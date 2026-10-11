@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CLIP_LABEL, clipKindsPresent, clipPath } from "@/lib/clippings";
 import type { ClipKind } from "@/lib/types";
 import { Logo } from "./logo";
+import { SyncButton } from "./sync-button";
 import { ThemeToggle } from "./theme-toggle";
 
 export type Section = "books" | ClipKind;
@@ -36,6 +37,7 @@ export function TopBar({ owner, current }: { owner: string; current: Section }) 
               {label}
             </Link>
           ))}
+          <SyncButton />
           <ThemeToggle />
         </nav>
       </div>

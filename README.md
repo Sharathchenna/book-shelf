@@ -14,7 +14,7 @@ bun run import path/to.csv # or a Goodreads "Export Library" CSV instead
 
 New books are looked up on Open Library for their cover, subjects, year, pages and description, and get a spine colour from the cover. Books already on the shelf keep what they had, so a sync only fetches what's new. `data/shelf.json` is only rewritten when something changed.
 
-**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand after logging a book: sign in and press **Sync from Goodreads** next to "Updated …" under your name (or use the repo's **Actions** tab → **Goodreads sync** → **Run workflow**). The button needs a `GITHUB_SYNC_TOKEN` secret: a fine-grained GitHub token for this repository only, with **Actions: Read and write**. Rate, review or move a book on Goodreads and the shelf follows.
+**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand after logging a book: sign in and press **Sync** in the top bar (or use the repo's **Actions** tab → **Goodreads sync** → **Run workflow**). The button needs a `GITHUB_SYNC_TOKEN` secret: a fine-grained GitHub token for this repository only, with **Actions: Read and write**. Rate, review or move a book on Goodreads and the shelf follows.
 
 Edit your name, bio, avatar and links in `shelf.config.ts`.
 
