@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     ".open-next/**",
     ".wrangler/**",
     "cloudflare-env.d.ts",
+    // pdf.js assets copied from node_modules (scripts/copy-pdfjs.ts).
+    "public/pdfjs/**",
   ]),
 ]);
 

@@ -14,7 +14,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/books/[id]"
 
   const storage = getStorage();
   const [fileUrl, progress, notes] = await Promise.all([
-    storage.downloadUrl(keys.epub(id)),
+    storage.downloadUrl(keys.file(book)),
     getJson<Progress>(keys.progress(id)),
     getJson<Highlight[]>(keys.notes(id)),
   ]);
@@ -24,7 +24,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/books/[id]"
   );
 }
 
-/** Link (or unlink) the EPUB to a shelf book. */
+/** Link (or unlink) the book to a shelf book. */
 export async function PATCH(request: Request, ctx: RouteContext<"/api/books/[id]">) {
   const denied = await requireOwner();
   if (denied) return denied;
@@ -53,7 +53,7 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/books/[i
   await writeIndex(books.filter((b) => b.id !== id));
   const storage = getStorage();
   await Promise.all(
-    [keys.epub(id), keys.text(id), keys.progress(id), keys.notes(id), book.coverKey]
+    [keys.file(book), keys.text(id), keys.progress(id), keys.notes(id), book.coverKey]
       .filter((key): key is string => Boolean(key))
       .map((key) => storage.delete(key)),
   );

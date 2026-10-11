@@ -21,9 +21,16 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/books/[id]/n
     if (typeof n.id !== "string" || typeof n.cfi !== "string" || typeof n.text !== "string" || !COLORS.has(n.color!)) {
       return Response.json({ error: "Invalid note." }, { status: 400 });
     }
+    const rects = Array.isArray(n.rects)
+      ? n.rects
+          .slice(0, 300)
+          .filter((r): r is [number, number, number, number] => Array.isArray(r) && r.length === 4 && r.every((v) => typeof v === "number" && Number.isFinite(v)))
+          .map((r) => r.map((v) => Math.round(Math.min(2, Math.max(-1, v)) * 1e4) / 1e4) as [number, number, number, number])
+      : undefined;
     notes.push({
       id: n.id.slice(0, 64),
       cfi: n.cfi.slice(0, 1000),
+      ...(rects?.length ? { rects } : {}),
       text: n.text.slice(0, 4000),
       color: n.color!,
       note: typeof n.note === "string" ? n.note.slice(0, 4000) : undefined,

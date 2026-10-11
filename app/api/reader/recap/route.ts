@@ -1,5 +1,5 @@
 import { haikuEnabled, streamText } from "@/lib/ai/haiku";
-import { RECAP_SYSTEM, textSoFar } from "@/lib/ai/reader";
+import { RECAP_PAPER_SYSTEM, RECAP_SYSTEM, textSoFar } from "@/lib/ai/reader";
 import { requireOwner } from "@/lib/auth/session";
 import { aiResponse } from "../stream";
 
@@ -30,14 +30,14 @@ export async function POST(request: Request) {
       {
         max_tokens: 4096,
         output_config: { effort: "low" },
-        system: RECAP_SYSTEM,
+        system: sofar.book.paperId ? RECAP_PAPER_SYSTEM : RECAP_SYSTEM,
         messages: [
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: `Book: ${sofar.book.title} by ${sofar.book.author}\n\nEverything read so far:\n"""\n${sofar.text}\n"""`,
+                text: `${sofar.book.paperId ? "Paper" : "Book"}: ${sofar.book.title} by ${sofar.book.author}\n\nEverything read so far:\n"""\n${sofar.text}\n"""`,
                 // The book text is the long, stable prefix; asking again at the same spot reads it from cache.
                 cache_control: { type: "ephemeral" },
               },

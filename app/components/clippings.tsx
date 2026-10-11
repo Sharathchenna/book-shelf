@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { fallbackColor, textOn } from "@/lib/color";
 import type { Clip, ClipKind } from "@/lib/types";
+import { useIsOwner } from "./use-owner";
 
 const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
@@ -22,10 +24,12 @@ const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip }) => 
 /** Every clipping of one kind, each with that kind's card. */
 export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
   const { list, Card } = LAYOUT[kind];
+  // The owner can open papers with a free PDF in the private reader.
+  const owner = useIsOwner(kind !== "paper");
   return (
     <ul className={list}>
       {items.map((clip) => (
-        <li key={clip.id}>
+        <li key={clip.id} className="relative">
           <a
             href={clip.url}
             target="_blank"
@@ -34,6 +38,14 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
           >
             <Card clip={clip} />
           </a>
+          {owner && clip.paper?.pdf && (
+            <Link
+              href={`/reader/paper/${encodeURIComponent(clip.id)}`}
+              className="absolute right-5 bottom-5 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg transition-transform hover:scale-105"
+            >
+              Read
+            </Link>
+          )}
         </li>
       ))}
     </ul>

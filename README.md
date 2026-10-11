@@ -1,6 +1,6 @@
 # Shelf
 
-A personal bookshelf site: every book you've read, are reading, and mean to read, built from a Goodreads export. Visitors can **ask the shelf** questions in plain language. You also get a private **reading room** for your own EPUBs.
+A personal bookshelf site: every book you've read, are reading, and mean to read, built from a Goodreads export. Visitors can **ask the shelf** questions in plain language. You also get a private **reading room** for your own EPUBs, PDFs and papers.
 
 ## Add your books
 
@@ -45,14 +45,14 @@ Copy `.env.example` to `.env.local`. Each feature turns on when its keys are set
 | Ask the shelf (Jev ranks the books) | `TYPESAFE_API_KEY` |
 | Short answers, and explain/recap in the reader (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Private reading room | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
-| EPUB storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
+| Book and PDF storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
 Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.
 
 ### Cloudflare R2
 
 1. Create a bucket and an R2 API token with **Object Read & Write** on it.
-2. Browsers upload and download EPUBs directly from R2 through short-lived signed URLs, so add a CORS rule to the bucket (**Settings → CORS policy**):
+2. Browsers upload and download books directly from R2 through short-lived signed URLs, so add a CORS rule to the bucket (**Settings → CORS policy**):
 
    ```json
    [
@@ -69,16 +69,20 @@ Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without
 
 Sign in at `/login` (or open `/reader`). Then:
 
-- Drop EPUBs onto **Your books**. Each one is matched to its book on your shelf by title and author, and the shelf's book popup gets a **Read / Continue** button for you.
-- Reading has themes (Paper, Sepia, Sage, Night), fonts, text size, spacing, column width, two-page or scrolling layout, contents, in-book search, and highlights with notes. Your position, highlights and notes sync to R2.
-- Select a passage and choose **Explain**, or use **Previously…** for a recap. When you come back after a few days, a recap is offered.
+- Drop EPUBs or PDFs onto **Your books**. Each one is matched to its book on your shelf by title and author, and the shelf's book popup gets a **Read / Continue** button for you.
+- EPUBs reflow: themes (Paper, Sepia, Sage, Night), fonts, text size, spacing, column width, two-page or scrolling layout.
+- PDFs keep their pages (pdf.js): continuous scrolling, zoom and fit-to-width, the same four themes (Night inverts the page and keeps figures' colours), contents from the PDF's bookmarks, and selectable text. The browser reads the text when you add one, so search, Explain and recap work on PDFs too; scanned PDFs without a text layer can only be viewed.
+- **Papers:** on `/papers`, a paper with a free PDF (arXiv, open proceedings) shows a **Read** button when you're signed in. The first time, the server fetches the PDF into R2; after that it opens straight away.
+- Both readers have contents, in-book search, and highlights with notes. Your position, highlights and notes sync to R2.
+- Select a passage and choose **Explain**, or use the recap button (**Previously…**, or **Where you left off** in a paper). When you come back after a few days, a recap is offered. In a PDF, Explain also sends Claude an image of the selection, so equations and symbols that text extraction garbles still get explained.
 
-**Keyboard:** ←/→ turn pages, `T` contents, `N` notes, `/` search, `A` settings, `F` fullscreen, `Esc` closes things. On the shelf, `/` focuses search and `R` opens a random unread book.
+**Keyboard:** ←/→ turn pages, `T` contents, `N` notes, `/` search, `A` settings (theme and zoom in PDFs), `+`/`-`/`0` zoom in, out and fit (PDFs), `F` fullscreen, `Esc` closes things. On the shelf, `/` focuses search and `R` opens a random unread book.
 
 ### Privacy and safety
 
-- **Owner only.** EPUBs, notes and the reader's AI features are private: every route checks your signed session cookie, so purchased books are never served publicly. Visitors only ever see shelf metadata.
+- **Owner only.** Books, PDFs, notes and the reader's AI features are private: every route checks your signed session cookie, so purchased books are never served publicly. Visitors only ever see shelf metadata.
 - **No spoilers.** Explain and recap only send the model text from *before* your current position.
+- **pdf.js** is copied from `node_modules` to `public/pdfjs` on install (`scripts/copy-pdfjs.ts`) and loaded from there at runtime, so it's in neither the client bundle nor the Worker. `/reader` allows `'wasm-unsafe-eval'` for its WebAssembly image decoders, which permits compiling WebAssembly but not JavaScript `eval`.
 - **Scripts in EPUBs.** EPUBs can contain scripts. Before a chapter renders, the reader strips `<script>`, inline event handlers and `javascript:` links, and `/reader` sends a Content-Security-Policy that blocks scripts from anywhere else.
 - **Rate limits.** The rate limit and result cache on `/api/ask` are kept in memory per server instance. That's fine for a personal site, but use a shared store if you scale out.
 
@@ -114,7 +118,7 @@ To run the real Workers runtime locally first, copy `.dev.vars.example` to `.dev
 Notes:
 
 - **Data is baked in.** `data/shelf.json` and `data/clippings.json` are part of the build, so redeploy after `bun run import` or `bun run clip` (pushing to `main` does it).
-- **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: pages are prerendered, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan.
+- **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: pages are prerendered, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan. PDFs are read in the browser, so they cost the Worker almost nothing.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's new `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
 - **`proxy.ts`** runs on OpenNext's Node.js middleware support, which it labels experimental. It only does the optimistic redirect from `/reader` to `/login`; the real check happens in every reader page and API route, so the site stays protected if it misbehaves.
 
@@ -131,6 +135,6 @@ Notes:
 | `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, library |
 | `app/api/ask/route.ts`, `lib/ai/jev.ts`, `lib/ai/haiku.ts` | Ask the shelf: BM25 pre-filter → Jev ranking → streamed Haiku answer |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login (signed JWT cookie) |
-| `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | EPUB storage (R2 or local), library index, EPUB metadata and text extraction |
-| `app/reader/`, `app/components/reader/` | The reading room (foliate-js), its panels and AI cards |
+| `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book storage (R2 or local), library index, EPUB parsing, PDF finalize and paper import |
+| `app/reader/`, `app/components/reader/` | The reading room: EPUBs (foliate-js), PDFs (pdf.js, `pdf-reader-view.tsx`, `pdf.ts`), panels and AI cards |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain and recap, using only text before the reader's position |

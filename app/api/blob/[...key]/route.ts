@@ -1,5 +1,5 @@
 import { verifyBlobToken } from "@/lib/auth/session";
-import { getStorage, MAX_EPUB_BYTES } from "@/lib/storage";
+import { getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
 /**
  * Stand-in for R2's presigned URLs when using local development storage.
@@ -39,7 +39,7 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/blob/[...key
   const auth = await authorise(request, ctx, "put");
   if ("error" in auth) return auth.error;
   const body = new Uint8Array(await request.arrayBuffer());
-  if (body.byteLength > (auth.claims.bytes ?? MAX_EPUB_BYTES)) {
+  if (body.byteLength > (auth.claims.bytes ?? MAX_BOOK_BYTES)) {
     return Response.json({ error: "Larger than declared." }, { status: 413 });
   }
   await auth.storage.put(auth.key, body, request.headers.get("content-type") ?? "application/octet-stream");

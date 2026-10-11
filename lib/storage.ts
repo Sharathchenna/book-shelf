@@ -1,10 +1,12 @@
 import "server-only";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, normalize } from "node:path";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   NoSuchKey,
+  NotFound,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -12,13 +14,15 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { signBlobToken } from "./auth/session";
 
 /**
- * Where EPUBs and reader data live. Cloudflare R2 (S3-compatible) when R2_* is configured;
+ * Where books (EPUB and PDF) and reader data live. Cloudflare R2 (S3-compatible) when R2_* is configured;
  * otherwise a local folder, for development. Browsers never get bucket credentials:
  * uploads and downloads use short-lived URLs from `uploadUrl` / `downloadUrl`.
  */
 export interface Storage {
   readonly kind: "r2" | "local";
   getBytes(key: string): Promise<Uint8Array | null>;
+  /** Size in bytes, or null when there's nothing at `key`. */
+  size(key: string): Promise<number | null>;
   put(key: string, body: Uint8Array | string, contentType: string): Promise<void>;
   delete(key: string): Promise<void>;
   /** A URL the browser can PUT exactly `bytes` bytes of `contentType` to. */
@@ -27,7 +31,7 @@ export interface Storage {
 }
 
 const URL_TTL_SECONDS = 15 * 60;
-export const MAX_EPUB_BYTES = 100 * 1024 * 1024;
+export const MAX_BOOK_BYTES = 100 * 1024 * 1024;
 
 class R2Storage implements Storage {
   readonly kind = "r2";
@@ -47,6 +51,15 @@ class R2Storage implements Storage {
       return res.Body ? await res.Body.transformToByteArray() : null;
     } catch (error) {
       if (error instanceof NoSuchKey) return null;
+      throw error;
+    }
+  }
+
+  async size(key: string) {
+    try {
+      return (await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))).ContentLength ?? 0;
+    } catch (error) {
+      if (error instanceof NotFound || (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null;
       throw error;
     }
   }
@@ -91,6 +104,15 @@ class LocalStorage implements Storage {
   async getBytes(key: string) {
     try {
       return new Uint8Array(await readFile(this.path(key)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async size(key: string) {
+    try {
+      return (await stat(this.path(key))).size;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;

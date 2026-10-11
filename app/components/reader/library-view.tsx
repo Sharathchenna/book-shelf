@@ -7,16 +7,26 @@ import type { LibraryEntry } from "@/lib/library-types";
 import type { Item } from "@/lib/types";
 import { Logo } from "../logo";
 
-type Upload = { name: string; progress: number; stage: "uploading" | "processing" | "error"; error?: string };
+type Upload = {
+  name: string;
+  progress: number;
+  stage: "uploading" | "reading" | "processing" | "error";
+  /** PDFs: pages read so far. */
+  pages?: string;
+  error?: string;
+};
 
-/** Uploads one EPUB: get a URL, PUT the file there (straight to R2), then let the server process it. */
-async function uploadEpub(file: File, onProgress: (p: number) => void): Promise<void> {
+/**
+ * Uploads one EPUB or PDF: get a URL, PUT the file there (straight to R2), then finish. The server
+ * reads EPUBs itself; PDFs are read here with pdf.js and their text sent along.
+ */
+async function uploadBook(file: File, onProgress: (patch: Partial<Upload>) => void): Promise<void> {
   const start = await fetch("/api/books", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ bytes: file.size, name: file.name }),
   });
-  const started = (await start.json()) as { id?: string; uploadUrl?: string; contentType?: string; error?: string };
+  const started = (await start.json()) as { id?: string; format?: "epub" | "pdf"; uploadUrl?: string; contentType?: string; error?: string };
   if (!start.ok || !started.id || !started.uploadUrl) throw new Error(started.error ?? "Couldn't start the upload.");
 
   // XHR rather than fetch: it reports upload progress.
@@ -24,12 +34,23 @@ async function uploadEpub(file: File, onProgress: (p: number) => void): Promise<
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", started.uploadUrl!);
     xhr.setRequestHeader("content-type", started.contentType ?? "application/epub+zip");
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress({ progress: e.loaded / e.total });
     xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status}).`)));
     xhr.onerror = () => reject(new Error("Upload failed. If you use R2, check the bucket's CORS settings."));
     xhr.send(file);
   });
 
+  if (started.format === "pdf") {
+    const { finalizePdf } = await import("./pdf");
+    onProgress({ stage: "reading", progress: 0 });
+    await finalizePdf(started.id, await file.arrayBuffer(), {
+      fileName: file.name,
+      onProgress: (done, total) => onProgress({ progress: done / total, pages: `${done}/${total}` }),
+    });
+    return;
+  }
+
+  onProgress({ stage: "processing" });
   const done = await fetch(`/api/books/${started.id}/finalize`, { method: "POST" });
   if (!done.ok) {
     const { error } = (await done.json().catch(() => ({}))) as { error?: string };
@@ -69,7 +90,7 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
         setUploads((list) => list.map((u) => (u.name === file.name ? { ...u, ...patch } : u)));
       setUploads((list) => [...list.filter((u) => u.name !== file.name), { name: file.name, progress: 0, stage: "uploading" }]);
       try {
-        await uploadEpub(file, (progress) => update({ progress, ...(progress >= 1 ? { stage: "processing" } : {}) }));
+        await uploadBook(file, update);
         setUploads((list) => list.filter((u) => u.name !== file.name));
         reload();
       } catch (error) {
@@ -125,19 +146,19 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
           <div>
             <h1 className="rise font-serif text-5xl sm:text-6xl">Your books</h1>
             <p className="rise mt-2 text-muted" style={{ animationDelay: "80ms" }}>
-              EPUBs you&apos;ve added. They&apos;re private to you, and your place, highlights and notes follow you between devices.
+              EPUBs and PDFs you&apos;ve added. They&apos;re private to you, and your place, highlights and notes follow you between devices.
             </p>
           </div>
           <button
             onClick={() => input.current?.click()}
             className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-ink-fg transition-transform hover:scale-[1.03] active:scale-95 sm:self-auto"
           >
-            <span aria-hidden>＋</span> Add EPUB
+            <span aria-hidden>＋</span> Add EPUB or PDF
           </button>
           <input
             ref={input}
             type="file"
-            accept=".epub,application/epub+zip"
+            accept=".epub,.pdf,application/epub+zip,application/pdf"
             multiple
             hidden
             onChange={(e) => {
@@ -169,7 +190,7 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
                       />
                     </span>
                     <span className="w-24 text-right text-xs text-muted">
-                      {u.stage === "processing" ? "Reading it…" : `${Math.round(u.progress * 100)}%`}
+                      {u.stage === "processing" ? "Reading it…" : u.stage === "reading" ? `Reading ${u.pages ?? "…"}` : `${Math.round(u.progress * 100)}%`}
                     </span>
                   </>
                 )}
@@ -224,8 +245,8 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
               onClick={() => input.current?.click()}
               className="mt-5 flex w-full flex-col items-center rounded-3xl border-2 border-dashed border-line px-6 py-20 text-center transition-colors hover:border-accent/50 hover:bg-chip"
             >
-              <span className="font-serif text-3xl">Drop an EPUB here</span>
-              <span className="mt-2 text-muted">or click to choose one. DRM-free EPUBs only, up to 100 MB.</span>
+              <span className="font-serif text-3xl">Drop an EPUB or PDF here</span>
+              <span className="mt-2 text-muted">or click to choose one. DRM-free files only, up to 100 MB.</span>
             </button>
           ) : (
             <ul className="mt-5 grid grid-cols-2 gap-x-5 gap-y-9 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
@@ -247,7 +268,13 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
                       <p className="mt-3 line-clamp-2 text-sm leading-snug font-semibold">{book.title}</p>
                       <p className="truncate text-sm text-muted">{book.author}</p>
                     </Link>
-                    <p className="mt-1 text-[11px] text-muted">{linked ? "On your shelf" : "Not on your shelf"}</p>
+                    <p className="mt-1 text-[11px] text-muted">
+                      {book.format === "pdf"
+                        ? `PDF · ${book.sections.length} pages${book.paperId ? " · paper" : ""}`
+                        : linked
+                          ? "On your shelf"
+                          : "Not on your shelf"}
+                    </p>
                     <button
                       onClick={() => void remove(book)}
                       className="absolute top-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100"

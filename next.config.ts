@@ -9,7 +9,8 @@ import type { NextConfig } from "next";
  */
 const readerCsp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  // 'wasm-unsafe-eval' lets pdf.js compile its WebAssembly image decoders; it allows no JS eval.
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline' blob:",
   "img-src 'self' blob: data: https://*.r2.cloudflarestorage.com https://covers.openlibrary.org",
   "font-src 'self' blob: data:",

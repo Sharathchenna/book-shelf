@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { requireOwner } from "@/lib/auth/session";
-import { keys, readIndex } from "@/lib/library";
+import { CONTENT_TYPES, keys, readIndex } from "@/lib/library";
 import type { LibraryEntry, Progress } from "@/lib/library-types";
-import { getJson, getStorage, MAX_EPUB_BYTES } from "@/lib/storage";
+import { getJson, getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
-/** The owner's EPUB library, most recently read first. */
+/** The owner's library, most recently read first. */
 export async function GET() {
   const denied = await requireOwner();
   if (denied) return denied;
@@ -24,8 +24,8 @@ export async function GET() {
 }
 
 /**
- * Starts an upload: returns a new book id and a short-lived URL the browser PUTs the EPUB to
- * (straight to R2). The client then calls POST /api/books/[id]/finalize.
+ * Starts an upload: returns a new book id and a short-lived URL the browser PUTs the EPUB or PDF
+ * to (straight to R2). The client then calls POST /api/books/[id]/finalize.
  */
 export async function POST(request: Request) {
   const denied = await requireOwner();
@@ -35,12 +35,14 @@ export async function POST(request: Request) {
   if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes <= 0) {
     return Response.json({ error: "Missing file size." }, { status: 400 });
   }
-  if (bytes > MAX_EPUB_BYTES) return Response.json({ error: "EPUBs up to 100 MB only." }, { status: 413 });
-  if (typeof name !== "string" || !name.toLowerCase().endsWith(".epub")) {
-    return Response.json({ error: "Only .epub files can be added." }, { status: 415 });
+  if (bytes > MAX_BOOK_BYTES) return Response.json({ error: "Files up to 100 MB only." }, { status: 413 });
+  const format = typeof name === "string" ? name.toLowerCase().match(/\.(epub|pdf)$/)?.[1] : undefined;
+  if (format !== "epub" && format !== "pdf") {
+    return Response.json({ error: "Only .epub and .pdf files can be added." }, { status: 415 });
   }
 
   const id = randomUUID().replace(/-/g, "").slice(0, 20);
-  const uploadUrl = await getStorage().uploadUrl(keys.epub(id), "application/epub+zip", bytes);
-  return Response.json({ id, uploadUrl, contentType: "application/epub+zip" });
+  const contentType = CONTENT_TYPES[format];
+  const uploadUrl = await getStorage().uploadUrl(keys.file({ id, format }), contentType, bytes);
+  return Response.json({ id, format, uploadUrl, contentType });
 }
