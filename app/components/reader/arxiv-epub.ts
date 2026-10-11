@@ -79,6 +79,17 @@ export async function buildArxivEpub(meta: Meta, onProgress: (label: string) => 
   }
 
   // ---- figures ----
+  // Most of arXiv's vector figures are SVG `<object>`s, which EPUB readers don't load: make them images.
+  for (const chapter of chapters) {
+    for (const object of chapter.body.querySelectorAll("object[data]")) {
+      const data = object.getAttribute("data")!;
+      if (!(object.getAttribute("type") ?? "").startsWith("image/") && !/\.(svg|png|jpe?g|gif|webp)$/i.test(data)) continue;
+      const img = object.ownerDocument.createElement("img");
+      img.setAttribute("src", data);
+      img.className = object.className;
+      object.replaceWith(img);
+    }
+  }
   const images: { path: string; data: Blob }[] = [];
   const imgs = chapters.flatMap((c) => [...c.body.querySelectorAll("img[src]")]).slice(0, MAX_IMAGES);
   let done = 0;

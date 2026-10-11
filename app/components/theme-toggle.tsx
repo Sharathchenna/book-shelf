@@ -12,13 +12,22 @@ export function ThemeToggle() {
         // Private mode: the toggle still works for this visit.
       }
     };
+    // While the theme changes, nothing animates on its own (see globals.css): otherwise every
+    // button and chip fades between the themes on its own clock, and the page flickers.
+    root.dataset.switching = "";
+    const settle = () => delete root.dataset.switching;
 
-    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return apply();
+    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      apply();
+      // Two frames: the new colours are painted before transitions come back.
+      requestAnimationFrame(() => requestAnimationFrame(settle));
+      return;
+    }
     // The new theme grows as a circle from the middle of this button (see globals.css).
     const r = e.currentTarget.getBoundingClientRect();
     root.style.setProperty("--vt-x", `${r.left + r.width / 2}px`);
     root.style.setProperty("--vt-y", `${r.top + r.height / 2}px`);
-    document.startViewTransition(apply);
+    document.startViewTransition(apply).finished.finally(settle);
   };
 
   // Both icons render; CSS shows the right one, so server and client markup always match.

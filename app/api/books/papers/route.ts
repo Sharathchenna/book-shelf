@@ -1,6 +1,7 @@
 import { requireOwner } from "@/lib/auth/session";
 import { getClipping } from "@/lib/data";
 import { CONTENT_TYPES, keys, listFiles } from "@/lib/library";
+import { ARXIV_EPUB_BUILD } from "@/lib/library-types";
 import { getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
 /**
@@ -20,9 +21,12 @@ export async function POST(request: Request) {
 
   const files = (await listFiles()).filter((b) => b.paperId === paper.id);
   const ebook = files.find((b) => b.format === "epub");
-  if (ebook) return Response.json({ id: ebook.id, ready: true });
+  // An ebook from an older conversion is rebuilt, unless that rebuild just failed (format "pdf").
+  if (ebook && (format === "pdf" || !paper.paper.arxiv || (ebook.build ?? 1) >= ARXIV_EPUB_BUILD)) {
+    return Response.json({ id: ebook.id, ready: true });
+  }
   // arXiv papers read best as ebooks: the browser builds one from arXiv's HTML version (falling
-  // back to the PDF when there's none), replacing a PDF copy added before.
+  // back to the PDF when there's none), replacing a PDF copy or older ebook added before.
   if (format !== "pdf" && paper.paper.arxiv) {
     return Response.json({
       build: "epub",

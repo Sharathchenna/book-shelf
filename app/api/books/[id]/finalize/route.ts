@@ -64,6 +64,7 @@ async function finalizeEpub(id: string, body: Record<string, unknown>, shelfItem
     title: paper?.title ?? parsed.title,
     author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : parsed.author,
     paperId: paper?.id,
+    build: paper && typeof body.build === "number" ? body.build : undefined,
     shelfItemId: paper ? undefined : (shelfItemId ?? matchShelfItem(parsed.title, parsed.author, items)),
     coverKey,
     sections: parsed.sections.map((s) => ({ title: s.title, chars: s.text.length })),

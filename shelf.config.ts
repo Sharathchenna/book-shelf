@@ -7,7 +7,7 @@ export type ShelfConfig = {
   links: { label: string; url: string }[];
   /** Where the site is deployed, e.g. "https://books.example.com". Needed for link previews. */
   siteUrl?: string;
-  /** The number in your Goodreads profile URL. `bun run import` syncs your public shelves from it. */
+  /** The number in your Goodreads profile URL. Sync (nightly, or the button) reads your public shelves from it. */
   goodreadsUserId?: string;
 };
 

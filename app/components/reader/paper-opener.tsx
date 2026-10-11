@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ARXIV_EPUB_BUILD } from "@/lib/library-types";
 import { OpeningBook } from "./chrome";
 
 type Opened = {
@@ -55,7 +56,7 @@ export function PaperOpener({ paperId }: { paperId: string }) {
           const id = await uploadBook(
             new File([epub], `${data.arxiv}.epub`, { type: "application/epub+zip" }),
             (patch) => show(patch.stage === "uploading" ? `Saving to your library… ${Math.round((patch.progress ?? 0) * 100)}%` : "Reading it…"),
-            { paperId },
+            { paperId, build: ARXIV_EPUB_BUILD },
           );
           // A PDF copy added before this paper could be read as an ebook is no longer needed.
           await Promise.all((data.replaces ?? []).map((old) => fetch(`/api/books/${old}`, { method: "DELETE" }).catch(() => {})));

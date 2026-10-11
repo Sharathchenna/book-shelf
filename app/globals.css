@@ -73,9 +73,12 @@ body {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+/* In the base layer, so a utility like `outline-none` (with its own focus ring) can replace it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
 }
 
 h1,
@@ -421,6 +424,19 @@ h3 {
 }
 
 /* ---- Theme switch: a circle grows from the toggle (--vt-x/--vt-y). ---- */
+
+/* While it runs (data-switching, set by ThemeToggle), the page holds still: no colour transitions,
+   paused animations, and plain blur instead of the refracting glass, which redraws badly mid-switch. */
+[data-switching] *,
+[data-switching] *::before,
+[data-switching] *::after {
+  transition: none !important;
+  animation-play-state: paused !important;
+}
+
+[data-switching][data-refract] .liquid {
+  backdrop-filter: blur(16px) saturate(1.8);
+}
 
 ::view-transition-old(root),
 ::view-transition-new(root) {

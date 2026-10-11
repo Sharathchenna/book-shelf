@@ -125,7 +125,7 @@ export function SearchPanel({ view, onGo }: { view: FoliateView; onGo: (cfi: str
 
   return (
     <div>
-      <form onSubmit={search} className="sticky top-0 z-10 px-1 pb-3">
+      <form onSubmit={search} className="sticky top-0 z-10 bg-bg px-1 pt-1 pb-3">
         <input
           autoFocus
           value={query}

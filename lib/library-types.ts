@@ -2,6 +2,12 @@
 
 export type LibrarySection = { title: string; chars: number };
 
+/**
+ * The version of the arXiv-to-EPUB conversion (arxiv-epub.ts). A paper's ebook built by an older
+ * version is rebuilt the next time it's opened. 2: figures arXiv embeds as SVG `<object>`s.
+ */
+export const ARXIV_EPUB_BUILD = 2;
+
 export type BookFormat = "epub" | "pdf";
 
 export type LibraryBook = {
@@ -12,6 +18,8 @@ export type LibraryBook = {
   author: string;
   /** For a PDF of a clipped paper: the clipping's id. */
   paperId?: string;
+  /** For a paper's ebook: the ARXIV_EPUB_BUILD that made it (absent: 1). */
+  build?: number;
   /** The Goodreads shelf item this EPUB belongs to, when one matched. */
   shelfItemId?: string;
   /** Storage key of the extracted cover image. */
