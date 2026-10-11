@@ -10,6 +10,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 - [Configure](#configure)
 - [Deploy to Cloudflare](#deploy-to-cloudflare)
 - [Using the site](#using-the-site)
+- [Saving from X and anywhere else](#saving-from-x-and-anywhere-else)
 - [Search](#search)
 - [The readers](#the-readers)
 - [AI features and cost](#ai-features-and-cost)
@@ -36,6 +37,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 
 - **Sync** pulls your Goodreads shelves now. It also runs every night on its own.
 - **Add** saves any link as a clipping: an article, an arXiv link or DOI, a newsletter issue, or a tweet.
+- **Save from anywhere:** an iPhone share-sheet shortcut and a bookmarklet send posts from X (or any page) here in two taps. Each one is read, summarised and indexed, so it can be found later by what it's about.
 - **Add EPUB or PDF** on any book's card.
 - A **reader** for EPUBs, PDFs and arXiv papers, with:
   - themes, highlights, notes and in-book search;
@@ -59,9 +61,9 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
        D1 (SQL)  R2 (files)   APIs
        shelf,    EPUB/PDF,    Goodreads RSS, Open Library,
        clippings, covers,     arXiv, Crossref, Semantic Scholar,
-       files,    extracted    X embeds, TypeSafe Jev,
-       progress, text         Anthropic (Claude Haiku 5.5)
-       notes
+       files,    extracted    FxTwitter / X embeds, TypeSafe Jev,
+       progress, text         Anthropic (Claude Haiku 5.5),
+       notes                  Workers AI + Vectorize (search index)
 ```
 
 **Stack**
@@ -72,6 +74,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 | `@opennextjs/cloudflare` | Running Next.js on Cloudflare Workers |
 | Cloudflare D1 | Shelf, clippings, library index, reading progress, highlights and notes (`migrations/`) |
 | Cloudflare R2 (S3 API, presigned URLs) | Book files, covers, extracted text for the AI |
+| Cloudflare Vectorize + Workers AI (`qwen3-embedding-0.6b`) | The search index: an embedding of every book and clipping |
 | foliate-js | The EPUB reader |
 | pdf.js (`pdfjs-dist`, loaded at runtime from `/pdfjs`) | The PDF reader, and reading PDF text in the browser |
 | jszip | Parsing uploaded EPUBs, building EPUBs from arXiv papers |
@@ -123,7 +126,7 @@ Each feature switches on when its keys are set. Locally they go in `.env.local` 
 | Feature | Keys |
 | --- | --- |
 | Ask the shelf and site search by meaning (Jev) | `TYPESAFE_API_KEY` |
-| Answers under search, Explain, Recap and Chat (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
+| Answers under search, Explain, Recap and Chat, and enriching clippings (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Signing in as the owner | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters, e.g. `openssl rand -base64 48`) |
 | Book files in R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
@@ -158,6 +161,14 @@ What happens when keys are missing:
    bunx wrangler d1 create book-shelf
    bunx wrangler d1 migrations apply book-shelf --remote
    ```
+
+   And the search index (the `ai` and `vectorize` bindings in `wrangler.jsonc` need no keys):
+
+   ```bash
+   bunx wrangler vectorize create book-shelf-search --dimensions=1024 --metric=cosine
+   ```
+
+   After the first deploy, press **Sync** once to index everything already on the site.
 
 2. **R2.** Set it up as above, including the deployed origins in CORS.
 3. **Secrets.** Add each one from the table:
@@ -198,7 +209,32 @@ Press **Add** and paste a link (or `arxiv:1706.03762`, or a DOI). Optionally pic
   - the `citation_*` tags that journals and proceedings sites publish for Google Scholar (NeurIPS, ACL Anthology, PMLR, most publishers).
 
   Semantic Scholar fills in missing abstracts and finds the free arXiv copy of a published paper. OpenReview blocks scripts, so clip a paper's arXiv link instead.
-- **Tweets** come from X's public embed endpoints and are stored as plain data: text, author, avatar, photos and likes. The site renders them itself, so no X script loads.
+- **Tweets** come from [FxTwitter](https://github.com/FxEmbed/FxEmbed)'s API, which has the full text of long posts, the post being quoted and the one being replied to. X's own embed endpoints are the fallback; they cut long posts short. Posts are stored as plain data: text, author, avatar, photos (and video poster frames), likes, quote and reply. The site renders them itself, so no X script loads.
+
+Each clipping (other than papers, which have abstracts) is also **enriched** when it's saved (`lib/enrich.ts`):
+
+- the text of the page a post links to (or of the article itself) is read;
+- Claude Haiku writes a one-line summary and a few topics, and describes each image, including any text, numbers or code in it, so a chart or screenshot can be found by what it shows.
+
+Older clippings without enrichment get it a few at a time on each Sync. Section pages list 60 clippings at a time, with **Show more**; search covers all of them.
+
+## Saving from X and anywhere else
+
+Open **Add → Save from your phone →** while signed in.
+
+**iPhone and iPad (share sheet).** Press **Make a token**, then build a three-step shortcut in the Shortcuts app (the panel shows the exact values):
+
+1. A new shortcut, **Save to Shelf**, with **Show in Share Sheet** on.
+2. **Get Contents of URL**: `https://<your site>/api/capture`, method POST, header `Authorization` = `Bearer <token>`, JSON body with a Text field `text` = Shortcut Input.
+3. **Show Notification** with Contents of URL.
+
+Then, in X: **Share → Share via… → Save to Shelf**. The post is saved, enriched and indexed, and the notification says what was saved, in about five seconds.
+
+- **The token** can only add clippings. It's shown once, stored only as a hash, and never expires.
+- **Revoking:** **Make a new token** replaces it, and **Turn off** revokes it.
+- **What the shortcut sends:** `/api/capture` saves the first link in whatever was shared, so text with a link in it works too.
+
+**Computers (bookmarklet).** Drag **+ Save to Shelf** from the same panel to your bookmarks bar. On any page, click it: a small window opens with Add filled in and the cursor in the note, and it closes itself after saving. (It opens `/?add=<link>`; signed out, you're asked to sign in first.)
 
 ### Book files
 
@@ -228,8 +264,12 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
 
 **Site search** (`⌘K`) covers everything:
 
-1. **Index:** each book and clipping becomes a short card. Books contribute title, author, status, rating, subjects, description and review. Clippings contribute title, author or handle, source, excerpt or abstract, tweet text, tags and your note.
-2. **Narrowing:** up to 150 items are ranked in full. More are first narrowed to 100 by keywords.
+1. **Index:** each book and clipping becomes a short card. Books contribute title, author, status, rating, subjects, description and review. Clippings contribute title, author or handle, source, excerpt or abstract, tweet text, the quoted and replied-to posts, the enrichment (summary, topics, image descriptions, linked page), tags and your note.
+2. **Narrowing:** up to 150 items are ranked in full. Beyond that, the candidates are:
+   - the 100 nearest the search in the vector index (`lib/search/vectors.ts`), which finds things by meaning even when no word matches;
+   - plus the 20 best keyword matches, for exact names and handles.
+
+   The index holds an embedding of each item's full text (`@cf/qwen/qwen3-embedding-0.6b`, 1,024 dimensions, in the `book-shelf-search` Vectorize index). Saving a clipping embeds it at once. Sync embeds whatever changed and drops what's gone; a hash of each item's text in D1 (`embeddings`) means unchanged items are never embedded twice.
 3. **Ranking:** Jev judges each card against the search, "is this something the person is looking for?". Results below 20% are hidden, unless nothing scores higher.
 4. **Display:** results are grouped by kind with a match bar.
 5. **Opening a result:**
@@ -237,7 +277,7 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
    - a paper, when you're signed in, opens in the reader;
    - anything else opens its source.
 
-A search costs a fraction of a cent and returns in under a second. Both searches cache recent queries, and allow 20 (Ask) or 40 (site search) searches per minute per address.
+A search costs a fraction of a cent and returns in under a second. Without Jev, results come from the vector index, ranked by similarity (or from keywords, when there's no index). Both searches cache recent queries, and allow 20 (Ask) or 40 (site search) searches per minute per address.
 
 ## The readers
 
@@ -297,6 +337,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 - **pdf.js** is copied from `node_modules` to `public/pdfjs` on install (`scripts/copy-pdfjs.ts`) and loaded at runtime, so it's in neither the client bundle nor the Worker.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
 - **`proxy.ts`** runs on OpenNext's Node.js middleware support, which OpenNext labels experimental. It only does an optimistic redirect from `/reader/<id>` to `/login`. The real check happens in every reader page and API route, so the site stays protected if it misbehaves.
+- **Search index in development.** Vectorize has no local simulation, so `bun dev` and `bun run preview` use the real index (`"remote": true`). Set `SEARCH_NAMESPACE=dev` in `.env.local` / `.dev.vars` to keep local vectors in their own namespace, with their ids prefixed `dev:`. Workers AI embeddings always run remotely and count against your account's free allowance.
 - **Types.** Cloudflare bindings are typed by hand in `types/cloudflare.d.ts`. The generated `cloudflare-env.d.ts` (`bun run cf-typegen`) clashes with the DOM types, so it's excluded from the type check.
 
 ## Troubleshooting
@@ -308,6 +349,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | Search results say "Keyword matches" | `TYPESAFE_API_KEY` isn't set where the site runs. |
 | AI features say "AI isn't configured" | `ANTHROPIC_API_KEY` isn't set. |
 | A paper opens as a PDF instead of an ebook | It has no HTML version on arXiv (some older or very large papers). |
+| The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
+| A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
 | A figure is missing from a paper ebook | Check the paper on arxiv.org/html: if arXiv's own page shows no image, its LaTeX conversion dropped it, and **PDF ↗** has it. |
 | Local changes don't show in `bun dev` | Restart the dev server; if it still serves an old page, check with `bun run preview`. |
 
@@ -323,7 +366,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `lib/sync.ts`, `lib/goodreads.ts`, `lib/categories.ts`, `app/api/sync/` | Goodreads sync (RSS → Open Library → D1) |
 | `lib/clip.ts`, `app/api/clips/`, `app/components/add-clip.tsx` | Adding clippings from the site |
 | `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
-| `app/api/search/`, `lib/search/site.ts`, `app/components/search-palette.tsx` | Site search |
+| `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `app/components/search-palette.tsx` | Site search and its vector index |
+| `lib/save.ts`, `lib/enrich.ts`, `app/api/capture/`, `app/components/capture-setup.tsx` | Saving from anywhere: the shared save pipeline, enrichment, the share-sheet endpoint and token, the setup panel |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login |
 | `lib/storage.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2), EPUB parsing, PDF finalize, paper import and the arXiv proxies |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |

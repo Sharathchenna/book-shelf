@@ -17,6 +17,10 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Site search: embeddings of every book and clipping (Workers AI), searched by meaning.
+  // Vectorize has no local simulation, so development uses the real index (in its own namespace).
+  "ai": { "binding": "AI", "remote": true },
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "book-shelf-search", "remote": true }],
   // Goodreads sync, nightly at 02:47 IST.
   "triggers": { "crons": ["17 21 * * *"] },
   "observability": { "enabled": true }

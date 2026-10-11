@@ -2,6 +2,7 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
+import { getMeta, setMeta } from "../data";
 
 /**
  * The site has one private user: its owner. The session is a signed JWT in an httpOnly cookie
@@ -37,6 +38,50 @@ export function fromScheduler(request: Request): boolean {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The phone shortcut and other tools that save links authenticate with a capture token: a
+ * signed JWT that can only add clippings. It doesn't expire; making a new one (or turning it
+ * off) revokes the old, since only the current token's id is kept, hashed, in the database.
+ */
+const CAPTURE_META = "capture_token";
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function createCaptureToken(): Promise<string> {
+  const jti = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await setMeta(CAPTURE_META, JSON.stringify({ hash: await sha256(jti), created: new Date().toISOString() }));
+  return new SignJWT({ scope: "capture" }).setProtectedHeader({ alg: "HS256" }).setJti(jti).setIssuedAt().sign(secret());
+}
+
+export async function revokeCaptureToken() {
+  await setMeta(CAPTURE_META, null);
+}
+
+/** When the current capture token was made, or null when there is none. */
+export async function captureTokenCreated(): Promise<string | null> {
+  const stored = await getMeta(CAPTURE_META);
+  return stored ? (JSON.parse(stored) as { created: string }).created : null;
+}
+
+/** Whether the request carries the current capture token (Authorization: Bearer …). */
+export async function fromCaptureToken(request: Request): Promise<boolean> {
+  const token = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+  if (!token || !ownerConfigured()) return false;
+  try {
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+    const stored = await getMeta(CAPTURE_META);
+    if (payload.scope !== "capture" || !payload.jti || !stored) return false;
+    const a = Buffer.from(await sha256(payload.jti));
+    const b = Buffer.from((JSON.parse(stored) as { hash: string }).hash);
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 export async function startSession() {

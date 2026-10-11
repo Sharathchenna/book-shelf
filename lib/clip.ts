@@ -1,12 +1,12 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { Clip, ClipKind } from "./types";
+import type { Clip, ClipKind, QuotedPost } from "./types";
 
 /**
  * Clipping a link: articles are described from their Open Graph and JSON-LD metadata, newsletters
- * are recognised by their platform (Substack, Buttondown, beehiiv, ...), tweets come from X's
- * public embed endpoints and are stored as plain data (so the site renders them without X's
- * scripts), and papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that
+ * are recognised by their platform (Substack, Buttondown, beehiiv, ...), tweets come from FxTwitter
+ * (falling back to X's public embed endpoints) and are stored as plain data (so the site renders
+ * them without X's scripts), and papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that
  * journals and proceedings sites publish for Google Scholar.
  */
 
@@ -88,7 +88,7 @@ export function clipId(url: string): string {
   return createHash("sha1").update(normal).digest("hex").slice(0, 12);
 }
 
-function tweetId(url: string): string | undefined {
+export function tweetId(url: string): string | undefined {
   return url.match(/^https?:\/\/(?:www\.|mobile\.)?(?:twitter|x)\.com\/[^/]+\/status(?:es)?\/(\d+)/)?.[1];
 }
 
@@ -265,7 +265,73 @@ type Syndicated = {
   mediaDetails?: { type: string; media_url_https: string }[];
 };
 
+/** A post as FxTwitter (api.fxtwitter.com, open source) describes it. */
+type FxPost = {
+  url: string;
+  text: string;
+  created_timestamp: number;
+  likes?: number;
+  author: { name: string; screen_name: string; avatar_url?: string };
+  media?: { all?: { type: string; url: string; thumbnail_url?: string }[] };
+  quote?: FxPost;
+  replying_to_status?: string | null;
+  /** An X Article: a long post with a title. */
+  article?: { title?: string; preview_text?: string };
+};
+
+async function fetchFx(id: string): Promise<FxPost | null> {
+  const res = await fetch(`https://api.fxtwitter.com/status/${id}`, { headers: API_HEADERS, signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { code?: number; tweet?: FxPost };
+  return data.code === 200 && data.tweet?.author ? data.tweet : null;
+}
+
+/** Photos as they are; videos and GIFs by their poster frame. */
+const fxMedia = (post: FxPost) => (post.media?.all ?? []).map((m) => (m.type === "photo" ? m.url : (m.thumbnail_url ?? m.url))).filter(Boolean);
+
+function fxText(post: FxPost): string {
+  const text = decodeEntities(post.text ?? "").trim();
+  if (text || !post.article?.title) return text;
+  return [post.article.title, post.article.preview_text].filter(Boolean).join("\n\n");
+}
+
+const fxQuoted = (post: FxPost): QuotedPost => ({
+  name: post.author.name,
+  handle: post.author.screen_name,
+  text: fxText(post),
+  url: `https://x.com/${post.author.screen_name}/status/${post.url.split("/").pop()}`,
+  ...(fxMedia(post).length ? { media: fxMedia(post) } : {}),
+});
+
 async function fetchTweet(url: string): Promise<Fetched> {
+  const id = tweetId(url)!;
+  // FxTwitter has the full text of long posts (X's embed endpoint cuts them off), quotes and replies.
+  const post = await fetchFx(id).catch(() => null);
+  if (post) {
+    const parent = post.replying_to_status ? await fetchFx(post.replying_to_status).catch(() => null) : null;
+    return {
+      kind: "tweet",
+      url: `https://x.com/${post.author.screen_name}/status/${id}`,
+      author: post.author.name,
+      source: "X",
+      published: new Date(post.created_timestamp * 1000).toISOString().slice(0, 10),
+      tweet: {
+        name: post.author.name,
+        handle: post.author.screen_name,
+        avatar: post.author.avatar_url,
+        text: fxText(post),
+        media: fxMedia(post),
+        likes: post.likes,
+        ...(post.quote?.author ? { quote: fxQuoted(post.quote) } : {}),
+        ...(parent ? { replyTo: fxQuoted(parent) } : {}),
+      },
+    };
+  }
+  return fetchTweetSyndicated(url);
+}
+
+/** X's own embed data: the fallback when FxTwitter can't describe a post. Long posts come back cut off. */
+async function fetchTweetSyndicated(url: string): Promise<Fetched> {
   const id = tweetId(url)!;
   // The token X's own embed widget sends; derived from the id.
   const token = ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");

@@ -73,9 +73,31 @@ export type Clip = {
     handle: string;
     avatar?: string;
     text: string;
+    /** Photos, and the poster frames of videos. */
     media: string[];
     likes?: number;
+    /** The post it quotes. */
+    quote?: QuotedPost;
+    /** The post it replies to. */
+    replyTo?: QuotedPost;
   };
+  /** Added when it's saved (lib/enrich.ts), so search finds it by what it's about. */
+  enriched?: Enrichment;
+};
+
+export type QuotedPost = { name: string; handle: string; text: string; url: string; media?: string[] };
+
+export type Enrichment = {
+  /** One line on what it is and why it's worth keeping. */
+  summary: string;
+  /** A few lowercase topics. */
+  topics: string[];
+  /** What each image shows, including any text or numbers in it (for posts with photos). */
+  images?: string[];
+  /** The page a post links to: its title and the start of its text. */
+  link?: { url: string; title?: string; text: string };
+  /** ISO time. */
+  at: string;
 };
 
 export type ClippingsData = { items: Clip[] };

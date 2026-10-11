@@ -34,8 +34,10 @@ export default {
     const url = new URL(request.url);
     if (!sharedPageView(request, url)) return (await loadSite()).fetch(request, env, ctx);
 
-    // The page is the same whatever its query (?book=… and ?q=… are read in the browser).
-    const key = new Request(`${url.origin}${url.pathname}`, { headers: { accept: "text/html" } });
+    // The page is the same whatever its query (?book=… and ?q=… are read in the browser), except
+    // ?show=…, how many clippings a long section lists.
+    const show = url.searchParams.get("show");
+    const key = new Request(`${url.origin}${url.pathname}${show ? `?show=${encodeURIComponent(show)}` : ""}`, { headers: { accept: "text/html" } });
     const cache = (caches as unknown as { default: Cache }).default;
     const hit = await cache.match(key);
     if (hit) {

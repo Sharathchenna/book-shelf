@@ -3,10 +3,13 @@ import { jevEnabled, rankForSearch } from "@/lib/ai/jev";
 import { getClippings, getShelf } from "@/lib/data";
 import { bm25By, bm25Scored } from "@/lib/search/bm25";
 import { bookDoc, clipDoc, type SearchDoc } from "@/lib/search/site";
+import { nearest } from "@/lib/search/vectors";
 
-/** Everything is ranked when there's this little; more is narrowed by keywords first. */
+/** Everything is ranked when there's this little; more is narrowed first, by meaning and keywords. */
 const RANK_ALL_UP_TO = 150;
 const CANDIDATES = 100;
+/** Keyword matches added to the nearest documents, for exact names and handles embeddings can blur. */
+const KEYWORD_EXTRAS = 20;
 const RESULTS = 20;
 /** Jev's probability below which a result isn't shown (unless nothing scores higher). */
 const MIN_MATCH = 0.2;
@@ -15,12 +18,14 @@ const RATE = { windowMs: 60_000, max: 40 };
 const hits = new Map<string, number[]>();
 const cache = new Map<string, SearchResult[]>();
 
-type SearchResult = Omit<SearchDoc, "card" | "text"> & { match: number };
+type Shown = Omit<SearchDoc, "card" | "text" | "passage">;
+type SearchResult = Shown & { match: number };
 
 /**
- * Searches the whole site (books, papers, articles, newsletter issues, tweets) by meaning: BM25
- * narrows large collections, then Jev judges each candidate against the search. Without Jev, the
- * keyword ranking is the answer.
+ * Searches the whole site (books, papers, articles, newsletter issues, tweets) by meaning. Large
+ * collections are first narrowed to the documents nearest the search in the vector index
+ * (lib/search/vectors.ts) plus the best keyword matches; then Jev judges each candidate against
+ * the search. Without Jev, the vector (or else keyword) ranking is the answer.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { query?: unknown };
@@ -40,13 +45,36 @@ export async function POST(request: Request) {
   if (cached) return Response.json({ results: cached, ranked: true, cached: true });
 
   const docs = [...shelf.items.map(bookDoc), ...clips.map(clipDoc)];
-  const pool = docs.length <= RANK_ALL_UP_TO ? docs : bm25By(query, docs, (d) => d.text, CANDIDATES);
-  // The palette needs neither the card Jev reads nor the keyword text.
-  const strip = (doc: SearchDoc): Omit<SearchDoc, "card" | "text"> => {
+  const byDocId = new Map(docs.map((d) => [d.id, d]));
+  const near =
+    docs.length > RANK_ALL_UP_TO || !jevEnabled()
+      ? await nearest(query, CANDIDATES).catch((error) => {
+          console.error("Vector search failed; narrowing by keywords", error);
+          return null;
+        })
+      : null;
+  const pool =
+    docs.length <= RANK_ALL_UP_TO
+      ? docs
+      : near
+        ? [
+            ...new Set([
+              ...near.map((n) => byDocId.get(n.id)).filter((d): d is SearchDoc => Boolean(d)),
+              ...bm25By(query, docs, (d) => d.text, KEYWORD_EXTRAS),
+            ]),
+          ]
+        : bm25By(query, docs, (d) => d.text, CANDIDATES);
+  // The palette needs none of what the rankers read.
+  const strip = (doc: SearchDoc): Shown => {
     const { id, kind, title, subtitle, image, href, paperId } = doc;
     return { id, kind, title, subtitle, image, href, paperId };
   };
 
+  if (!jevEnabled() && near) {
+    // Nearest first, with the cosine similarity as the match.
+    const found = near.filter((n) => byDocId.has(n.id)).slice(0, RESULTS);
+    return Response.json({ results: found.map((n) => ({ ...strip(byDocId.get(n.id)!), match: Math.max(0, Math.min(1, n.score)) })), ranked: true });
+  }
   if (!jevEnabled()) {
     // Only what contains a search word, scored against the best match.
     const scored = bm25Scored(query, docs, (d) => d.text, RESULTS).filter((s) => s.score > 0);

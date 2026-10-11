@@ -190,7 +190,13 @@ function TweetCard({ clip }: { clip: Clip }) {
           <path d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3Zm-1.08 16.18h1.7L7.4 4.74H5.58l11.09 14.44Z" />
         </svg>
       </div>
-      <p className="mt-3 text-[15px] leading-relaxed whitespace-pre-line">
+      {tweet.replyTo && (
+        <p className="mt-3 line-clamp-2 border-l-2 border-line pl-3 text-sm text-muted">
+          Replying to <span className="text-accent">@{tweet.replyTo.handle}</span>: {tweet.replyTo.text}
+        </p>
+      )}
+      {/* Long posts are kept whole for search; the card shows the start. */}
+      <p className="mt-3 line-clamp-[14] text-[15px] leading-relaxed whitespace-pre-line">
         <Linkified text={tweet.text} />
       </p>
       {tweet.media.length > 0 && (
@@ -200,6 +206,7 @@ function TweetCard({ clip }: { clip: Clip }) {
           ))}
         </div>
       )}
+      {tweet.quote && <QuotedPost post={tweet.quote} />}
       <Note text={clip.note} />
       <Byline
         parts={[
@@ -207,6 +214,21 @@ function TweetCard({ clip }: { clip: Clip }) {
           tweet.likes !== undefined && `♥ ${compact.format(tweet.likes)}`,
         ]}
       />
+    </div>
+  );
+}
+
+/** The post a tweet quotes, as a smaller card inside it. */
+function QuotedPost({ post }: { post: NonNullable<NonNullable<Clip["tweet"]>["quote"]> }) {
+  return (
+    <div className="mt-3 rounded-2xl p-3.5 ring-1 ring-line">
+      <p className="truncate text-sm">
+        <span className="font-semibold">{post.name}</span> <span className="text-muted">@{post.handle}</span>
+      </p>
+      <p className="mt-1 line-clamp-5 text-sm leading-relaxed whitespace-pre-line">
+        <Linkified text={post.text} />
+      </p>
+      {post.media?.[0] && <Picture src={post.media[0]} className="mt-2 aspect-[16/9] w-full rounded-xl object-cover" />}
     </div>
   );
 }

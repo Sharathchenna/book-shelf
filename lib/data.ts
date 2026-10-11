@@ -64,6 +64,16 @@ export async function getClippings(kind?: ClipKind): Promise<ClippingsData> {
   return { items: records<Clip>((await query.all<{ data: string }>()).results) };
 }
 
+/** The newest `limit` clippings of one kind, and how many there are in all. */
+export async function getClippingsPage(kind: ClipKind, limit: number): Promise<ClippingsData & { total: number }> {
+  const database = await db();
+  const [rows, count] = await database.batch([
+    database.prepare("SELECT data FROM clippings WHERE kind = ?1 ORDER BY saved DESC, added_at DESC LIMIT ?2").bind(kind, limit),
+    database.prepare("SELECT COUNT(*) AS total FROM clippings WHERE kind = ?1").bind(kind),
+  ]);
+  return { items: records<Clip>(rows.results as { data: string }[]), total: Number((count.results[0] as { total: number }).total) };
+}
+
 /** The kinds that have at least one clipping, which decides which sections exist. */
 export async function getClipKinds(): Promise<ClipKind[]> {
   const { results } = await (await db()).prepare("SELECT DISTINCT kind FROM clippings").all<{ kind: ClipKind }>();
@@ -83,6 +93,19 @@ export async function saveClipping(clip: Clip) {
     )
     .bind(clip.id, clip.kind, clip.saved, new Date().toISOString(), JSON.stringify(clip))
     .run();
+}
+
+export async function getMeta(key: string): Promise<string | null> {
+  const row = await (await db()).prepare("SELECT value FROM meta WHERE key = ?1").bind(key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setMeta(key: string, value: string | null) {
+  const database = await db();
+  await (value === null
+    ? database.prepare("DELETE FROM meta WHERE key = ?1").bind(key)
+    : database.prepare("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(key, value)
+  ).run();
 }
 
 export async function deleteClipping(id: string): Promise<boolean> {

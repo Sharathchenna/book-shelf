@@ -1,7 +1,8 @@
 import { requireOwner } from "@/lib/auth/session";
-import { clipId, clipLink, expand } from "@/lib/clip";
 import { CLIP_KINDS } from "@/lib/clippings";
-import { deleteClipping, getClipping, saveClipping } from "@/lib/data";
+import { deleteClipping } from "@/lib/data";
+import { saveLink } from "@/lib/save";
+import { removeDocs } from "@/lib/search/vectors";
 import type { ClipKind } from "@/lib/types";
 
 /**
@@ -22,16 +23,8 @@ export async function POST(request: Request) {
     ? body.tags.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim().slice(0, 40)).slice(0, 12)
     : undefined;
 
-  let existing = null;
   try {
-    existing = await getClipping(clipId(expand(body.url.trim())));
-  } catch {
-    // Not a parseable URL; clipLink explains.
-  }
-  try {
-    const clip = await clipLink(body.url, { kind, note, tags }, existing);
-    await saveClipping(clip);
-    return Response.json({ clip, refreshed: Boolean(existing) });
+    return Response.json(await saveLink(body.url, { kind, note, tags }));
   } catch (error) {
     return Response.json({ error: `Couldn't clip that: ${(error as Error).message}` }, { status: 422 });
   }
@@ -44,5 +37,6 @@ export async function DELETE(request: Request) {
   if (typeof id !== "string" || !(await deleteClipping(id))) {
     return Response.json({ error: "Unknown clipping." }, { status: 404 });
   }
+  await removeDocs([`clip:${id}`]).catch((error) => console.error("Removing from the search index failed", id, error));
   return new Response(null, { status: 204 });
 }

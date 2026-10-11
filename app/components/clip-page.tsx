@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { CLIP_LABEL } from "@/lib/clippings";
-import { getBookCount, getClipKinds, getClippings } from "@/lib/data";
+import { getBookCount, getClipKinds, getClippingsPage } from "@/lib/data";
 import type { ClipKind } from "@/lib/types";
 import { shelfConfig } from "@/shelf.config";
 import { ClipGrid } from "./clippings";
@@ -22,29 +22,43 @@ export function clipMetadata(kind: ClipKind): Metadata {
   return { title, description, openGraph: { title, description }, twitter: { title, description } };
 }
 
+/** Clippings listed per page; "Show more" adds this many (?show=…). Search reaches all of them. */
+const PAGE = 60;
+
 /**
  * One kind of clipping (articles, papers, newsletters or tweets) on its own page. The heading
  * ships with the page; the clippings come from the database as the request arrives.
  */
-export function ClipPage({ kind }: { kind: ClipKind }) {
+export function ClipPage({ kind, searchParams }: { kind: ClipKind; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   return (
     <Suspense fallback={<ClipPageFrame kind={kind} kinds={[]} />}>
-      <ClipPageContent kind={kind} />
+      <ClipPageContent kind={kind} searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function ClipPageContent({ kind }: { kind: ClipKind }) {
-  const [{ items }, kinds, books] = await Promise.all([getClippings(kind), getClipKinds(), getBookCount()]);
+async function ClipPageContent({ kind, searchParams }: { kind: ClipKind; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const requested = Number((await searchParams).show);
+  const show = Number.isFinite(requested) && requested > PAGE ? Math.min(Math.ceil(requested / PAGE) * PAGE, 5000) : PAGE;
+  const [{ items, total }, kinds, books] = await Promise.all([getClippingsPage(kind, show), getClipKinds(), getBookCount()]);
   return (
     <ClipPageFrame
       kind={kind}
       kinds={kinds}
-      count={items.length}
+      count={total}
       footer={<Footer owner={shelfConfig.owner} count={books} kinds={kinds} />}
     >
       {items.length ? (
-        <ClipGrid kind={kind} items={items} />
+        <>
+          <ClipGrid kind={kind} items={items} />
+          {total > items.length && (
+            <div className="mt-10 text-center">
+              <Link href={`?show=${show + PAGE}`} scroll={false} className="pill">
+                Show more <span className="text-muted">· {total - items.length} older</span>
+              </Link>
+            </div>
+          )}
+        </>
       ) : (
         <p className="rounded-3xl border border-dashed border-line px-6 py-16 text-center text-muted">
           Nothing here yet.

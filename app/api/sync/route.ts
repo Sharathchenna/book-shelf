@@ -1,9 +1,11 @@
 import { fromScheduler, requireOwner } from "@/lib/auth/session";
+import { refreshSearch } from "@/lib/save";
 import { syncGoodreads } from "@/lib/sync";
 
 /**
  * Syncs the shelf from Goodreads into the database: the owner's Sync button, and the nightly cron
- * (worker.ts). Returns what changed; the page shows it on the next render.
+ * (worker.ts). Then brings the search index up to date. Returns what changed; the page shows it
+ * on the next render.
  */
 export async function POST(request: Request) {
   if (!fromScheduler(request)) {
@@ -11,7 +13,13 @@ export async function POST(request: Request) {
     if (denied) return denied;
   }
   try {
-    return Response.json(await syncGoodreads(), { headers: { "cache-control": "no-store" } });
+    const result = await syncGoodreads();
+    // The shelf is synced either way; search catches up on the next run if this fails.
+    const search = await refreshSearch().catch((error) => {
+      console.error("Search index refresh failed", error);
+      return null;
+    });
+    return Response.json({ ...result, search }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Goodreads sync failed", error);
     return Response.json({ error: (error as Error).message || "The sync failed." }, { status: 502 });
