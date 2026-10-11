@@ -12,13 +12,14 @@ const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZon
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const date = (iso: string, format = monthYear) => format.format(new Date(`${iso}T00:00:00Z`));
 
-const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip }) => React.ReactNode }> = {
+// The card link (first child) fills the grid cell; the small links beside it must not.
+const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip; readable?: boolean }) => React.ReactNode }> = {
   // Masonry: cards with and without images keep their natural heights.
   article: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: ArticleCard },
   // Two wide columns: titles and abstracts need the measure.
-  paper: { list: "grid grid-cols-1 gap-4 md:grid-cols-2 [&>li>a]:h-full", Card: PaperCard },
+  paper: { list: "grid grid-cols-1 gap-4 md:grid-cols-2 [&>li>a:first-child]:h-full", Card: PaperCard },
   // An even grid, so the letter-style cards and their postmarks line up.
-  newsletter: { list: "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a]:h-full", Card: NewsletterCard },
+  newsletter: { list: "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a:first-child]:h-full", Card: NewsletterCard },
   tweet: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: TweetCard },
 };
 
@@ -39,38 +40,47 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
   };
   return (
     <ul className={list}>
-      {items.map((clip) => (
-        <li key={clip.id} className="group relative">
-          <a
-            href={clip.url}
-            target="_blank"
-            rel="noreferrer"
-            className="glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1"
-          >
-            <Card clip={clip} />
-          </a>
-          {owner && (
-            <button
-              onClick={() => void remove(clip)}
-              aria-label={`Remove ${clip.title ?? "this clipping"}`}
-              title="Remove"
-              className="absolute top-3 right-3 grid size-8 place-items-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            </button>
-          )}
-          {owner && clip.paper?.pdf && (
-            <Link
-              href={`/reader/paper/${encodeURIComponent(clip.id)}`}
-              className="absolute right-5 bottom-5 rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-ink-fg transition-transform hover:scale-105"
-            >
-              Read
-            </Link>
-          )}
-        </li>
-      ))}
+      {items.map((clip) => {
+        // For the owner, a paper with a free PDF opens in the site's reader; the source is a small link.
+        const readable = owner && Boolean(clip.paper?.pdf);
+        const cardClass =
+          "glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1";
+        return (
+          <li key={clip.id} className="group relative">
+            {readable ? (
+              <Link href={`/reader/paper/${encodeURIComponent(clip.id)}`} className={cardClass}>
+                <Card clip={clip} readable />
+              </Link>
+            ) : (
+              <a href={clip.url} target="_blank" rel="noreferrer" className={cardClass}>
+                <Card clip={clip} />
+              </a>
+            )}
+            {owner && (
+              <button
+                onClick={() => void remove(clip)}
+                aria-label={`Remove ${clip.title ?? "this clipping"}`}
+                title="Remove"
+                className="absolute top-3 right-3 grid size-8 place-items-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            )}
+            {readable && (
+              <a
+                href={clip.url}
+                target="_blank"
+                rel="noreferrer"
+                className="absolute right-5 bottom-5 rounded-md border border-line px-1.5 py-0.5 text-xs text-muted transition-colors hover:text-fg"
+              >
+                {clip.paper?.arxiv ? "arXiv" : new URL(clip.url).host.replace(/^www\./, "")} ↗
+              </a>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -95,7 +105,8 @@ function ArticleCard({ clip }: { clip: Clip }) {
 }
 
 /** Styled like a title page: venue and year, title, authors, then the abstract. */
-function PaperCard({ clip }: { clip: Clip }) {
+/** `readable`: opens in the site's reader (the owner, with a free PDF). */
+function PaperCard({ clip, readable }: { clip: Clip; readable?: boolean }) {
   const paper = clip.paper!;
   const shown = paper.authors.slice(0, 4);
   const more = paper.authors.length - shown.length;
@@ -117,7 +128,16 @@ function PaperCard({ clip }: { clip: Clip }) {
       <p className="mt-auto flex flex-wrap items-center gap-2 pt-4 text-xs text-muted">
         {paper.arxiv && <span className="rounded-md bg-chip px-1.5 py-0.5 font-mono">arXiv:{paper.arxiv}</span>}
         {!paper.arxiv && paper.doi && <span className="truncate rounded-md bg-chip px-1.5 py-0.5 font-mono">doi:{paper.doi}</span>}
-        {paper.pdf && <span className="rounded-md border border-line px-1.5 py-0.5 font-medium">PDF</span>}
+        {readable ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-ink px-2 py-0.5 font-medium text-ink-fg">
+            <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" aria-hidden>
+              <path d="M12 7c-2-1.5-5-2-8-1.5v12c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-12c-3-.5-6 0-8 1.5zM12 7v12" />
+            </svg>
+            Read here
+          </span>
+        ) : (
+          paper.pdf && <span className="rounded-md border border-line px-1.5 py-0.5 font-medium">PDF</span>
+        )}
       </p>
     </div>
   );
