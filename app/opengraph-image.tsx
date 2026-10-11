@@ -56,7 +56,9 @@ export default async function Image() {
             <span>&nbsp;Shelf</span>
           </div>
           <div style={{ marginTop: 24, fontSize: 30, color: "#66706a", fontFamily: "Fraunces" }}>
-            {`${stats.booksRead.toLocaleString("en-US")} books read · ${stats.pagesTurned.toLocaleString("en-US")} pages · ${stats.onTheList} on the list`}
+            {shelf.items.length === 0
+              ? "A reading log, coming soon"
+              : `${stats.booksRead.toLocaleString("en-US")} books read · ${stats.pagesTurned.toLocaleString("en-US")} pages · ${stats.onTheList} on the list`}
           </div>
         </div>
       </div>

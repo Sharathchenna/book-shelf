@@ -20,8 +20,7 @@ const OUT = "data/shelf.json";
 const CONCURRENCY = 4;
 const HEADERS = { "User-Agent": "book-shelf-importer/0.1 (personal reading shelf)" };
 
-const input =
-  process.argv[2] ?? (existsSync("data/goodreads.csv") ? "data/goodreads.csv" : "data/sample-goodreads.csv");
+const input = process.argv[2] ?? "data/goodreads.csv";
 
 type SearchDoc = {
   key: string;
@@ -33,6 +32,10 @@ type SearchDoc = {
 };
 
 async function main() {
+  if (!existsSync(input)) {
+    console.error(`No Goodreads export at ${input}. Save it there, or pass its path: bun run import path/to.csv`);
+    process.exit(1);
+  }
   const items = parseGoodreads(await readFile(input, "utf8"));
   console.log(`Read ${items.length} books from ${input}`);
   await mkdir(CACHE_DIR, { recursive: true });

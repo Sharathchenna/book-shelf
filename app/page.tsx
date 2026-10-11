@@ -45,6 +45,7 @@ function suggestions(items: Item[]): Suggestion[] {
 
 export default function Home() {
   const { items, updatedAt } = shelf;
+  if (items.length === 0) return <EmptyShelf />;
   const [top] = spineRows(items);
 
   return (
@@ -69,5 +70,24 @@ export default function Home() {
       </main>
       <Footer owner={shelfConfig.owner} count={items.length} shortcuts />
     </ShelfProvider>
+  );
+}
+
+/** Before the first import: no search, stats or library, which would only show zeros. */
+function EmptyShelf() {
+  return (
+    <>
+      <TopBar owner={shelfConfig.owner} current="books" />
+      <main className="mx-auto flex max-w-6xl flex-col gap-8 px-4 pt-14">
+        <div className="glass rounded-3xl px-6 py-16 text-center">
+          <h1 className="font-serif text-5xl leading-tight text-balance sm:text-6xl">The shelf is being stocked.</h1>
+          <p className="mx-auto mt-4 max-w-md text-muted">
+            {shelfConfig.owner}&apos;s books are on their way. Check back soon.
+          </p>
+        </div>
+        <Profile config={shelfConfig} updatedAt={shelf.updatedAt} />
+      </main>
+      <Footer owner={shelfConfig.owner} count={0} />
+    </>
   );
 }

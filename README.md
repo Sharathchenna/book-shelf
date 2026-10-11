@@ -9,7 +9,7 @@ A personal bookshelf site: every book you've read, are reading, and mean to read
 3. Run the import:
 
    ```bash
-   bun run import            # uses data/goodreads.csv, or the sample if it's missing
+   bun run import            # uses data/goodreads.csv
    bun run import path/to.csv
    ```
 
@@ -31,7 +31,7 @@ bun run clip --remove https://example.com/some-essay
 - **Newsletters** are recognised by platform: Substack (including custom domains), beehiiv, Buttondown, Kit, Ghost and a few others. Pass `--kind newsletter` (or `article`) to override.
 - **Tweets** come from X's public embed endpoints and are stored as plain data (text, author, avatar, photos, likes). The site renders them itself, so no X script loads.
 
-Everything lands in `data/clippings.json`, newest first, and can be edited by hand. Clipping a URL again refreshes its metadata but keeps its note, tags and saved date. `--saved 2026-10-11` sets the saved date. The sample clippings' notes are placeholders.
+Everything lands in `data/clippings.json`, newest first, and can be edited by hand. Clipping a URL again refreshes its metadata but keeps its note, tags and saved date. `--saved 2026-10-11` sets the saved date.
 
 ## Configure
 
