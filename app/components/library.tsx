@@ -41,7 +41,7 @@ function matches(item: Item, terms: string[]): boolean {
 }
 
 export function Library() {
-  const { items, query, setQuery, category, setCategory, colour, setColour, openBook } = useShelf();
+  const { items, query, setQuery, category, setCategory, colour, setColour, openBook, library } = useShelf();
   const [status, setStatus] = useState<Status | "all">("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -196,7 +196,7 @@ export function Library() {
         >
           {shown.slice(0, limit).map((item) => (
             <li key={item.id}>
-              <BookCard item={item} onOpen={() => openBook(item.id, ids)} />
+              <BookCard item={item} readable={library?.epubs.has(item.id)} onOpen={() => openBook(item.id, ids)} />
             </li>
           ))}
         </ul>
@@ -228,7 +228,8 @@ function moveFocus(e: React.KeyboardEvent<HTMLUListElement>) {
   }
 }
 
-function BookCard({ item, onOpen }: { item: Item; onOpen: () => void }) {
+/** `readable`: the book has an EPUB or PDF to open from its card. */
+function BookCard({ item, readable, onOpen }: { item: Item; readable?: boolean; onOpen: () => void }) {
   return (
     <button onClick={onOpen} className="group w-full rounded-md text-left">
       <div className="relative transition-transform duration-300 group-hover:-translate-y-1.5">
@@ -240,6 +241,17 @@ function BookCard({ item, onOpen }: { item: Item; onOpen: () => void }) {
             }`}
           >
             {STATUS_LABEL[item.status]}
+          </span>
+        )}
+        {readable && (
+          <span
+            title="Readable here"
+            className="glass absolute right-2 bottom-2 grid size-8 place-items-center rounded-full text-fg"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+              <path d="M12 7c-2-1.5-5-2-8-1.5v12c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-12c-3-.5-6 0-8 1.5zM12 7v12" />
+            </svg>
+            <span className="sr-only">Readable here</span>
           </span>
         )}
       </div>

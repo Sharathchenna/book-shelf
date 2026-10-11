@@ -4,7 +4,7 @@ import Link from "next/link";
 import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { AiCard, useAiStream } from "./ai-card";
-import { BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
+import { backHref, BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
 import { Drawer, NotesPanel, TocPanel } from "./panels";
 import { flatOutline, loadPdfjs, openPdf, outline, pageText, sectionAt, toBase64Jpeg, type PDFDocumentProxy } from "./pdf";
@@ -540,8 +540,8 @@ export function PdfReaderView({ id }: { id: string }) {
           <div>
             <p className="font-serif text-3xl">This PDF wouldn&apos;t open.</p>
             <p className="mt-2 text-muted">{error}</p>
-            <Link href="/reader" className="pill mt-6">
-              Back to your books
+            <Link href="/" className="pill mt-6">
+              Back to the shelf
             </Link>
           </div>
         </div>
@@ -554,7 +554,7 @@ export function PdfReaderView({ id }: { id: string }) {
         }`}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
-        <Link href="/reader" aria-label="Back to your books" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
+        <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
           <Icon d="M15 6l-6 6 6 6" />
         </Link>
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>

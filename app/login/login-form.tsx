@@ -3,7 +3,7 @@
 import { startTransition, useActionState } from "react";
 import { login } from "./actions";
 
-/** `next`: where to go after signing in. Without it, the page's ?next= (or the reading room). */
+/** `next`: where to go after signing in. Without it, the page's ?next= (or the shelf). */
 export function LoginForm({ next, submitLabel = "Enter" }: { next?: string; submitLabel?: string }) {
   const [state, formAction, pending] = useActionState(login, {});
 
@@ -13,7 +13,7 @@ export function LoginForm({ next, submitLabel = "Enter" }: { next?: string; subm
       onSubmit={(e) => {
         e.preventDefault();
         const form = new FormData(e.currentTarget);
-        form.set("next", next ?? new URLSearchParams(window.location.search).get("next") ?? "/reader");
+        form.set("next", next ?? new URLSearchParams(window.location.search).get("next") ?? "/");
         startTransition(() => formAction(form));
       }}
       className="mt-7 flex flex-col gap-3 text-left"

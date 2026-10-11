@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AccountLink } from "./account-link";
 import { Logo } from "./logo";
 import { sectionLinks } from "./top-bar";
 
@@ -39,6 +40,7 @@ export function Footer({ owner, count, shortcuts = false }: { owner: string; cou
             {label}
           </Link>
         ))}
+        <AccountLink />
       </nav>
     </footer>
   );

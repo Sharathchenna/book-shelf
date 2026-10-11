@@ -1,9 +1,15 @@
 "use client";
 
-import type { Highlight, HighlightColor } from "@/lib/library-types";
+import type { Highlight, HighlightColor, LibraryBook } from "@/lib/library-types";
 import { HIGHLIGHT_HEX } from "./foliate";
 
 /** Pieces shared by the EPUB and PDF readers. */
+
+/** Where the reader's back button goes: the book's card on the shelf, or the papers page. */
+export function backHref(book: Pick<LibraryBook, "id" | "shelfItemId" | "paperId"> | null): string {
+  if (book?.shelfItemId) return `/?book=${book.shelfItemId}`;
+  return book?.paperId ? "/papers" : "/";
+}
 
 /** A selection (or a clicked highlight) and where to show its popover. */
 export type Selected = {

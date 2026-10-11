@@ -54,8 +54,8 @@ export function PaperOpener({ paperId }: { paperId: string }) {
             <Link href="/papers" className="pill">
               Back to papers
             </Link>
-            <Link href="/reader" className="pill">
-              Your books
+            <Link href="/" className="pill">
+              The shelf
             </Link>
           </div>
         </div>

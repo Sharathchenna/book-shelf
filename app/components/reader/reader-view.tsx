@@ -16,7 +16,7 @@ import {
   type ReaderSettings,
   type TocItem,
 } from "./foliate";
-import { BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
+import { backHref, BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
 import { Drawer, NotesPanel, SearchPanel, SettingsPanel, TocPanel } from "./panels";
 
 const SETTINGS_KEY = "reader-settings";
@@ -423,8 +423,8 @@ export function ReaderView({ id }: { id: string }) {
           <div>
             <p className="font-serif text-3xl">This book wouldn&apos;t open.</p>
             <p className="mt-2 text-muted">{error}</p>
-            <Link href="/reader" className="pill mt-6">
-              Back to your books
+            <Link href="/" className="pill mt-6">
+              Back to the shelf
             </Link>
           </div>
         </div>
@@ -437,7 +437,7 @@ export function ReaderView({ id }: { id: string }) {
         }`}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
-        <Link href="/reader" aria-label="Back to your books" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
+        <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
           <Icon d="M15 6l-6 6 6 6" />
         </Link>
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>

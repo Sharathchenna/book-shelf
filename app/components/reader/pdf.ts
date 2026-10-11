@@ -179,7 +179,7 @@ export function toBase64Jpeg(canvas: HTMLCanvasElement, quality = 0.85): string 
 export async function finalizePdf(
   id: string,
   data: ArrayBuffer,
-  opts: { fileName?: string; paperId?: string; onProgress: (done: number, total: number) => void },
+  opts: { fileName?: string; paperId?: string; shelfItemId?: string; onProgress: (done: number, total: number) => void },
 ): Promise<void> {
   const doc = await openPdf(data);
   let read: ReadPdf;
@@ -195,6 +195,7 @@ export async function finalizePdf(
     body: JSON.stringify({
       format: "pdf",
       paperId: opts.paperId,
+      shelfItemId: opts.shelfItemId,
       title: read.title ?? fromName,
       author: read.author,
       pages: read.pages,

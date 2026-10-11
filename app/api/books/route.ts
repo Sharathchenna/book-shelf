@@ -1,31 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { isOwner, requireOwner } from "@/lib/auth/session";
-import { CONTENT_TYPES, keys, readIndex } from "@/lib/library";
-import type { LibraryEntry, Progress } from "@/lib/library-types";
-import { getJson, getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
-
-/**
- * The library, most recently read first. It's on show to everyone (locked), so visitors get each
- * book's title, author and cover; the owner also gets their progress. The files stay owner-only.
- */
-export async function GET() {
-  const owner = await isOwner();
-  const storage = getStorage();
-  const entries: LibraryEntry[] = await Promise.all(
-    (await readIndex()).map(async (book) => ({
-      ...book,
-      progress: owner ? ((await getJson<Progress>(keys.progress(book.id))) ?? undefined) : undefined,
-      coverUrl: book.coverKey ? await storage.downloadUrl(book.coverKey) : undefined,
-    })),
-  );
-  entries.sort((a, b) =>
-    (b.progress?.updatedAt ?? b.addedAt).localeCompare(a.progress?.updatedAt ?? a.addedAt),
-  );
-  return Response.json(
-    { books: entries, owner, storage: owner ? storage.kind : undefined },
-    { headers: { "cache-control": "no-store" } },
-  );
-}
+import { requireOwner } from "@/lib/auth/session";
+import { CONTENT_TYPES, keys } from "@/lib/library";
+import { getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
 /**
  * Starts an upload: returns a new book id and a short-lived URL the browser PUTs the EPUB or PDF

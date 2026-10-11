@@ -1,6 +1,6 @@
 # Shelf
 
-A personal bookshelf site: every book you've read, are reading, and mean to read, built from a Goodreads export. Visitors can **ask the shelf** questions in plain language. You also get a private **reading room** for your own EPUBs, PDFs and papers.
+A personal bookshelf site: every book you've read, are reading, and mean to read, built from a Goodreads export. Visitors can **ask the shelf** questions in plain language. Books can carry their own EPUB or PDF: anyone sees which ones, and reading asks for your password.
 
 ## Add your books
 
@@ -44,7 +44,7 @@ Copy `.env.example` to `.env.local`. Each feature turns on when its keys are set
 | --- | --- |
 | Ask the shelf (Jev ranks the books) | `TYPESAFE_API_KEY` |
 | Short answers, and explain/recap in the reader (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
-| Private reading room | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
+| Reading books on the shelf (password) | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
 | Book and PDF storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
 Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.
@@ -65,11 +65,13 @@ Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without
    ]
    ```
 
-## Using the reading room
+## Reading books on the shelf
 
-`/reader` is public: visitors see your library (covers, titles, authors) with a lock, and opening a book asks for the password. Your progress, highlights and notes are never shown to them. Sign in there (or at `/login`), then:
+Every book's card can carry its own EPUB or PDF. Sign in with **Sign in** in the footer (or any locked **Read** button), then:
 
-- Drop EPUBs or PDFs onto **Your books**. Each one is matched to its book on your shelf by title and author, and the shelf's book popup gets a **Read / Continue** button for you.
+- Open a book's card and choose **Add EPUB or PDF**. It uploads straight to R2, attached to that book. The card then shows **Read** (or **Continue · 42%**) and **Remove file**, and the cover gets a small book badge.
+- Visitors see **Read · locked** on those cards. It asks for the password inside the card, then opens the book. Your progress, highlights and notes are never shown to them.
+- A file is matched to its book when the shelf loads, not only at upload: a book added to Goodreads after its file was uploaded picks the file up after the next sync.
 - EPUBs reflow: themes (Paper, Sepia, Sage, Night), fonts, text size, spacing, column width, two-page or scrolling layout.
 - PDFs keep their pages (pdf.js): continuous scrolling, zoom and fit-to-width, the same four themes (Night inverts the page and keeps figures' colours), contents from the PDF's bookmarks, and selectable text. The browser reads the text when you add one, so search, Explain and recap work on PDFs too; scanned PDFs without a text layer can only be viewed.
 - **Papers:** on `/papers`, a paper with a free PDF (arXiv, open proceedings) shows a **Read** button when you're signed in. The first time, the server fetches the PDF into R2; after that it opens straight away.
@@ -80,7 +82,7 @@ Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without
 
 ### Privacy and safety
 
-- **Locked, not hidden.** Visitors can see which books are in the reading room, but the files, your notes and progress, and the reader's AI features are owner-only: every route checks your signed session cookie, so purchased books are never served publicly.
+- **Locked, not hidden.** Visitors can see which books have a file to read, but the files, your notes and progress, and the reader's AI features are owner-only: every route checks your signed session cookie, so purchased books are never served publicly.
 - **Password guessing.** Wrong passwords are answered slowly, and after 8 wrong tries in 15 minutes an address is turned away. That count lives in memory per Worker instance, so it's a speed bump; use a long password.
 - **No spoilers.** Explain and recap only send the model text from *before* your current position.
 - **pdf.js** is copied from `node_modules` to `public/pdfjs` on install (`scripts/copy-pdfjs.ts`) and loaded from there at runtime, so it's in neither the client bundle nor the Worker. `/reader` allows `'wasm-unsafe-eval'` for its WebAssembly image decoders, which permits compiling WebAssembly but not JavaScript `eval`.
@@ -121,7 +123,7 @@ Notes:
 - **Data is baked in.** `data/shelf.json` and `data/clippings.json` are part of the build, so redeploy after `bun run import` or `bun run clip` (pushing to `main` does it).
 - **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: pages are prerendered, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan. PDFs are read in the browser, so they cost the Worker almost nothing.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's new `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
-- **`proxy.ts`** runs on OpenNext's Node.js middleware support, which it labels experimental. It only does the optimistic redirect from `/reader` to `/login`; the real check happens in every reader page and API route, so the site stays protected if it misbehaves.
+- **`proxy.ts`** runs on OpenNext's Node.js middleware support, which it labels experimental. It only does the optimistic redirect from a book (`/reader/<id>`) to `/login`; the real check happens in every reader page and API route, so the site stays protected if it misbehaves.
 
 ## Layout
 
@@ -137,5 +139,6 @@ Notes:
 | `app/api/ask/route.ts`, `lib/ai/jev.ts`, `lib/ai/haiku.ts` | Ask the shelf: BM25 pre-filter → Jev ranking → streamed Haiku answer |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login (signed JWT cookie) |
 | `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book storage (R2 or local), library index, EPUB parsing, PDF finalize and paper import |
-| `app/reader/`, `app/components/reader/` | The reading room: EPUBs (foliate-js), PDFs (pdf.js, `pdf-reader-view.tsx`, `pdf.ts`), panels and AI cards |
+| `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
+| `app/reader/`, `app/components/reader/` | The readers: EPUBs (foliate-js), PDFs (pdf.js, `pdf-reader-view.tsx`, `pdf.ts`), panels and AI cards |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain and recap, using only text before the reader's position |

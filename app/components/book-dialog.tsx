@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { goodreadsUrl, STATUS_LABEL } from "@/lib/shelf";
-import Link from "next/link";
 import type { Item } from "@/lib/types";
+import { BookFile } from "./book-file";
 import { Cover } from "./cover";
 import type { Epub } from "./shelf-provider";
 import { Stars } from "./stars";
@@ -13,16 +13,31 @@ type Props = {
   prevId?: string;
   nextId?: string;
   sameAuthor: Item[];
-  /** This book's EPUB or PDF in the reading room, when there is one. */
+  /** This book's EPUB or PDF, when it has one. */
   epub?: Epub;
-  /** Visitors see the Read button too; it asks for the password first. */
-  locked?: boolean;
+  /** The signed-in owner reads directly and can add or remove files; visitors unlock first. */
+  owner?: boolean;
+  onFileChanged: () => void;
   onOpen: (id: string) => void;
   onClose: () => void;
 };
 
-export function BookDialog({ item, prevId, nextId, sameAuthor, epub, locked, onOpen, onClose }: Props) {
+export function BookDialog({ item, prevId, nextId, sameAuthor, epub, owner, onFileChanged, onOpen, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  /** Set while the page is hidden, so that closing the dialog then doesn't count as the reader closing it. */
+  const hidden = useRef(false);
+
+  // Next keeps a page mounted but hidden after navigating away (Read opens the reader from here).
+  // An open modal dialog would stay in the top layer and make the next page inert, so close it
+  // while hidden; the effect below opens it again when the page comes back.
+  useEffect(() => {
+    const dialog = ref.current;
+    hidden.current = false;
+    return () => {
+      hidden.current = true;
+      dialog?.close();
+    };
+  }, []);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -51,7 +66,7 @@ export function BookDialog({ item, prevId, nextId, sameAuthor, epub, locked, onO
     <dialog
       ref={ref}
       aria-labelledby="book-title"
-      onClose={onClose}
+      onClose={() => !hidden.current && onClose()}
       // Clicks on the dialog element itself (not its content) are clicks on the backdrop.
       onClick={(e) => e.target === e.currentTarget && e.currentTarget.close()}
       className="book-dialog m-auto w-[min(58rem,calc(100%-1.5rem))] max-h-[calc(100dvh-2rem)] overflow-x-hidden overflow-y-auto rounded-[30px] border border-line bg-bg/85 p-0 text-fg shadow-[0_40px_120px_-30px_rgb(0_0_0/0.55)] backdrop-blur-2xl"
@@ -64,7 +79,8 @@ export function BookDialog({ item, prevId, nextId, sameAuthor, epub, locked, onO
           nextId={nextId}
           sameAuthor={sameAuthor}
           epub={epub}
-          locked={locked}
+          owner={owner}
+          onFileChanged={onFileChanged}
           onOpen={onOpen}
         />
       )}
@@ -72,7 +88,16 @@ export function BookDialog({ item, prevId, nextId, sameAuthor, epub, locked, onO
   );
 }
 
-function BookDetails({ item, prevId, nextId, sameAuthor, epub, locked, onOpen }: Omit<Props, "item" | "onClose"> & { item: Item }) {
+function BookDetails({
+  item,
+  prevId,
+  nextId,
+  sameAuthor,
+  epub,
+  owner = false,
+  onFileChanged,
+  onOpen,
+}: Omit<Props, "item" | "onClose"> & { item: Item }) {
   const [copied, setCopied] = useState(false);
   const candidates = [
     STATUS_LABEL[item.status],
@@ -157,22 +182,7 @@ function BookDetails({ item, prevId, nextId, sameAuthor, epub, locked, onOpen }:
           )}
 
           <div className="rise mt-6 flex flex-wrap gap-2" style={stagger(6)}>
-            {epub && (
-              <Link
-                // Visitors go through the password page, which then opens the book.
-                href={locked ? `/login?next=${encodeURIComponent(`/reader/${epub.id}`)}` : `/reader/${epub.id}`}
-                className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-fg transition-transform hover:scale-[1.03]"
-              >
-                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                  {locked ? (
-                    <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" strokeLinejoin="round" />
-                  ) : (
-                    <path d="M12 7c-2-1.5-5-2-8-1.5v12c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-12c-3-.5-6 0-8 1.5zM12 7v12" strokeLinejoin="round" />
-                  )}
-                </svg>
-                {locked ? "Read · locked" : epub.fraction > 0.005 ? `Continue · ${Math.round(epub.fraction * 100)}%` : "Read"}
-              </Link>
-            )}
+            <BookFile shelfItemId={item.id} epub={epub} owner={owner} onChanged={onFileChanged} />
             <a className="pill" href={goodreadsUrl(item)} target="_blank" rel="noreferrer">
               Goodreads ↗
             </a>

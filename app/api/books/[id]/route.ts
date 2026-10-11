@@ -1,5 +1,5 @@
 import { requireOwner } from "@/lib/auth/session";
-import { keys, readIndex, validId, writeIndex } from "@/lib/library";
+import { keys, readIndex, shelfItemFor, validId, writeIndex } from "@/lib/library";
 import type { Highlight, Progress } from "@/lib/library-types";
 import { shelf } from "@/lib/shelf";
 import { getJson, getStorage } from "@/lib/storage";
@@ -19,7 +19,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/books/[id]"
     getJson<Highlight[]>(keys.notes(id)),
   ]);
   return Response.json(
-    { book, fileUrl, progress, notes: notes ?? [] },
+    { book: { ...book, shelfItemId: shelfItemFor(book) }, fileUrl, progress, notes: notes ?? [] },
     { headers: { "cache-control": "no-store" } },
   );
 }

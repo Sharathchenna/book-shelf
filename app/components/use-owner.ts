@@ -7,7 +7,7 @@ export type Me = { owner: boolean; books: number };
 let inFlight: Promise<Me | null> | undefined;
 
 /**
- * Who is looking at this (static, public) page, and how many books are in the reading room.
+ * Who is looking at this (static, public) page, and how many shelf books have a file to read.
  * Components on the same page share one /api/me request. Pass `skip` when the answer is already
  * known some other way.
  */

@@ -33,6 +33,16 @@ const normalize = (s: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
+/**
+ * The shelf book a file belongs to: the one it was added from, or else one with the same title
+ * and author. Matched when read, not only at upload, so a file added before its book was on
+ * Goodreads finds it after the next sync.
+ */
+export function shelfItemFor(book: Pick<LibraryBook, "shelfItemId" | "paperId" | "title" | "author">): string | undefined {
+  if (book.shelfItemId && shelf.items.some((i) => i.id === book.shelfItemId)) return book.shelfItemId;
+  return book.paperId ? undefined : matchShelfItem(book.title, book.author);
+}
+
 /** The shelf item an uploaded book belongs to: same title (before any subtitle) and author surname. */
 export function matchShelfItem(title: string, author: string): string | undefined {
   const t = normalize(title);

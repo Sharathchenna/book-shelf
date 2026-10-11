@@ -2,6 +2,7 @@ import { requireOwner } from "@/lib/auth/session";
 import { clippings } from "@/lib/clippings";
 import { parseEpub } from "@/lib/epub/parse";
 import { keys, matchShelfItem, readIndex, validId, writeIndex } from "@/lib/library";
+import { shelf } from "@/lib/shelf";
 import type { LibraryBook } from "@/lib/library-types";
 import { getStorage, MAX_BOOK_BYTES, putJson } from "@/lib/storage";
 
@@ -22,10 +23,12 @@ export async function POST(request: Request, ctx: RouteContext<"/api/books/[id]/
   if (!validId(id)) return Response.json({ error: "Unknown book." }, { status: 404 });
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  return body.format === "pdf" ? finalizePdf(id, body) : finalizeEpub(id);
+  // Added from a book's card: it belongs to that book, whatever the file's own metadata says.
+  const shelfItemId = shelf.items.some((i) => i.id === body.shelfItemId) ? (body.shelfItemId as string) : undefined;
+  return body.format === "pdf" ? finalizePdf(id, body, shelfItemId) : finalizeEpub(id, shelfItemId);
 }
 
-async function finalizeEpub(id: string) {
+async function finalizeEpub(id: string, shelfItemId: string | undefined) {
   const storage = getStorage();
   const key = keys.file({ id, format: "epub" });
   const bytes = await storage.getBytes(key);
@@ -55,7 +58,7 @@ async function finalizeEpub(id: string) {
     format: "epub",
     title: parsed.title,
     author: parsed.author,
-    shelfItemId: matchShelfItem(parsed.title, parsed.author),
+    shelfItemId: shelfItemId ?? matchShelfItem(parsed.title, parsed.author),
     coverKey,
     sections: parsed.sections.map((s) => ({ title: s.title, chars: s.text.length })),
     totalChars: parsed.sections.reduce((sum, s) => sum + s.text.length, 0),
@@ -64,7 +67,7 @@ async function finalizeEpub(id: string) {
   });
 }
 
-async function finalizePdf(id: string, body: Record<string, unknown>) {
+async function finalizePdf(id: string, body: Record<string, unknown>, shelfItemId: string | undefined) {
   const storage = getStorage();
   const key = keys.file({ id, format: "pdf" });
   const bytes = await storage.size(key);
@@ -90,11 +93,13 @@ async function finalizePdf(id: string, body: Record<string, unknown>) {
   const totalChars = sections.reduce((sum, s) => sum + s.text.length, 0);
   if (totalChars > MAX_TEXT_CHARS) return Response.json({ error: "That PDF has too much text." }, { status: 413 });
 
-  // A clipped paper names itself; otherwise take what the browser read from the PDF or its file name.
+  // A clipped paper or the shelf book it was added to names it; otherwise take what the browser
+  // read from the PDF or its file name.
   const paper = typeof body.paperId === "string" ? clippings.items.find((c) => c.id === body.paperId && c.kind === "paper") : undefined;
+  const book = shelf.items.find((i) => i.id === shelfItemId);
   const text = (v: unknown, fallback: string) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 300) : fallback);
-  const title = paper?.title ?? text(body.title, "Untitled PDF");
-  const author = paper?.paper?.authors.length ? authorLine(paper.paper.authors) : text(body.author, "");
+  const title = paper?.title ?? book?.title ?? text(body.title, "Untitled PDF");
+  const author = paper?.paper?.authors.length ? authorLine(paper.paper.authors) : (book?.author ?? text(body.author, ""));
 
   let coverKey: string | undefined;
   if (typeof body.cover === "string" && body.cover.length < (MAX_COVER_BYTES * 4) / 3) {
@@ -113,7 +118,7 @@ async function finalizePdf(id: string, body: Record<string, unknown>) {
     title,
     author,
     paperId: paper?.id,
-    shelfItemId: paper ? undefined : matchShelfItem(title, author),
+    shelfItemId: paper ? undefined : (shelfItemId ?? matchShelfItem(title, author)),
     coverKey,
     sections: sections.map((s) => ({ title: s.title, chars: s.text.length })),
     totalChars,

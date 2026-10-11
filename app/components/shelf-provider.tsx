@@ -22,13 +22,13 @@ type ShelfContextValue = {
    */
   openBook: (id: string | null, sequence?: string[]) => void;
   /**
-   * The reading room, once known: which shelf books have an EPUB or PDF there (keyed by shelf
-   * item id), and whether the visitor is the signed-in owner who can open them.
+   * Once known: which shelf books have an EPUB or PDF (keyed by shelf item id), and whether the
+   * visitor is the signed-in owner who can open them without the password.
    */
-  library: { owner: boolean; size: number; epubs: Map<string, Epub> } | null;
+  library: { owner: boolean; epubs: Map<string, Epub> } | null;
 };
 
-/** A book in the reading room, and (for the owner) how far through it they are. */
+/** A book's EPUB or PDF, and (for the owner) how far through it they are. */
 export type Epub = { id: string; fraction: number };
 
 const ShelfContext = createContext<ShelfContextValue | null>(null);
@@ -52,8 +52,10 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
   const [sequence, setSequence] = useState<string[]>([]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const [library, setLibrary] = useState<ShelfContextValue["library"]>(null);
+  // Bumped after a file is added or removed, to ask again.
+  const [libraryVersion, setLibraryVersion] = useState(0);
 
-  // The page is static and public; only after it loads do we learn what's in the reading room.
+  // The page is static and public; only after it loads do we learn which books can be read.
   useEffect(() => {
     let current = true;
     void fetch("/api/me")
@@ -64,13 +66,13 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
         for (const book of me.library ?? []) {
           if (book.shelfItemId) epubs.set(book.shelfItemId, { id: book.id, fraction: book.fraction });
         }
-        setLibrary({ owner: me.owner, size: me.library?.length ?? 0, epubs });
+        setLibrary({ owner: me.owner, epubs });
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, []);
+  }, [libraryVersion]);
 
   // ?book=<id> links open that book. Read after hydration: the URL is not known while prerendering.
   useEffect(() => {
@@ -106,7 +108,8 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
         nextId={position >= 0 ? sequence[position + 1] : undefined}
         sameAuthor={sameAuthor}
         epub={item ? library?.epubs.get(item.id) : undefined}
-        locked={!library?.owner}
+        owner={library?.owner}
+        onFileChanged={() => setLibraryVersion((v) => v + 1)}
         onOpen={openBook}
         onClose={() => openBook(null)}
       />

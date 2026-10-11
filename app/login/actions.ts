@@ -38,5 +38,5 @@ export async function login(_state: LoginState, form: FormData): Promise<LoginSt
 
   // Only same-site paths, never "//host" or absolute URLs.
   const next = String(form.get("next") ?? "");
-  redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/reader");
+  redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
 }
