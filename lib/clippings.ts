@@ -12,3 +12,8 @@ export const CLIP_LABEL: Record<ClipKind, string> = {
   newsletter: "Newsletters",
   tweet: "Tweets",
 };
+
+/** Kinds that have at least one clipping, in page order. Kinds without any get no page or link. */
+export const clipKindsPresent = () => CLIP_KINDS.filter((kind) => clippings.items.some((c) => c.kind === kind));
+
+export const clipPath = (kind: ClipKind) => `/${CLIP_LABEL[kind].toLowerCase()}`;

@@ -30,6 +30,11 @@ export type Epub = { id: string; fraction: number };
 
 const ShelfContext = createContext<ShelfContextValue | null>(null);
 
+/** The shelf context when rendered inside <ShelfProvider> (the home page), otherwise null. */
+export function useOptionalShelf() {
+  return use(ShelfContext);
+}
+
 export function useShelf() {
   const value = use(ShelfContext);
   if (!value) throw new Error("useShelf must be used inside <ShelfProvider>");

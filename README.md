@@ -19,7 +19,7 @@ Edit your name, bio, avatar and links in `shelf.config.ts`.
 
 ## Add articles, newsletters and tweets
 
-The **Articles**, **Newsletters** and **Tweets** sections collect things read on the web; each appears once it has something in it. Add one by URL:
+The home page is only books. Things read on the web get their own pages: **/articles**, **/newsletters** and **/tweets**, each linked from the top bar once it has something in it. Add one by URL:
 
 ```bash
 bun run clip https://example.com/some-essay --note "Why it's worth keeping" --tags essays,craft
@@ -121,10 +121,10 @@ Notes:
 | --- | --- |
 | `scripts/import.ts` | Goodreads CSV → enriched `data/shelf.json` |
 | `lib/goodreads.ts`, `lib/csv.ts`, `lib/categories.ts` | CSV parsing, Goodreads mapping, keyword categories |
-| `scripts/clip.ts`, `app/components/clippings.tsx` | Clip articles, newsletters and tweets → `data/clippings.json`, and their three sections |
+| `scripts/clip.ts`, `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,newsletters,tweets}/` | Clip articles, newsletters and tweets → `data/clippings.json`, and their pages |
 | `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment (OpenNext) |
 | `app/components/engine/` | The Shelf Engine: the isometric machine animation on the main page |
-| `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, articles, newsletters, tweets, library |
+| `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, library |
 | `app/api/ask/route.ts`, `lib/ai/jev.ts`, `lib/ai/haiku.ts` | Ask the shelf: BM25 pre-filter → Jev ranking → streamed Haiku answer |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login (signed JWT cookie) |
 | `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | EPUB storage (R2 or local), library index, EPUB metadata and text extraction |

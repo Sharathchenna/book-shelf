@@ -1,81 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { CLIP_LABEL } from "@/lib/clippings";
 import { fallbackColor, textOn } from "@/lib/color";
 import type { Clip, ClipKind } from "@/lib/types";
-
-const PAGE_SIZE = 6;
 
 const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const date = (iso: string, format = monthYear) => format.format(new Date(`${iso}T00:00:00Z`));
 
-const SECTIONS: Record<ClipKind, { blurb: (items: Clip[]) => string; list: string; Card: (props: { clip: Clip }) => React.ReactNode }> = {
-  article: {
-    blurb: () => "Essays and long reads from around the web, with notes in the margins.",
-    // Masonry: cards with and without images keep their natural heights.
-    list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid",
-    Card: ArticleCard,
-  },
-  newsletter: {
-    blurb: (items) => {
-      const publications = new Set(items.map((c) => c.source)).size;
-      return `Issues worth keeping from ${publications} ${publications === 1 ? "publication" : "publications"} in the inbox.`;
-    },
-    list: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a]:h-full",
-    Card: NewsletterCard,
-  },
-  tweet: {
-    blurb: () => "Posts that stuck, kept here in case they disappear.",
-    list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid",
-    Card: TweetCard,
-  },
+const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip }) => React.ReactNode }> = {
+  // Masonry: cards with and without images keep their natural heights.
+  article: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: ArticleCard },
+  // An even grid, so the letter-style cards and their postmarks line up.
+  newsletter: { list: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a]:h-full", Card: NewsletterCard },
+  tweet: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: TweetCard },
 };
 
-/** One section per kind of clipping (articles, newsletters, tweets), each with its own card and layout. */
-export function ClipSection({ kind, items }: { kind: ClipKind; items: Clip[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const { blurb, list, Card } = SECTIONS[kind];
-  const label = CLIP_LABEL[kind];
-  const shown = expanded ? items : items.slice(0, PAGE_SIZE);
-
+/** Every clipping of one kind, each with that kind's card. */
+export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
+  const { list, Card } = LAYOUT[kind];
   return (
-    <section id={label.toLowerCase()} aria-labelledby={`${kind}-title`} className="scroll-mt-28">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h2 id={`${kind}-title`} className="font-serif text-4xl">
-            {label}
-            <span className="ml-3 align-middle font-sans text-sm text-muted">{items.length}</span>
-          </h2>
-          <p className="mt-1 text-sm text-muted">{blurb(items)}</p>
-        </div>
-      </div>
-
-      <ul className={`mt-6 ${list}`}>
-        {shown.map((clip) => (
-          <li key={clip.id}>
-            <a
-              href={clip.url}
-              target="_blank"
-              rel="noreferrer"
-              className="glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1"
-            >
-              <Card clip={clip} />
-            </a>
-          </li>
-        ))}
-      </ul>
-
-      {items.length > PAGE_SIZE && (
-        <div className="mt-2 flex justify-center">
-          <button onClick={() => setExpanded((v) => !v)} className="pill">
-            {expanded ? "Show fewer" : `Show all ${items.length} ${label.toLowerCase()}`}
-          </button>
-        </div>
-      )}
-    </section>
+    <ul className={list}>
+      {items.map((clip) => (
+        <li key={clip.id}>
+          <a
+            href={clip.url}
+            target="_blank"
+            rel="noreferrer"
+            className="glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1"
+          >
+            <Card clip={clip} />
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 }
 

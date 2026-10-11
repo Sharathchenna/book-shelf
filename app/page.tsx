@@ -2,9 +2,7 @@ import { hashString } from "@/lib/color";
 import { getStats, readsByYear, shelf } from "@/lib/shelf";
 import type { Item } from "@/lib/types";
 import { shelfConfig } from "@/shelf.config";
-import { CLIP_KINDS, clippings } from "@/lib/clippings";
 import { AskHero, type Suggestion } from "./components/ask-hero";
-import { ClipSection } from "./components/clippings";
 import { ColourShelf } from "./components/colour-shelf";
 import { ShelfEngine } from "./components/engine/shelf-engine";
 import { Footer } from "./components/footer";
@@ -51,7 +49,7 @@ export default function Home() {
 
   return (
     <ShelfProvider items={items}>
-      <TopBar owner={shelfConfig.owner} clipKinds={CLIP_KINDS.filter((k) => clippings.items.some((c) => c.kind === k))} />
+      <TopBar owner={shelfConfig.owner} current="books" />
       <main className="pt-6">
         <SpineRow items={top} />
         <AskHero owner={shelfConfig.owner} suggestions={suggestions(items)} />
@@ -66,14 +64,10 @@ export default function Home() {
             <YearStacks years={readsByYear(items)} />
             <ColourShelf />
           </section>
-          {CLIP_KINDS.map((kind) => {
-            const clips = clippings.items.filter((c) => c.kind === kind);
-            return clips.length > 0 && <ClipSection key={kind} kind={kind} items={clips} />;
-          })}
           <Library />
         </div>
       </main>
-      <Footer owner={shelfConfig.owner} count={items.length} />
+      <Footer owner={shelfConfig.owner} count={items.length} shortcuts />
     </ShelfProvider>
   );
 }
