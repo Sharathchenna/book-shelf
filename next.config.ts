@@ -1,4 +1,8 @@
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
+
+// `next dev` gets the Worker's bindings (the D1 database, as a local copy under .wrangler/).
+if (process.env.NODE_ENV === "development") void initOpenNextCloudflareForDev();
 
 /**
  * The reader renders EPUB content in iframes that must allow scripts (see
@@ -43,8 +47,9 @@ const nextConfig: NextConfig = {
     // (Cloudflare Workers have no project files at runtime).
     turbopackImportTypeBytes: true,
   },
-  cacheComponents: true,
-  partialPrefetching: true,
+  // No cacheComponents / partial prerendering: OpenNext on Workers serves a partially prerendered
+  // page's static shell but never resumes the dynamic part, and the shelf is read from D1 per
+  // request. Pages that read data render per request (they call connection()); the rest stay static.
   turbopack: {
     rules: {
       "*.css": {

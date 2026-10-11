@@ -26,6 +26,19 @@ export function passwordMatches(attempt: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Whether a request is the Worker's own cron (worker.ts), which presents the session secret as a
+ * bearer token. It never leaves the Worker: the cron calls the route in-process.
+ */
+export function fromScheduler(request: Request): boolean {
+  const expected = process.env.SESSION_SECRET;
+  const given = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+  if (!expected || !given) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function startSession() {
   const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   const token = await new SignJWT({ role: "owner" })

@@ -1,7 +1,6 @@
 import { requireOwner } from "@/lib/auth/session";
-import { keys, validId } from "@/lib/library";
+import { putProgress, validId } from "@/lib/library";
 import type { Progress } from "@/lib/library-types";
-import { putJson } from "@/lib/storage";
 
 /** Saves where the owner is in a book (sent, debounced, as they read). */
 export async function PUT(request: Request, ctx: RouteContext<"/api/books/[id]/progress">) {
@@ -25,6 +24,6 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/books/[id]/p
     sectionIndex: Math.max(0, Math.floor(body.sectionIndex)),
     updatedAt: new Date().toISOString(),
   };
-  await putJson(keys.progress(id), progress);
+  await putProgress(id, progress);
   return Response.json({ progress });
 }

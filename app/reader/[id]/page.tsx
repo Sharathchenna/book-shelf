@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { readIndex, validId } from "@/lib/library";
+import { getFile } from "@/lib/library";
 import { PdfReaderView } from "../../components/reader/pdf-reader-view";
 import { ReaderView } from "../../components/reader/reader-view";
 import { OwnerGate } from "../owner-gate";
@@ -26,6 +26,6 @@ async function Reader({ params }: { params: PageProps<"/reader/[id]">["params"] 
 
 /** EPUBs open in the reflowing reader; PDFs keep their pages. Unknown ids get the reader's own error. */
 async function BookView({ id }: { id: string }) {
-  const book = validId(id) ? (await readIndex()).find((b) => b.id === id) : undefined;
+  const book = await getFile(id);
   return book?.format === "pdf" ? <PdfReaderView id={id} /> : <ReaderView id={id} />;
 }

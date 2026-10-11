@@ -4,7 +4,8 @@ import { haikuEnabled, streamText } from "@/lib/ai/haiku";
 import { jevEnabled, rankWithJev, type Ranked } from "@/lib/ai/jev";
 import { answerPrompt, answerSystem, tasteContext } from "@/lib/ai/prompts";
 import { bm25 } from "@/lib/search/bm25";
-import { shelf } from "@/lib/shelf";
+import { getShelf } from "@/lib/data";
+import type { ShelfData } from "@/lib/types";
 import { shelfConfig } from "@/shelf.config";
 
 /** Shelves up to this size are ranked whole; bigger ones are narrowed by BM25 first. */
@@ -13,8 +14,6 @@ const CANDIDATES = 120;
 /** Books shown, and books Haiku is told about. */
 const RESULTS = 24;
 const EXPLAINED = 8;
-
-const byId = new Map(shelf.items.map((i) => [i.id, i]));
 
 // Per-instance safeguards; enough for a personal site. A shared store (KV/Redis) would be needed at scale.
 const RATE = { windowMs: 60_000, max: 20 };
@@ -29,8 +28,9 @@ function rateLimited(ip: string): boolean {
   return recent.length > RATE.max;
 }
 
-async function rank(query: string, mode: "ask" | "next"): Promise<Ranked[]> {
-  const key = `${mode}:${query.toLowerCase()}`;
+async function rank(query: string, mode: "ask" | "next", shelf: ShelfData): Promise<Ranked[]> {
+  // Keyed by the shelf's version too: a sync can change the answer.
+  const key = `${shelf.updatedAt}:${mode}:${query.toLowerCase()}`;
   const cached = rankings.get(key);
   if (cached) return cached;
 
@@ -71,9 +71,11 @@ export async function POST(request: Request) {
   if (rateLimited(ip)) return Response.json({ error: "Too many questions. Try again in a minute." }, { status: 429 });
 
   const started = performance.now();
+  const shelf = await getShelf();
+  const byId = new Map(shelf.items.map((i) => [i.id, i]));
   let ranked: Ranked[];
   try {
-    ranked = await rank(query, mode);
+    ranked = await rank(query, mode, shelf);
   } catch (error) {
     console.error("Jev ranking failed", error);
     const status = error instanceof APIError && error.status === 429 ? 429 : 502;

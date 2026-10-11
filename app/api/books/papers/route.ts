@@ -1,23 +1,24 @@
 import { requireOwner } from "@/lib/auth/session";
-import { clippings } from "@/lib/clippings";
-import { CONTENT_TYPES, keys, readIndex } from "@/lib/library";
+import { getClipping } from "@/lib/data";
+import { CONTENT_TYPES, keys, listFiles } from "@/lib/library";
 import { getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
 /**
  * Puts a clipped paper's free PDF (arXiv, open proceedings) into the library, so "Read" needs no
  * upload. Returns the book id. If the paper isn't in the library yet, the server fetches and stores
  * the PDF, then the browser reads it and calls finalize, exactly as after an upload.
- * The URL comes from data/clippings.json, never from the request.
+ * The URL comes from the stored clipping, never from the request.
  */
 export async function POST(request: Request) {
   const denied = await requireOwner();
   if (denied) return denied;
 
   const { paperId } = (await request.json().catch(() => ({}))) as { paperId?: unknown };
-  const paper = clippings.items.find((c) => c.id === paperId && c.kind === "paper");
+  const clip = typeof paperId === "string" ? await getClipping(paperId) : null;
+  const paper = clip?.kind === "paper" ? clip : undefined;
   if (!paper?.paper?.pdf) return Response.json({ error: "That paper has no free PDF to read." }, { status: 404 });
 
-  const existing = (await readIndex()).find((b) => b.paperId === paper.id);
+  const existing = (await listFiles()).find((b) => b.paperId === paper.id);
   if (existing) return Response.json({ id: existing.id, ready: true });
 
   let bytes: Uint8Array;

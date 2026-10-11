@@ -9,8 +9,6 @@ export type ShelfConfig = {
   siteUrl?: string;
   /** The number in your Goodreads profile URL. `bun run import` syncs your public shelves from it. */
   goodreadsUserId?: string;
-  /** "owner/repo" on GitHub. Lets the "Sync now" button run the Goodreads sync workflow there. */
-  githubRepo?: string;
 };
 
 export const shelfConfig: ShelfConfig = {
@@ -19,5 +17,4 @@ export const shelfConfig: ShelfConfig = {
   links: [],
   siteUrl: "https://read.sharathchenna.com",
   goodreadsUserId: "49386460",
-  githubRepo: "Sharathchenna/book-shelf",
 };

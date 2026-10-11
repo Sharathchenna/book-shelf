@@ -1,89 +1,91 @@
+import "server-only";
+import jpeg from "jpeg-js";
+import { shelfConfig } from "@/shelf.config";
+import { categorize } from "./categories";
+import { getStoredBooks, replaceShelf, type StoredBook } from "./data";
+import { parseGoodreadsRss, STATUS } from "./goodreads";
+import type { Item } from "./types";
+
 /**
- * Builds data/shelf.json from Goodreads.
- *
- *   bun run import                    # your public shelves, via shelf.config.ts → goodreadsUserId
- *   bun run import path/to/export.csv # a Goodreads "Export Library" CSV instead
- *   bun run import --refresh          # look every book up again, not just new ones
- *
- * New books are enriched from Open Library (cover, subjects, year, pages,
- * description) and get a dominant cover colour; books already on the shelf keep
- * what they had. Lookups are cached in .cache/openlibrary. The file is only
- * rewritten when something changed, so a scheduled sync makes no empty commits.
+ * The Goodreads sync: reads the owner's public shelves (RSS), keeps what earlier syncs looked up
+ * on Open Library, looks up new books, and replaces the shelf in D1 when anything changed.
+ * Runs from the Sync button and nightly (worker.ts).
  */
-import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import sharp from "sharp";
-import { shelfConfig } from "../shelf.config";
-import { categorize } from "../lib/categories";
-import { parseGoodreads, parseGoodreadsRss, STATUS } from "../lib/goodreads";
-import type { Item, ShelfData } from "../lib/types";
 
-const CACHE_DIR = ".cache/openlibrary";
-const OUT = "data/shelf.json";
-const CONCURRENCY = 4;
-const HEADERS = { "User-Agent": "book-shelf-importer/0.1 (personal reading shelf)" };
 const FEED_PAGE = 200;
+/** Open Library lookups per sync; a big first import fills in over a few syncs. */
+const MAX_LOOKUPS = 25;
+const CONCURRENCY = 4;
+const HEADERS = { "User-Agent": "book-shelf/0.1 (personal reading shelf)" };
 
-const args = process.argv.slice(2);
-const refresh = args.includes("--refresh");
-const csvPath = args.find((a) => !a.startsWith("--"));
-
-type SearchDoc = {
-  key: string;
-  title: string;
-  cover_i?: number;
-  subject?: string[];
-  first_publish_year?: number;
-  number_of_pages_median?: number;
+export type SyncResult = {
+  books: number;
+  added: string[];
+  removed: string[];
+  /** Books whose details changed (rating, shelf, review…), not counting added ones. */
+  updated: number;
+  /** New books still waiting for an Open Library lookup (done on the next syncs). */
+  pending: number;
+  changed: boolean;
 };
 
-async function main() {
-  const { items, source } = await load();
-  console.log(`Read ${items.length} books from ${source}`);
+export async function syncGoodreads(): Promise<SyncResult> {
+  const user = shelfConfig.goodreadsUserId;
+  if (!user) throw new Error("Set goodreadsUserId in shelf.config.ts.");
 
-  const previous = existsSync(OUT) ? (JSON.parse(await readFile(OUT, "utf8")) as ShelfData) : undefined;
+  const [items, stored] = await Promise.all([fetchShelves(user), getStoredBooks()]);
   // A feed that comes back empty is far more likely a Goodreads hiccup than a deliberately emptied shelf.
-  if (items.length === 0 && previous?.items.length) {
-    throw new Error(`${source} has no books, but ${OUT} has ${previous.items.length}. Leaving it alone.`);
-  }
-  const known = new Map(refresh ? [] : previous?.items.map((i) => [i.id, i]));
+  if (items.length === 0 && stored.length) throw new Error("Goodreads returned no books, so the shelf was left alone.");
+  const before = new Map(stored.map((b) => [b.item.id, b]));
 
-  await mkdir(CACHE_DIR, { recursive: true });
-  const fresh = items.filter((item) => !reuse(item, known.get(item.id)));
-  let done = 0;
-  let matched = 0;
-  await pool(fresh, CONCURRENCY, async (item) => {
-    const goodreadsCover = item.cover;
-    try {
-      if (await enrich(item)) matched++;
-      // Open Library had no cover, so the one from Goodreads stays and needs its colour.
-      if (item.cover && item.cover === goodreadsCover) item.color = (await coverColor(item.cover)) ?? item.color;
-    } catch (error) {
-      console.warn(`  skipped enrichment for "${item.title}": ${(error as Error).message}`);
+  const fresh = items.filter((item) => !before.get(item.id)?.lookedUp);
+  const toLookUp = new Set(fresh.slice(0, MAX_LOOKUPS).map((i) => i.id));
+  await pool(
+    items.filter((i) => toLookUp.has(i.id)),
+    CONCURRENCY,
+    async (item) => {
+      const goodreadsCover = item.cover;
+      try {
+        await enrich(item);
+        // Open Library had no cover, so Goodreads' stays and needs its colour.
+        if (item.cover && item.cover === goodreadsCover) item.color = (await dominantColor(item.cover)) ?? item.color;
+      } catch (error) {
+        console.warn(`Open Library lookup failed for "${item.title}": ${(error as Error).message}`);
+      }
+    },
+  );
+
+  const rows: StoredBook[] = items.map((item) => {
+    const old = before.get(item.id);
+    if (toLookUp.has(item.id)) {
+      if (item.description) item.description = cleanDescription(item.description);
+    } else if (old) {
+      reuse(item, old.item);
+    } else if (item.description) {
+      item.description = cleanDescription(item.description);
     }
-    if (item.description) item.description = cleanDescription(item.description);
-    if (++done % 10 === 0 || done === fresh.length) console.log(`  ${done}/${fresh.length}`);
+    item.category = categorize(item);
+    return { item, lookedUp: toLookUp.has(item.id) || Boolean(old?.lookedUp) };
   });
-  for (const item of items) item.category = categorize(item);
 
-  if (previous && JSON.stringify(previous.items) === JSON.stringify(items)) {
-    console.log(`No changes; ${OUT} left as it was.`);
-    return;
-  }
-  const data: ShelfData = { updatedAt: new Date().toISOString(), items };
-  await writeFile(OUT, JSON.stringify(data, null, 1) + "\n");
-  console.log(`Wrote ${OUT}: ${items.length} books, ${fresh.length} looked up, ${matched} matched on Open Library.`);
+  const ids = new Set(items.map((i) => i.id));
+  const result: SyncResult = {
+    books: items.length,
+    added: items.filter((i) => !before.has(i.id)).map((i) => i.title),
+    removed: stored.filter((b) => !ids.has(b.item.id)).map((b) => b.item.title),
+    updated: rows.filter((r) => before.has(r.item.id) && JSON.stringify(r.item) !== JSON.stringify(before.get(r.item.id)!.item)).length,
+    pending: Math.max(0, fresh.length - toLookUp.size),
+    changed: false,
+  };
+  const sameOrder = stored.length === rows.length && stored.every((b, i) => b.item.id === rows[i].item.id);
+  const sameLookups = rows.every((r) => before.get(r.item.id)?.lookedUp === r.lookedUp);
+  result.changed = !(sameOrder && sameLookups && result.added.length === 0 && result.updated === 0);
+  if (result.changed) await replaceShelf(rows, new Date().toISOString());
+  return result;
 }
 
-async function load(): Promise<{ items: Item[]; source: string }> {
-  if (csvPath) {
-    if (!existsSync(csvPath)) throw new Error(`No file at ${csvPath}.`);
-    return { items: parseGoodreads(await readFile(csvPath, "utf8")), source: csvPath };
-  }
-  const user = shelfConfig.goodreadsUserId;
-  if (!user) throw new Error("Set goodreadsUserId in shelf.config.ts, or pass a Goodreads CSV: bun run import path/to.csv");
-
+/** Every book on the read, currently-reading and to-read shelves. */
+async function fetchShelves(user: string): Promise<Item[]> {
   const items: Item[] = [];
   for (const [shelf, status] of Object.entries(STATUS)) {
     for (let page = 1; ; page++) {
@@ -97,21 +99,30 @@ async function load(): Promise<{ items: Item[]; source: string }> {
       if (batch.length < FEED_PAGE) break;
     }
   }
-  return { items, source: `Goodreads user ${user}` };
+  return items;
 }
 
-/** Carries over what an earlier run looked up, so only new books hit Open Library. */
-function reuse(item: Item, before: Item | undefined): boolean {
-  if (!before) return false;
+/** Carries over what an earlier sync looked up, so only new books hit Open Library. */
+function reuse(item: Item, before: Item) {
   item.openLibraryKey = before.openLibraryKey;
   item.subjects = before.subjects;
   item.cover = before.cover ?? item.cover;
   item.color = before.color;
-  item.description = before.description ?? item.description;
+  item.description = before.description;
   item.year ??= before.year;
   item.pages ??= before.pages;
-  return true;
 }
+
+// ---- Open Library ------------------------------------------------------------------------------
+
+type SearchDoc = {
+  key: string;
+  title: string;
+  cover_i?: number;
+  subject?: string[];
+  first_publish_year?: number;
+  number_of_pages_median?: number;
+};
 
 async function enrich(item: Item): Promise<boolean> {
   const doc = await findOnOpenLibrary(item);
@@ -124,13 +135,13 @@ async function enrich(item: Item): Promise<boolean> {
 
   if (doc.cover_i) {
     item.cover = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
-    const color = await coverColor(`https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`);
+    const color = await dominantColor(`https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`);
     if (color) item.color = color;
   }
 
   const work = await getJson<{ description?: string | { value: string } }>(`https://openlibrary.org${doc.key}.json`);
   const description = typeof work?.description === "string" ? work.description : work?.description?.value;
-  if (description) item.description = cleanDescription(description);
+  if (description) item.description = description;
   return true;
 }
 
@@ -167,9 +178,7 @@ async function findOnOpenLibrary(item: Item): Promise<SearchDoc | undefined> {
   return top?.cover_i ? top : undefined;
 
   async function search(q: string): Promise<SearchDoc[]> {
-    const res = await getJson<{ docs: SearchDoc[] }>(
-      `https://openlibrary.org/search.json?${q}&fields=${fields}&limit=5`,
-    );
+    const res = await getJson<{ docs: SearchDoc[] }>(`https://openlibrary.org/search.json?${q}&fields=${fields}&limit=5`);
     return res?.docs ?? [];
   }
 }
@@ -178,7 +187,8 @@ function normalize(title: string): string {
   return title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
-const NOISE = /^(accessible book|protected daisy|in library|lending library|large type books|open library staff picks|nyt:|new york times|reading level|fiction, general)/i;
+const NOISE =
+  /^(accessible book|protected daisy|in library|lending library|large type books|open library staff picks|nyt:|new york times|reading level|fiction, general)/i;
 
 function cleanSubjects(subjects: string[]): string[] {
   const seen = new Set<string>();
@@ -205,20 +215,21 @@ function cleanDescription(text: string): string {
   return end > 200 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
 }
 
-const coverColor = (url: string) => memo(`color:${url}`, () => dominantColor(url));
-
-/** Average colour of the heaviest colour bucket. */
+/** Average colour of the heaviest colour bucket of a cover (a small JPEG). */
 async function dominantColor(url: string): Promise<string | undefined> {
   const res = await fetchWithRetry(url);
   if (!res.ok) return undefined;
-  const { data } = await sharp(Buffer.from(await res.arrayBuffer()))
-    .resize(24, 36, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  let data: Uint8Array;
+  try {
+    // A pure-JS decoder: Workers can't run native image libraries.
+    ({ data } = jpeg.decode(new Uint8Array(await res.arrayBuffer()), { useTArray: true, maxMemoryUsageInMB: 64 }));
+  } catch {
+    return undefined;
+  }
 
   const buckets = new Map<number, { n: number; r: number; g: number; b: number }>();
-  for (let i = 0; i < data.length; i += 3) {
+  // RGBA; every other pixel is plenty for a cover's main colour.
+  for (let i = 0; i < data.length; i += 8) {
     const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
     const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
     // Favour saturated pixels; near-black and near-white are mostly text and margins.
@@ -237,23 +248,12 @@ async function dominantColor(url: string): Promise<string | undefined> {
 }
 
 async function getJson<T>(url: string): Promise<T | undefined> {
-  return memo(url, async () => {
-    const res = await fetchWithRetry(url);
-    return res.ok ? ((await res.json()) as T) : undefined;
-  });
-}
-
-/** Caches a JSON-serialisable result on disk, keyed by `key`. Failures (throws) are not cached. */
-async function memo<T>(key: string, load: () => Promise<T | undefined>): Promise<T | undefined> {
-  const file = `${CACHE_DIR}/${createHash("sha1").update(key).digest("hex")}.json`;
-  if (existsSync(file)) return JSON.parse(await readFile(file, "utf8")).value as T | undefined;
-  const value = await load();
-  await writeFile(file, JSON.stringify({ key, value: value ?? null }));
-  return value;
+  const res = await fetchWithRetry(url);
+  return res.ok ? ((await res.json()) as T) : undefined;
 }
 
 /** Retries rate limits, server errors and network failures; throws when it gives up. */
-async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
+async function fetchWithRetry(url: string, attempts = 3): Promise<Response> {
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await fetch(url, { headers: HEADERS });
@@ -261,7 +261,7 @@ async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
     } catch {
       // Network hiccup; retry below.
     }
-    await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+    await new Promise((r) => setTimeout(r, 800 * 2 ** i));
   }
   throw new Error(`gave up on ${url}`);
 }
@@ -274,8 +274,3 @@ async function pool<T>(items: T[], size: number, run: (item: T) => Promise<void>
     }),
   );
 }
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});

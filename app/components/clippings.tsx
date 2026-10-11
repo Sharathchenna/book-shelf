@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { fallbackColor, textOn } from "@/lib/color";
 import type { Clip, ClipKind } from "@/lib/types";
-import { useIsOwner } from "./use-owner";
+import { useOwner } from "./use-owner";
 
 const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
@@ -24,12 +25,22 @@ const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip }) => 
 /** Every clipping of one kind, each with that kind's card. */
 export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
   const { list, Card } = LAYOUT[kind];
-  // The owner can open papers with a free PDF in the private reader.
-  const owner = useIsOwner(kind !== "paper");
+  // The owner can remove clippings, and open papers with a free PDF in the reader.
+  const owner = useOwner();
+  const router = useRouter();
+  const remove = async (clip: Clip) => {
+    if (!confirm(`Remove “${clip.title ?? clip.url}”?`)) return;
+    const res = await fetch("/api/clips", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: clip.id }),
+    });
+    if (res.ok) router.refresh();
+  };
   return (
     <ul className={list}>
       {items.map((clip) => (
-        <li key={clip.id} className="relative">
+        <li key={clip.id} className="group relative">
           <a
             href={clip.url}
             target="_blank"
@@ -38,6 +49,18 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
           >
             <Card clip={clip} />
           </a>
+          {owner && (
+            <button
+              onClick={() => void remove(clip)}
+              aria-label={`Remove ${clip.title ?? "this clipping"}`}
+              title="Remove"
+              className="absolute top-3 right-3 grid size-8 place-items-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
+            >
+              <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          )}
           {owner && clip.paper?.pdf && (
             <Link
               href={`/reader/paper/${encodeURIComponent(clip.id)}`}

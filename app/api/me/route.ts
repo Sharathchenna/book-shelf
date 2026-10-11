@@ -1,7 +1,6 @@
 import { isOwner, ownerConfigured } from "@/lib/auth/session";
-import { keys, readIndex, shelfItemFor } from "@/lib/library";
-import type { Progress } from "@/lib/library-types";
-import { getJson } from "@/lib/storage";
+import { getShelf } from "@/lib/data";
+import { allProgress, listFiles, shelfItemFor } from "@/lib/library";
 
 /**
  * Who is looking at the (static) shelf page, and which shelf books have an EPUB or PDF to read.
@@ -10,14 +9,12 @@ import { getJson } from "@/lib/storage";
  */
 export async function GET() {
   const owner = await isOwner();
-  const books = await readIndex().catch(() => []);
-  const library = await Promise.all(
-    books.map(async (book) => ({
-      id: book.id,
-      shelfItemId: shelfItemFor(book),
-      fraction: owner ? ((await getJson<Progress>(keys.progress(book.id)))?.fraction ?? 0) : 0,
-    })),
-  );
+  const [files, { items }, progress] = await Promise.all([listFiles(), getShelf(), owner ? allProgress() : new Map()]);
+  const library = files.map((book) => ({
+    id: book.id,
+    shelfItemId: shelfItemFor(book, items),
+    fraction: progress.get(book.id)?.fraction ?? 0,
+  }));
   return Response.json(
     { owner, loginAvailable: ownerConfigured(), library },
     { headers: { "cache-control": "no-store" } },

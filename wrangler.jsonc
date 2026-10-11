@@ -1,12 +1,23 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Built by `bun run deploy` (OpenNext); don't change `main` or `assets`.
-  "main": ".open-next/worker.js",
+  // worker.ts wraps the OpenNext build (`bun run deploy`) to add the nightly Goodreads sync.
+  "main": "worker.ts",
   "name": "book-shelf",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   // Must match `name`: OpenNext calls back into the worker for some requests.
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "book-shelf" }],
+  // Books, clippings, and the reader's library, progress and notes. Files stay in R2.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "book-shelf",
+      "database_id": "1897f70b-14fe-4b79-8b3a-bd89c0aa61e3",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Goodreads sync, nightly at 02:47 IST.
+  "triggers": { "crons": ["17 21 * * *"] },
   "observability": { "enabled": true }
 }

@@ -2,39 +2,29 @@
 
 A personal bookshelf site: every book you've read, are reading, and mean to read, built from a Goodreads export. Visitors can **ask the shelf** questions in plain language. Books can carry their own EPUB or PDF: anyone sees which ones, and reading asks for your password.
 
-## Add your books
+Everything is managed from the site itself: sign in (footer → **Sign in**) and the top bar gains **Add** and **Sync**. The shelf, clippings, and your reading progress and notes live in a Cloudflare D1 database; book files live in R2.
 
-The shelf syncs from Goodreads. Put the number from your profile URL (`goodreads.com/user/show/49386460-…`) in `shelf.config.ts` as `goodreadsUserId`, keep the profile public, and run:
+## Your books
 
-```bash
-bun run import             # read, currently-reading and to-read, from your shelves' RSS feeds
-bun run import --refresh   # also look up every book again, not just new ones
-bun run import path/to.csv # or a Goodreads "Export Library" CSV instead
-```
+The shelf syncs from Goodreads. Put the number from your profile URL (`goodreads.com/user/show/49386460-…`) in `shelf.config.ts` as `goodreadsUserId` and keep the profile public. The site reads your read, currently-reading and to-read shelves from their RSS feeds:
 
-New books are looked up on Open Library for their cover, subjects, year, pages and description, and get a spine colour from the cover. Books already on the shelf keep what they had, so a sync only fetches what's new. `data/shelf.json` is only rewritten when something changed.
+- **Nightly**, at 02:47 IST (a Cron Trigger on the Worker; see `worker.ts`).
+- **Whenever you press Sync** in the top bar. It shows what changed (books added, updated, removed) and the page updates at once.
 
-**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand after logging a book: sign in and press **Sync** in the top bar (or use the repo's **Actions** tab → **Goodreads sync** → **Run workflow**). The button needs a `GITHUB_SYNC_TOKEN` secret: a fine-grained GitHub token for this repository only, with **Actions: Read and write**. Rate, review or move a book on Goodreads and the shelf follows.
+New books are looked up on Open Library for their cover, subjects, year, pages and description, and get a spine colour from the cover. Books already on the shelf keep what they had, so a sync only fetches what's new; a large first import is looked up 25 books per sync. Rate, review or move a book on Goodreads and the shelf follows.
 
 Edit your name, bio, avatar and links in `shelf.config.ts`.
 
-## Add articles, papers, newsletters and tweets
+## Articles, papers, newsletters and tweets
 
-The home page is only books. Things read on the web get their own pages: **/articles**, **/papers**, **/newsletters** and **/tweets**, each linked from the top bar once it has something in it. Add one by URL:
+The home page is only books. Things read on the web get their own pages: **/articles**, **/papers**, **/newsletters** and **/tweets**, each linked from the top bar once it has something in it.
 
-```bash
-bun run clip https://example.com/some-essay --note "Why it's worth keeping" --tags essays,craft
-bun run clip https://x.com/someone/status/123 https://someone.substack.com/p/issue   # several at once
-bun run clip arxiv:1706.03762 10.1038/nature14539 # papers by arXiv id or DOI
-bun run clip --remove https://example.com/some-essay
-```
+Press **Add**, paste a link (or `arxiv:1706.03762`, or a DOI), and optionally pick the kind and add a note and tags. The site reads the link and the clipping appears straight away. Clipping a link again refreshes it, keeping its saved date. Each card has a remove button while you're signed in.
 
 - **Articles** are described from the page's Open Graph and JSON-LD metadata: title, author, publication, excerpt, image, date and reading time.
-- **Newsletters** are recognised by platform: Substack (including custom domains), beehiiv, Buttondown, Kit, Ghost and a few others. Pass `--kind newsletter` (or `article`) to override.
+- **Newsletters** are recognised by platform: Substack (including custom domains), beehiiv, Buttondown, Kit, Ghost and a few others. Pick the kind yourself to override.
 - **Papers** come from the arXiv API (any arXiv link or `arxiv:<id>`), Crossref (any DOI), or the `citation_*` tags that journals and proceedings sites (NeurIPS, ACL Anthology, PMLR, most publishers) publish for Google Scholar. Semantic Scholar fills in a missing abstract and finds the free arXiv copy of a journal or conference paper. OpenReview blocks scripts, so clip a paper's arXiv link instead.
 - **Tweets** come from X's public embed endpoints and are stored as plain data (text, author, avatar, photos, likes). The site renders them itself, so no X script loads.
-
-Everything lands in `data/clippings.json`, newest first, and can be edited by hand. Clipping a URL again refreshes its metadata but keeps its note, tags and saved date. `--saved 2026-10-11` sets the saved date.
 
 ## Configure
 
@@ -45,7 +35,6 @@ Copy `.env.example` to `.env.local`. Each feature turns on when its keys are set
 | Ask the shelf (Jev ranks the books) | `TYPESAFE_API_KEY` |
 | Short answers, and explain/recap in the reader (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Reading books on the shelf (password) | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
-| "Sync from Goodreads" button | `GITHUB_SYNC_TOKEN` (fine-grained, this repo, Actions read and write) |
 | Book and PDF storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
 Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.
@@ -94,35 +83,46 @@ Every book's card can carry its own EPUB or PDF. Sign in with **Sign in** in the
 
 ```bash
 bun install
+bunx wrangler d1 migrations apply book-shelf --local   # once, and after adding a migration
 bun dev
 ```
+
+`bun dev` uses a local copy of the D1 database (under `.wrangler/`), so it starts empty: sign in and press **Sync**.
 
 ## Deploy to Cloudflare Workers
 
 The site runs on Workers through [OpenNext](https://opennext.js.org/cloudflare) (`@opennextjs/cloudflare`).
 
-1. Set up R2 as above: a Worker has no disk, so the reader needs it. Add your Worker's URL (for example `https://book-shelf.<you>.workers.dev`, or your custom domain) to the bucket's CORS `AllowedOrigins`.
-2. Sign in and add the secrets from the table above, one at a time:
+1. Create the database and its tables, and put the printed `database_id` in `wrangler.jsonc`:
+
+   ```bash
+   bunx wrangler d1 create book-shelf
+   bunx wrangler d1 migrations apply book-shelf --remote
+   ```
+
+2. Set up R2 as above: a Worker has no disk, so the reader needs it. Add your Worker's URL (for example `https://book-shelf.<you>.workers.dev`, or your custom domain) to the bucket's CORS `AllowedOrigins`.
+3. Sign in and add the secrets from the table above, one at a time:
 
    ```bash
    bunx wrangler login
    bunx wrangler secret put OWNER_PASSWORD   # then SESSION_SECRET, TYPESAFE_API_KEY, ANTHROPIC_API_KEY, R2_*
    ```
 
-3. Deploy:
+4. Deploy:
 
    ```bash
    bun run deploy
    ```
 
-4. Set `siteUrl` in `shelf.config.ts` to the deployed URL, so link previews work, then deploy again.
+5. Set `siteUrl` in `shelf.config.ts` to the deployed URL, so link previews work, then deploy again.
 
 To run the real Workers runtime locally first, copy `.dev.vars.example` to `.dev.vars`, fill it in, and run `bun run preview`.
 
 Notes:
 
-- **Data is baked in.** `data/shelf.json` and `data/clippings.json` are part of the build, so redeploy after `bun run import` or `bun run clip` (pushing to `main` does it).
-- **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: pages are prerendered, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan. PDFs are read in the browser, so they cost the Worker almost nothing.
+- **Database changes.** Schema changes are SQL files in `migrations/`; apply them with `bunx wrangler d1 migrations apply book-shelf --remote` before deploying code that needs them. D1 keeps 30 days of point-in-time restore (`wrangler d1 time-travel`).
+- **Rendering.** Pages that show the shelf or clippings render per request from D1, so changes show at once. Cache Components (partial prerendering) is off: OpenNext on Workers serves a partially prerendered page's static shell without resuming its dynamic part.
+- **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: a page is a few small D1 queries and a render, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan. PDFs are read in the browser, so they cost the Worker almost nothing.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's new `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
 - **`proxy.ts`** runs on OpenNext's Node.js middleware support, which it labels experimental. It only does the optimistic redirect from a book (`/reader/<id>`) to `/login`; the real check happens in every reader page and API route, so the site stays protected if it misbehaves.
 
@@ -130,16 +130,16 @@ Notes:
 
 | Path | What it is |
 | --- | --- |
-| `scripts/import.ts` | Goodreads feeds (or CSV) → enriched `data/shelf.json` |
-| `.github/workflows/goodreads-sync.yml` | Nightly import, committed and deployed |
-| `lib/goodreads.ts`, `lib/csv.ts`, `lib/categories.ts` | Goodreads RSS and CSV parsing, keyword categories |
-| `scripts/clip.ts`, `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,papers,newsletters,tweets}/` | Clip articles, papers, newsletters and tweets → `data/clippings.json`, and their pages |
-| `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment (OpenNext) |
+| `migrations/`, `lib/db.ts`, `lib/data.ts`, `lib/library.ts` | The D1 database: schema, and the shelf, clippings, files, progress and notes |
+| `lib/sync.ts`, `lib/goodreads.ts`, `lib/categories.ts`, `app/api/sync/` | Goodreads sync (RSS → Open Library → D1), keyword categories |
+| `lib/clip.ts`, `app/api/clips/`, `app/components/add-clip.tsx` | Clipping links from the site |
+| `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,papers,newsletters,tweets}/` | The clipping pages |
+| `worker.ts`, `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment (OpenNext), with the nightly sync |
 | `app/components/engine/` | The Shelf Engine: the isometric machine animation on the main page |
 | `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, library |
 | `app/api/ask/route.ts`, `lib/ai/jev.ts`, `lib/ai/haiku.ts` | Ask the shelf: BM25 pre-filter → Jev ranking → streamed Haiku answer |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login (signed JWT cookie) |
-| `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book storage (R2 or local), library index, EPUB parsing, PDF finalize and paper import |
+| `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2 or local), EPUB parsing, PDF finalize and paper import |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
 | `app/reader/`, `app/components/reader/` | The readers: EPUBs (foliate-js), PDFs (pdf.js, `pdf-reader-view.tsx`, `pdf.ts`), panels and AI cards |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain and recap, using only text before the reader's position |

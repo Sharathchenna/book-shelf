@@ -30,5 +30,12 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Wrangler's generated types include the whole Workers runtime, which clashes with the DOM
+    // types the client code uses. types/cloudflare.d.ts declares the bindings this app reads.
+    "cloudflare-env.d.ts",
+    // Bundled by Wrangler, after the OpenNext build generates what it imports.
+    "worker.ts"
+  ]
 }

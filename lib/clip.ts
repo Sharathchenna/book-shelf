@@ -1,25 +1,15 @@
-/**
- * Adds articles, papers, newsletter issues and tweets to data/clippings.json.
- *
- *   bun run clip <url> [<url> ...] [--note "Why it's worth keeping"] [--tags design,essays]
- *                [--kind article|paper|newsletter|tweet] [--saved 2026-10-11]
- *   bun run clip arxiv:1706.03762 10.1038/nature14539
- *   bun run clip --remove <url>
- *
- * Articles are described from their Open Graph and JSON-LD metadata, newsletters are recognised
- * by their platform (Substack, Buttondown, beehiiv, ...), and tweets are fetched from X's public
- * embed endpoints and stored as plain data, so the site renders them without X's scripts.
- * Papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that journals and
- * proceedings sites publish for Google Scholar.
- * Adding a URL that is already clipped refreshes it, keeping its note, tags and saved date
- * unless new ones are given.
- */
+import "server-only";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import type { Clip, ClipKind, ClippingsData } from "../lib/types";
+import type { Clip, ClipKind } from "./types";
 
-const OUT = "data/clippings.json";
+/**
+ * Clipping a link: articles are described from their Open Graph and JSON-LD metadata, newsletters
+ * are recognised by their platform (Substack, Buttondown, beehiiv, ...), tweets come from X's
+ * public embed endpoints and are stored as plain data (so the site renders them without X's
+ * scripts), and papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that
+ * journals and proceedings sites publish for Google Scholar.
+ */
+
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; book-shelf-clipper/0.1; personal reading shelf)",
   Accept: "text/html,application/xhtml+xml",
@@ -42,82 +32,42 @@ const NEWSLETTER_HOSTS = [
 /** Substack and beehiiv on custom domains still load their own assets. (Not signup forms: blogs embed those too.) */
 const NEWSLETTER_MARKERS = /substackcdn\.com|media\.beehiiv\.com/;
 
-type Options = { note?: string; tags?: string[]; kind?: ClipKind; saved?: string; remove: boolean };
+export type ClipOptions = { kind?: ClipKind; note?: string; tags?: string[] };
 
-async function main() {
-  const { urls, options } = parseArgs(process.argv.slice(2));
-  if (urls.length === 0) {
-    console.log('Usage: bun run clip <url> [<url> ...] [--note "..."] [--tags a,b] [--kind article|paper|newsletter|tweet]');
-    process.exit(1);
-  }
+/**
+ * Fetches and describes a link (or "arxiv:<id>", or a bare DOI). Clipping one that's already
+ * there refreshes its details but keeps its saved date, and its note and tags unless new ones
+ * are given. Throws with a readable reason when the link can't be clipped.
+ */
+export async function clipLink(input: string, options: ClipOptions, existing?: Clip | null): Promise<Clip> {
+  const url = expand(input.trim());
+  if (!/^https?:\/\//i.test(url)) throw new Error("That doesn't look like a link.");
+  const fetched = tweetId(url)
+    ? await fetchTweet(url)
+    : arxivId(url)
+      ? await fetchArxiv(arxivId(url)!)
+      : doiOf(url)
+        ? await fetchCrossref(doiOf(url)!)
+        : await fetchPage(url, options.kind);
+  if (fetched.paper) await fillFromSemanticScholar(fetched);
 
-  const data: ClippingsData = existsSync(OUT) ? JSON.parse(await readFile(OUT, "utf8")) : { items: [] };
-
-  for (const url of urls) {
-    const id = clipId(url);
-    const existing = data.items.find((c) => c.id === id || clipId(c.url) === id);
-
-    if (options.remove) {
-      data.items = data.items.filter((c) => c !== existing);
-      console.log(existing ? `Removed ${existing.title ?? existing.url}` : `Not clipped: ${url}`);
-      continue;
-    }
-
-    try {
-      const fetched = tweetId(url)
-        ? await fetchTweet(url)
-        : arxivId(url)
-          ? await fetchArxiv(arxivId(url)!)
-          : doiOf(url)
-            ? await fetchCrossref(doiOf(url)!)
-            : await fetchPage(url, options.kind);
-      if (fetched.paper) await fillFromSemanticScholar(fetched);
-      const clip: Clip = {
-        ...fetched,
-        id: existing?.id ?? id,
-        kind: options.kind ?? fetched.kind,
-        saved: options.saved ?? existing?.saved ?? new Date().toISOString().slice(0, 10),
-        note: options.note ?? existing?.note,
-        tags: options.tags ?? existing?.tags ?? [],
-      };
-      if (!clip.note) delete clip.note;
-      data.items = [clip, ...data.items.filter((c) => c !== existing)];
-      const label = clip.kind === "tweet" ? `@${clip.tweet?.handle}: ${clip.tweet?.text.slice(0, 60)}` : clip.title;
-      console.log(`${existing ? "Refreshed" : "Clipped"} ${clip.kind}: ${label}`);
-    } catch (error) {
-      console.warn(`  could not clip ${url}: ${(error as Error).message}`);
-    }
-  }
-
-  data.items.sort((a, b) => b.saved.localeCompare(a.saved));
-  await writeFile(OUT, JSON.stringify(data, null, 1) + "\n");
-  console.log(`Wrote ${OUT}: ${data.items.length} clippings.`);
-}
-
-function parseArgs(args: string[]): { urls: string[]; options: Options } {
-  const urls: string[] = [];
-  const options: Options = { remove: false };
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--note") options.note = args[++i];
-    else if (arg === "--tags")
-      options.tags = args[++i]
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-    else if (arg === "--kind") options.kind = args[++i] as ClipKind;
-    else if (arg === "--saved") options.saved = args[++i];
-    else if (arg === "--remove") options.remove = true;
-    else urls.push(expand(arg));
-  }
-  return { urls, options };
+  const clip: Clip = {
+    ...fetched,
+    id: existing?.id ?? clipId(url),
+    kind: options.kind ?? fetched.kind,
+    saved: existing?.saved ?? new Date().toISOString().slice(0, 10),
+    note: options.note?.trim() || existing?.note,
+    tags: options.tags ?? existing?.tags ?? [],
+  };
+  if (!clip.note) delete clip.note;
+  return clip;
 }
 
 /**
  * Shorthands: "arxiv:1706.03762" and bare DOIs ("10.1038/nature14539") become URLs, and
  * arXiv's own DOIs (10.48550/arXiv.…) become arXiv links, so a paper has one id however it's clipped.
  */
-function expand(arg: string): string {
+export function expand(arg: string): string {
   const doi = arg.match(/^(?:https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/.+)$/i)?.[1];
   const arxiv = arg.match(/^arxiv:(.+)$/i)?.[1] ?? doi?.match(/^10\.48550\/arxiv\.(.+)$/i)?.[1];
   if (arxiv) return `https://arxiv.org/abs/${arxiv}`;
@@ -126,7 +76,7 @@ function expand(arg: string): string {
 }
 
 /** Stable id from the URL without tracking parameters, fragment or trailing slash. */
-function clipId(url: string): string {
+export function clipId(url: string): string {
   const tweet = tweetId(url);
   if (tweet) return `tweet-${tweet}`;
   const arxiv = arxivId(url);
@@ -487,5 +437,3 @@ function decodeEntities(s: string): string {
       : (named[e.toLowerCase()] ?? m),
   );
 }
-
-main();

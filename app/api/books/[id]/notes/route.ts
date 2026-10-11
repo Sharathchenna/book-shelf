@@ -1,7 +1,6 @@
 import { requireOwner } from "@/lib/auth/session";
-import { keys, validId } from "@/lib/library";
+import { putNotes, validId } from "@/lib/library";
 import type { Highlight, HighlightColor } from "@/lib/library-types";
-import { putJson } from "@/lib/storage";
 
 const COLORS = new Set<HighlightColor>(["yellow", "green", "blue", "pink"]);
 
@@ -38,6 +37,6 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/books/[id]/n
       createdAt: typeof n.createdAt === "string" ? n.createdAt : new Date().toISOString(),
     });
   }
-  await putJson(keys.notes(id), notes);
+  await putNotes(id, notes);
   return Response.json({ notes });
 }

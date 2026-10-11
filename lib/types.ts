@@ -38,7 +38,7 @@ export type ShelfData = {
 
 export type ClipKind = "article" | "paper" | "newsletter" | "tweet";
 
-/** Something read on the web: an article, a paper, a newsletter issue or a post. Added with `bun run clip <url>`. */
+/** Something read on the web: an article, a paper, a newsletter issue or a post. Added with the site's Add button. */
 export type Clip = {
   id: string;
   kind: ClipKind;

@@ -1,5 +1,4 @@
 import { fallbackColor, hashString } from "./color";
-import { parseCsv } from "./csv";
 import type { Item, Status } from "./types";
 
 export const STATUS: Record<string, Status> = {
@@ -8,7 +7,7 @@ export const STATUS: Record<string, Status> = {
   "to-read": "to-read",
 };
 
-/** What Goodreads knows about a book on someone's shelf, from either the CSV export or the RSS feed. */
+/** What Goodreads knows about a book on someone's shelf, from its RSS feed. */
 type Shelved = {
   goodreadsId?: string;
   title: string;
@@ -56,34 +55,6 @@ function toItem(book: Shelved): Item {
   };
 }
 
-/** Turns a Goodreads "Export Library" CSV into shelf items (not yet enriched). */
-export function parseGoodreads(csv: string): Item[] {
-  const rows = parseCsv(csv);
-  if (rows.length && !("Title" in rows[0] && "Author" in rows[0])) {
-    throw new Error("This does not look like a Goodreads export: it has no Title and Author columns.");
-  }
-
-  return rows
-    .filter((r) => r.Title?.trim())
-    .map((r) =>
-      toItem({
-        goodreadsId: r["Book Id"]?.trim() || undefined,
-        title: r.Title,
-        author: r.Author,
-        year: int(r["Original Publication Year"]) ?? int(r["Year Published"]),
-        pages: int(r["Number of Pages"]),
-        format: r.Binding?.trim() || undefined,
-        status: STATUS[r["Exclusive Shelf"]?.trim()] ?? "read",
-        rating: int(r["My Rating"]),
-        dateRead: slashDate(r["Date Read"]),
-        dateAdded: slashDate(r["Date Added"]),
-        review: text(r["My Review"]),
-        shelves: (r.Bookshelves ?? "").split(","),
-        isbn: isbn(r.ISBN13) ?? isbn(r.ISBN),
-      }),
-    );
-}
-
 /**
  * Turns one page of a shelf's RSS feed (goodreads.com/review/list_rss/<user>?shelf=<shelf>)
  * into shelf items (not yet enriched). The feed is per exclusive shelf, so the caller passes its status.
@@ -124,12 +95,6 @@ function splitSeries(raw: string): { title: string; series?: string } {
 function int(s: string | undefined): number | undefined {
   const n = parseInt(s ?? "", 10);
   return Number.isFinite(n) ? n : undefined;
-}
-
-/** The CSV writes dates as YYYY/MM/DD. */
-function slashDate(s: string | undefined): string | undefined {
-  const m = s?.trim().match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : undefined;
 }
 
 /** The feed writes dates like "Wed, 25 Nov 2015 01:18:44 -0800"; the calendar day as written is the one meant. */

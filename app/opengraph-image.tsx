@@ -2,7 +2,8 @@ import { ImageResponse } from "next/og";
 import frauncesItalic from "@/assets/fonts/Fraunces-400-italic.woff" with { type: "bytes" };
 import fraunces from "@/assets/fonts/Fraunces-400-normal.woff" with { type: "bytes" };
 import { hashString } from "@/lib/color";
-import { getStats, shelf } from "@/lib/shelf";
+import { getShelf } from "@/lib/data";
+import { getStats } from "@/lib/shelf";
 import { shelfConfig } from "@/shelf.config";
 
 export const alt = `${shelfConfig.owner}'s Shelf`;
@@ -15,6 +16,7 @@ export const contentType = "image/png";
 
 /** Link preview: a row of the shelf's real spine colours above the title and a few stats. */
 export default async function Image() {
+  const shelf = await getShelf();
   const stats = getStats(shelf.items);
   const spines = shelf.items.toSorted((a, b) => hashString(a.id) - hashString(b.id)).slice(0, 34);
 

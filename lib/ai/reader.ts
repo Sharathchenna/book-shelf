@@ -1,5 +1,5 @@
 import "server-only";
-import { keys, readIndex, validId } from "../library";
+import { getFile, keys } from "../library";
 import type { LibraryBook } from "../library-types";
 import { getJson } from "../storage";
 
@@ -15,8 +15,7 @@ export async function textSoFar(
   sectionFraction: number,
   maxChars: number,
 ): Promise<{ book: LibraryBook; text: string; truncated: boolean } | null> {
-  if (!validId(bookId)) return null;
-  const book = (await readIndex()).find((b) => b.id === bookId);
+  const book = await getFile(bookId);
   const sections = await getJson<string[]>(keys.text(bookId));
   if (!book || !sections) return null;
 

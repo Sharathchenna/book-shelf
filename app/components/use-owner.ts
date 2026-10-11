@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOptionalShelf } from "./shelf-provider";
 
 export type Me = { owner: boolean; books: number };
 
@@ -30,3 +31,10 @@ export function useMe(skip = false): Me | null {
 }
 
 export const useIsOwner = (skip = false) => useMe(skip)?.owner ?? false;
+
+/** Whether the signed-in owner is here: from the shelf provider on the home page, else from /api/me. */
+export function useOwner(): boolean {
+  const shelf = useOptionalShelf();
+  const me = useMe(Boolean(shelf));
+  return Boolean(shelf ? shelf.library?.owner : me?.owner);
+}
