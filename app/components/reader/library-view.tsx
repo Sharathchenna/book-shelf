@@ -36,7 +36,8 @@ async function uploadBook(file: File, onProgress: (patch: Partial<Upload>) => vo
     xhr.setRequestHeader("content-type", started.contentType ?? "application/epub+zip");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress({ progress: e.loaded / e.total });
     xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status}).`)));
-    xhr.onerror = () => reject(new Error("Upload failed. If you use R2, check the bucket's CORS settings."));
+    // R2 sends its error replies without CORS headers, so any rejection looks like a network error here.
+    xhr.onerror = () => reject(new Error("Storage refused the upload. Check the R2 keys and the bucket's CORS settings."));
     xhr.send(file);
   });
 

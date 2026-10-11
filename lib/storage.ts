@@ -42,6 +42,10 @@ class R2Storage implements Storage {
       accessKeyId: process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
+    // Newer AWS SDKs add CRC32 checksums by default. In a presigned upload URL that checksum is of
+    // an empty body, so R2 rejects the real file. Only send checksums where the API requires them.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
   private bucket = process.env.R2_BUCKET!;
 
