@@ -1,5 +1,5 @@
 import { requireOwner } from "@/lib/auth/session";
-import { getShelf } from "@/lib/data";
+import { getClipping, getShelf } from "@/lib/data";
 import { getFile, getNotes, getProgress, keys, putFile, removeFile, shelfItemFor } from "@/lib/library";
 import { getStorage } from "@/lib/storage";
 
@@ -11,14 +11,22 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/books/[id]"
   const book = await getFile(id);
   if (!book) return Response.json({ error: "Unknown book." }, { status: 404 });
 
-  const [fileUrl, progress, notes, { items }] = await Promise.all([
+  const [fileUrl, progress, notes, { items }, paper] = await Promise.all([
     getStorage().downloadUrl(keys.file(book)),
     getProgress(id),
     getNotes(id),
     getShelf(),
+    book.paperId ? getClipping(book.paperId) : null,
   ]);
   return Response.json(
-    { book: { ...book, shelfItemId: shelfItemFor(book, items) }, fileUrl, progress, notes },
+    {
+      book: { ...book, shelfItemId: shelfItemFor(book, items) },
+      fileUrl,
+      progress,
+      notes,
+      // A paper read as an ebook keeps its original PDF a click away.
+      original: paper?.paper?.pdf,
+    },
     { headers: { "cache-control": "no-store" } },
   );
 }

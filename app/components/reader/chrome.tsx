@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import type { Highlight, HighlightColor, LibraryBook } from "@/lib/library-types";
 import { HIGHLIGHT_HEX } from "./foliate";
 
@@ -31,6 +32,7 @@ export function SelectionPopover({
   onHighlight,
   onSaveNote,
   onExplain,
+  onAsk,
   onCopy,
   onRemove,
 }: {
@@ -41,6 +43,8 @@ export function SelectionPopover({
   onHighlight: (color: HighlightColor) => void;
   onSaveNote: (text: string) => void;
   onExplain: () => void;
+  /** Opens the chat with this passage quoted. */
+  onAsk?: () => void;
   onCopy: () => void;
   onRemove?: () => void;
 }) {
@@ -101,7 +105,8 @@ export function SelectionPopover({
           <PopButton onClick={onExplain} accent>
             Explain
           </PopButton>
-          {onRemove ? <PopButton onClick={onRemove}>Remove</PopButton> : <PopButton onClick={onCopy}>Copy</PopButton>}
+          {onAsk && <PopButton onClick={onAsk}>Ask</PopButton>}
+          {onRemove ? <PopButton onClick={onRemove}>Remove</PopButton> : !onAsk && <PopButton onClick={onCopy}>Copy</PopButton>}
         </div>
       )}
     </div>
@@ -168,5 +173,31 @@ export function OpeningBook({ label = "Opening your book…" }: { label?: string
         <p className="text-sm text-muted">{label}</p>
       </div>
     </div>
+  );
+}
+
+const WIDE = "(min-width: 1024px)";
+
+/** Whether the chat sits beside the page (wide screens) rather than over it. */
+export function useWideScreen(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = matchMedia(WIDE);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => matchMedia(WIDE).matches,
+    () => false,
+  );
+}
+
+/** Room the open chat takes on the right of a wide screen: its width plus the gaps around it. */
+export const CHAT_SPACE = "27.5rem";
+
+export function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden>
+      <path d="M5 5h14v10H10l-4 4v-4H5z" />
+    </svg>
   );
 }

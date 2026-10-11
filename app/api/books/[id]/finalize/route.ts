@@ -26,10 +26,10 @@ export async function POST(request: Request, ctx: RouteContext<"/api/books/[id]/
   const { items } = await getShelf();
   // Added from a book's card: it belongs to that book, whatever the file's own metadata says.
   const shelfItemId = items.some((i) => i.id === body.shelfItemId) ? (body.shelfItemId as string) : undefined;
-  return body.format === "pdf" ? finalizePdf(id, body, shelfItemId, items) : finalizeEpub(id, shelfItemId, items);
+  return body.format === "pdf" ? finalizePdf(id, body, shelfItemId, items) : finalizeEpub(id, body, shelfItemId, items);
 }
 
-async function finalizeEpub(id: string, shelfItemId: string | undefined, items: Item[]) {
+async function finalizeEpub(id: string, body: Record<string, unknown>, shelfItemId: string | undefined, items: Item[]) {
   const storage = getStorage();
   const key = keys.file({ id, format: "epub" });
   const bytes = await storage.getBytes(key);
@@ -54,12 +54,17 @@ async function finalizeEpub(id: string, shelfItemId: string | undefined, items: 
   }
   await putJson(keys.text(id), parsed.sections.map((s) => s.text));
 
+  // An arXiv paper converted to an EPUB in the browser (see arxiv-epub.ts).
+  const clip = typeof body.paperId === "string" ? await getClipping(body.paperId) : null;
+  const paper = clip?.kind === "paper" ? clip : undefined;
+
   return addToIndex({
     id,
     format: "epub",
-    title: parsed.title,
-    author: parsed.author,
-    shelfItemId: shelfItemId ?? matchShelfItem(parsed.title, parsed.author, items),
+    title: paper?.title ?? parsed.title,
+    author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : parsed.author,
+    paperId: paper?.id,
+    shelfItemId: paper ? undefined : (shelfItemId ?? matchShelfItem(parsed.title, parsed.author, items)),
     coverKey,
     sections: parsed.sections.map((s) => ({ title: s.title, chars: s.text.length })),
     totalChars: parsed.sections.reduce((sum, s) => sum + s.text.length, 0),

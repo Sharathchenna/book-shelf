@@ -13,12 +13,26 @@ export async function POST(request: Request) {
   const denied = await requireOwner();
   if (denied) return denied;
 
-  const { paperId } = (await request.json().catch(() => ({}))) as { paperId?: unknown };
+  const { paperId, format } = (await request.json().catch(() => ({}))) as { paperId?: unknown; format?: unknown };
   const clip = typeof paperId === "string" ? await getClipping(paperId) : null;
   const paper = clip?.kind === "paper" ? clip : undefined;
   if (!paper?.paper?.pdf) return Response.json({ error: "That paper has no free PDF to read." }, { status: 404 });
 
-  const existing = (await listFiles()).find((b) => b.paperId === paper.id);
+  const files = (await listFiles()).filter((b) => b.paperId === paper.id);
+  const ebook = files.find((b) => b.format === "epub");
+  if (ebook) return Response.json({ id: ebook.id, ready: true });
+  // arXiv papers read best as ebooks: the browser builds one from arXiv's HTML version (falling
+  // back to the PDF when there's none), replacing a PDF copy added before.
+  if (format !== "pdf" && paper.paper.arxiv) {
+    return Response.json({
+      build: "epub",
+      arxiv: paper.paper.arxiv,
+      title: paper.title,
+      authors: paper.paper.authors,
+      replaces: files.map((b) => b.id),
+    });
+  }
+  const existing = files[0];
   if (existing) return Response.json({ id: existing.id, ready: true });
 
   let bytes: Uint8Array;

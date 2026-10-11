@@ -4,7 +4,8 @@ import Link from "next/link";
 import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { AiCard, useAiStream } from "./ai-card";
-import { backHref, BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
+import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
+import { backHref, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
 import { Drawer, NotesPanel, TocPanel } from "./panels";
 import { flatOutline, loadPdfjs, openPdf, outline, pageText, sectionAt, toBase64Jpeg, type PDFDocumentProxy } from "./pdf";
@@ -124,6 +125,11 @@ export function PdfReaderView({ id }: { id: string }) {
   const [scrub, setScrub] = useState<number | null>(null);
   const { ai, run: runAi, close: closeAi } = useAiStream();
   const [explained, setExplained] = useState<PdfSelected | null>(null);
+  const [chat, setChat] = useState(false);
+  const [chatQuote, setChatQuote] = useState<ChatQuote | null>(null);
+  const wide = useWideScreen();
+  /** On a wide screen the open chat sits beside the pages, which gives it room. */
+  const besideChat = chat && wide ? CHAT_SPACE : undefined;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pending = useRef<Progress | null>(null);
@@ -141,7 +147,7 @@ export function PdfReaderView({ id }: { id: string }) {
   const look = PAGE_LOOK[settings.theme];
   const theme = THEMES[settings.theme];
 
-  const pinned = panel !== null || selected !== null || ai !== null || offerRecap || status !== "ready";
+  const pinned = panel !== null || selected !== null || ai !== null || offerRecap || chat || status !== "ready";
   // Bars stay visible while a panel, popover or AI card is open.
   const showChrome = chrome || pinned;
 
@@ -309,6 +315,7 @@ export function PdfReaderView({ id }: { id: string }) {
       ArrowLeft: () => goToPage(page - 1),
       ArrowRight: () => goToPage(page + 1),
       t: () => setPanel((p) => (p === "toc" ? null : "toc")),
+      c: () => setChat((c) => !c),
       n: () => setPanel((p) => (p === "notes" ? null : "notes")),
       "/": () => setPanel("search"),
       a: () => setPanel((p) => (p === "settings" ? null : "settings")),
@@ -320,7 +327,8 @@ export function PdfReaderView({ id }: { id: string }) {
       Escape: () => {
         if (selected) setSelected(null);
         else if (ai) closeAi();
-        else setPanel(null);
+        else if (panel) setPanel(null);
+        else setChat(false);
       },
     };
     const action = keys[e.key];
@@ -509,7 +517,7 @@ export function PdfReaderView({ id }: { id: string }) {
       className="fixed inset-0 overflow-hidden text-fg"
       style={{ background: theme.bg, color: theme.fg }}
     >
-      <div ref={scroller} className="absolute inset-0 overflow-auto overscroll-contain">
+      <div ref={scroller} className="absolute inset-0 overflow-auto overscroll-contain" style={{ right: besideChat }}>
         <div
           className="flex flex-col items-center gap-4 px-3 pt-[72px] pb-24"
           style={{ opacity: status === "ready" ? 1 : 0, transition: "opacity .5s ease", minWidth: "fit-content" }}
@@ -552,6 +560,7 @@ export function PdfReaderView({ id }: { id: string }) {
         className={`reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
           showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
         }`}
+        style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
@@ -573,6 +582,9 @@ export function PdfReaderView({ id }: { id: string }) {
         <BarButton label="Notes (N)" active={panel === "notes"} onClick={() => setPanel(panel === "notes" ? null : "notes")}>
           <Icon d="M6 4h12v16l-6-4-6 4z" />
         </BarButton>
+        <BarButton label="Chat (C)" active={chat} onClick={() => setChat((c) => !c)}>
+          <ChatIcon />
+        </BarButton>
         <BarButton label="View: theme and zoom (A)" active={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}>
           <span className="font-serif text-[15px] leading-none">Aa</span>
         </BarButton>
@@ -583,6 +595,7 @@ export function PdfReaderView({ id }: { id: string }) {
         className={`fixed inset-x-3 bottom-3 z-40 transition-all duration-300 ${
           showChrome ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"
         }`}
+        style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <div className="reader-surface mx-auto flex max-w-3xl items-center gap-3 rounded-full px-4 py-2">
@@ -689,6 +702,12 @@ export function PdfReaderView({ id }: { id: string }) {
               setSelected(null);
             }}
             onExplain={() => explain(selected)}
+            onAsk={() => {
+              setChatQuote({ text: selected.text, image: cropSelection(selected.page, selected.rects) });
+              setChat(true);
+              window.getSelection()?.removeAllRanges();
+              setSelected(null);
+            }}
             onCopy={() => {
               void navigator.clipboard.writeText(selected.text);
               setSelected(null);
@@ -714,6 +733,7 @@ export function PdfReaderView({ id }: { id: string }) {
         <div data-reader-ui>
           <AiCard
             ai={ai}
+            right={besideChat}
             onClose={closeAi}
             onSaveNote={
               ai.kind === "explain" && explained
@@ -725,6 +745,30 @@ export function PdfReaderView({ id }: { id: string }) {
             }
           />
         </div>
+      )}
+
+      {chat && (
+        <ChatPanel
+          key={id}
+          bookId={id}
+          paper={Boolean(book?.paperId)}
+          onClose={() => setChat(false)}
+          getPosition={() => {
+            const el = scroller.current;
+            const current = pageEls()[page - 1];
+            const seen = el && current ? (el.scrollTop + el.clientHeight - current.offsetTop) / current.offsetHeight : 1;
+            return { sectionIndex: page - 1, sectionFraction: Math.min(1, Math.max(0, seen)) };
+          }}
+          quote={chatQuote}
+          onQuoteUsed={() => setChatQuote(null)}
+          onCite={(cite: Cite) => {
+            if (cite.page) goToPage(cite.page);
+            else if (cite.section) {
+              const entry = flat.find((e) => e.label.startsWith(`${cite.section} `) || e.label === cite.section);
+              if (entry) goToPage(entry.page);
+            }
+          }}
+        />
       )}
     </div>
   );

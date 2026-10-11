@@ -38,6 +38,9 @@ function htmlToText(html: string): string {
   return decodeEntities(
     html
       .replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, "")
+      // Equations as their LaTeX (papers converted from arXiv carry it), not their rendered glyphs.
+      .replace(/<math\b[^>]*\balttext\s*=\s*"([^"]*)"[^>]*>[\s\S]*?<\/math>/gi, (_, tex: string) => ` $${tex}$ `)
+      .replace(/<annotation(-xml)?\b[\s\S]*?<\/annotation(-xml)?>/gi, "")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/(p|div|h[1-6]|li|blockquote|section|tr|dt|dd)>/gi, "\n\n")
       .replace(/<[^>]+>/g, ""),

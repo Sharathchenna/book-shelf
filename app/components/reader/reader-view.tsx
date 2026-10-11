@@ -16,7 +16,8 @@ import {
   type ReaderSettings,
   type TocItem,
 } from "./foliate";
-import { backHref, BarButton, Icon, OpeningBook, SelectionPopover, type Selected } from "./chrome";
+import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
+import { backHref, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { Drawer, NotesPanel, SearchPanel, SettingsPanel, TocPanel } from "./panels";
 
 const SETTINGS_KEY = "reader-settings";
@@ -77,6 +78,13 @@ export function ReaderView({ id }: { id: string }) {
   const [offerRecap, setOfferRecap] = useState(false);
   const [scrub, setScrub] = useState<number | null>(null);
   const { ai, run: runAi, close: closeAi } = useAiStream();
+  const [chat, setChat] = useState(false);
+  /** A paper's original PDF. */
+  const [original, setOriginal] = useState<string | null>(null);
+  const [chatQuote, setChatQuote] = useState<ChatQuote | null>(null);
+  const wide = useWideScreen();
+  /** On a wide screen the open chat sits beside the page, which gives it room. */
+  const besideChat = chat && wide ? CHAT_SPACE : undefined;
   /** The passage behind the open "Explain" card, so its answer can be saved as a note. */
   const [explained, setExplained] = useState<Selected | null>(null);
   /** The open view, mirrored from viewRef for rendering (panels that need it). */
@@ -192,7 +200,7 @@ export function ReaderView({ id }: { id: string }) {
         // Up to the end of the visible page: the reader has seen all of it.
         sectionFraction: range ? fractionInSection(range, true) : 0,
       },
-      { kind: "recap", title: "Previously…" },
+      { kind: "recap", title: book?.paperId ? "Where you left off" : "Previously…" },
     );
   };
 
@@ -213,6 +221,7 @@ export function ReaderView({ id }: { id: string }) {
       PageDown: () => void view.next(),
       " ": () => void (e.shiftKey ? view.prev() : view.next()),
       t: () => setPanel((p) => (p === "toc" ? null : "toc")),
+      c: () => setChat((c) => !c),
       n: () => setPanel((p) => (p === "notes" ? null : "notes")),
       "/": () => setPanel("search"),
       a: () => setPanel((p) => (p === "settings" ? null : "settings")),
@@ -220,7 +229,8 @@ export function ReaderView({ id }: { id: string }) {
       Escape: () => {
         if (selected) setSelected(null);
         else if (ai) closeAi();
-        else setPanel(null);
+        else if (panel) setPanel(null);
+        else setChat(false);
       },
     };
     const action = keys[e.key];
@@ -297,7 +307,13 @@ export function ReaderView({ id }: { id: string }) {
         const { error } = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(error ?? "Couldn't open this book.");
       }
-      const data = (await res.json()) as { book: LibraryBook; fileUrl: string; progress: Progress | null; notes: Highlight[] };
+      const data = (await res.json()) as {
+        book: LibraryBook;
+        fileUrl: string;
+        progress: Progress | null;
+        notes: Highlight[];
+        original?: string;
+      };
       const file = await fetch(data.fileUrl).then((r) => {
         if (!r.ok) throw new Error("Couldn't download the book file.");
         return r.blob();
@@ -345,6 +361,7 @@ export function ReaderView({ id }: { id: string }) {
       setSettings(stored);
       setView(view);
       setBook(data.book);
+      setOriginal(data.original ?? null);
       setNotes(data.notes);
       setToc(view.book.toc ?? []);
       setTicks(view.getSectionFractions());
@@ -383,7 +400,27 @@ export function ReaderView({ id }: { id: string }) {
   }, []);
 
   // Bars stay visible while a panel, popover or AI card is open.
-  const pinned = panel !== null || selected !== null || ai !== null || offerRecap || status !== "ready";
+  const pinned = panel !== null || selected !== null || ai !== null || offerRecap || chat || status !== "ready";
+
+  /** Where the reader is, for the chat (a book's text is shared only up to here). */
+  const chatPosition = () => {
+    const range = viewRef.current?.lastLocation?.range;
+    return { sectionIndex: loc?.section?.current ?? 0, sectionFraction: range ? fractionInSection(range, true) : 0 };
+  };
+
+  /** "(§3.2)" in an answer: the contents entry with that number. */
+  const followCite = (cite: Cite) => {
+    if (!cite.section) return;
+    const walk = (items: TocItem[]): TocItem | undefined => {
+      for (const item of items) {
+        if (item.label.trim().startsWith(`${cite.section} `) || item.label.trim() === cite.section) return item;
+        const inner = item.subitems && walk(item.subitems);
+        if (inner) return inner;
+      }
+    };
+    const target = walk(toc);
+    if (target) void viewRef.current?.goTo(target.href);
+  };
   const showChrome = chrome || pinned;
 
   const changeSettings = (next: ReaderSettings) => {
@@ -395,7 +432,9 @@ export function ReaderView({ id }: { id: string }) {
   const theme = THEMES[settings.theme];
   const sectionIndex = loc?.section?.current ?? 0;
   const chapter = loc?.tocItem?.label?.trim() || book?.sections[sectionIndex]?.title || "";
-  const percent = Math.round((scrub ?? loc?.fraction ?? 0) * 100);
+  // foliate can report a NaN fraction for a moment on a fresh book.
+  const fraction = Number.isFinite(loc?.fraction) ? loc!.fraction : 0;
+  const percent = Math.round((scrub ?? fraction) * 100);
   const minutesLeft = loc?.time?.section !== undefined ? Math.max(1, Math.round(loc.time.section)) : null;
   const go = (target: string) => {
     void viewRef.current?.goTo(target);
@@ -414,7 +453,7 @@ export function ReaderView({ id }: { id: string }) {
         className={`absolute inset-x-0 transition-[top,bottom] duration-300 [&>foliate-view]:block [&>foliate-view]:size-full ${
           settings.flow === "scrolled" ? "top-16 bottom-16" : "top-14 bottom-14"
         }`}
-        style={{ opacity: status === "ready" ? 1 : 0, transition: "opacity .5s ease" }}
+        style={{ opacity: status === "ready" ? 1 : 0, transition: "opacity .5s ease", right: besideChat }}
       />
 
       {status === "loading" && <OpeningBook />}
@@ -435,6 +474,7 @@ export function ReaderView({ id }: { id: string }) {
         className={`reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
           showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
         }`}
+        style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
@@ -447,7 +487,7 @@ export function ReaderView({ id }: { id: string }) {
           <p className="truncate font-serif text-[15px] leading-tight">{book?.title ?? "Opening…"}</p>
           <p className="truncate text-[11px] text-muted">{book?.author}</p>
         </div>
-        <BarButton label="Previously… (recap)" onClick={recap} disabled={status !== "ready"}>
+        <BarButton label={book?.paperId ? "Where you left off (recap)" : "Previously… (recap)"} onClick={recap} disabled={status !== "ready"}>
           <Icon d="M12 8v4l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v4h4" />
         </BarButton>
         <BarButton label="Search (/)" active={panel === "search"} onClick={() => setPanel(panel === "search" ? null : "search")}>
@@ -455,6 +495,20 @@ export function ReaderView({ id }: { id: string }) {
         </BarButton>
         <BarButton label="Notes (N)" active={panel === "notes"} onClick={() => setPanel(panel === "notes" ? null : "notes")}>
           <Icon d="M6 4h12v16l-6-4-6 4z" />
+        </BarButton>
+        {original && (
+          <a
+            href={original}
+            target="_blank"
+            rel="noreferrer"
+            title="The original PDF"
+            className="hidden h-8 shrink-0 items-center rounded-full px-2.5 text-xs font-semibold tracking-wide hover:bg-chip sm:inline-flex"
+          >
+            PDF ↗
+          </a>
+        )}
+        <BarButton label="Chat (C)" active={chat} onClick={() => setChat((c) => !c)}>
+          <ChatIcon />
         </BarButton>
         <BarButton label="Reading settings (A)" active={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}>
           <span className="font-serif text-[15px] leading-none">Aa</span>
@@ -466,6 +520,7 @@ export function ReaderView({ id }: { id: string }) {
         className={`fixed inset-x-3 bottom-3 z-40 transition-all duration-300 ${
           showChrome ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"
         }`}
+        style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <div className="reader-surface mx-auto flex max-w-3xl items-center gap-3 rounded-full px-4 py-2">
@@ -483,7 +538,7 @@ export function ReaderView({ id }: { id: string }) {
             <div className="relative mt-1.5 h-4">
               <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-chip" />
               <div className="absolute top-1/2 left-0 h-1 -translate-y-1/2 rounded-full bg-accent" style={{ width: `${percent}%` }} />
-              {ticks.slice(1).map((t, i) => (
+              {ticks.slice(1).filter(Number.isFinite).map((t, i) => (
                 <span key={i} className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-fg/20" style={{ left: `${t * 100}%` }} />
               ))}
               <input
@@ -491,7 +546,7 @@ export function ReaderView({ id }: { id: string }) {
                 min={0}
                 max={1}
                 step={0.0005}
-                value={scrub ?? loc?.fraction ?? 0}
+                value={scrub ?? fraction}
                 aria-label="Position in book"
                 onChange={(e) => setScrub(Number(e.target.value))}
                 onPointerUp={() => {
@@ -558,6 +613,12 @@ export function ReaderView({ id }: { id: string }) {
             setSelected(null);
           }}
           onExplain={() => explain(selected)}
+          onAsk={() => {
+            setChatQuote({ text: selected.text });
+            setChat(true);
+            viewRef.current?.deselect();
+            setSelected(null);
+          }}
           onCopy={() => {
             void navigator.clipboard.writeText(selected.text);
             setSelected(null);
@@ -581,6 +642,7 @@ export function ReaderView({ id }: { id: string }) {
       {ai && (
         <AiCard
           ai={ai}
+          right={besideChat}
           onClose={closeAi}
           onSaveNote={
             ai.kind === "explain" && explained
@@ -590,6 +652,19 @@ export function ReaderView({ id }: { id: string }) {
                 }
               : undefined
           }
+        />
+      )}
+
+      {chat && (
+        <ChatPanel
+          key={id}
+          bookId={id}
+          paper={Boolean(book?.paperId)}
+          onClose={() => setChat(false)}
+          getPosition={chatPosition}
+          quote={chatQuote}
+          onQuoteUsed={() => setChatQuote(null)}
+          onCite={followCite}
         />
       )}
     </div>

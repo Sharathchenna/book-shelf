@@ -14,9 +14,10 @@ export type Upload = {
 export async function uploadBook(
   file: File,
   onProgress: (patch: Partial<Upload>) => void,
-  /** The shelf book it's being added to. */
-  shelfItemId?: string,
-): Promise<void> {
+  /** The shelf book, or clipped paper, it belongs to. */
+  owner: { shelfItemId?: string; paperId?: string } = {},
+): Promise<string> {
+  const { shelfItemId, paperId } = owner;
   const start = await fetch("/api/books", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -43,19 +44,21 @@ export async function uploadBook(
     await finalizePdf(started.id, await file.arrayBuffer(), {
       fileName: file.name,
       shelfItemId,
+      paperId,
       onProgress: (done, total) => onProgress({ progress: done / total, pages: `${done}/${total}` }),
     });
-    return;
+    return started.id;
   }
 
   onProgress({ stage: "processing" });
   const done = await fetch(`/api/books/${started.id}/finalize`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ shelfItemId }),
+    body: JSON.stringify({ shelfItemId, paperId }),
   });
   if (!done.ok) {
     const { error } = (await done.json().catch(() => ({}))) as { error?: string };
     throw new Error(error ?? "Couldn't read that EPUB.");
   }
+  return started.id;
 }

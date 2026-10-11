@@ -64,7 +64,8 @@ Every book's card can carry its own EPUB or PDF. Sign in with **Sign in** in the
 - A file is matched to its book when the shelf loads, not only at upload: a book added to Goodreads after its file was uploaded picks the file up after the next sync.
 - EPUBs reflow: themes (Paper, Sepia, Sage, Night), fonts, text size, spacing, column width, two-page or scrolling layout.
 - PDFs keep their pages (pdf.js): continuous scrolling, zoom and fit-to-width, the same four themes (Night inverts the page and keeps figures' colours), contents from the PDF's bookmarks, and selectable text. The browser reads the text when you add one, so search, Explain and recap work on PDFs too; scanned PDFs without a text layer can only be viewed.
-- **Papers:** on `/papers`, a paper with a free PDF (arXiv, open proceedings) shows a **Read** button when you're signed in. The first time, the server fetches the PDF into R2; after that it opens straight away.
+- **Papers:** on `/papers`, signed in, clicking a paper with a free PDF opens it here (a small link keeps the source). arXiv papers become **ebooks**: the browser builds an EPUB from arXiv's HTML version (sections as chapters, real MathML equations, figures, footnotes, links between them; `app/components/reader/arxiv-epub.ts`), so they read like books, with a **PDF ↗** button for the original. Papers without an HTML version, and other papers, open as PDFs (the server fetches the PDF into R2). The first open takes a few seconds; after that it's instant.
+- **Chat** (`C`, or the speech-bubble button): a panel on the right for asking Claude about what you're reading. It has a paper's whole text, but a book's only up to your page (no spoilers), plus your highlights; the text is cached between messages. Answers cite pages and sections as links that jump there. Select a passage and choose **Ask** to quote it (in a PDF, with an image of it). Each book keeps its conversation on your device.
 - Both readers have contents, in-book search, and highlights with notes. Your position, highlights and notes sync to R2.
 - Select a passage and choose **Explain**, or use the recap button (**Previously…**, or **Where you left off** in a paper). When you come back after a few days, a recap is offered. In a PDF, Explain also sends Claude an image of the selection, so equations and symbols that text extraction garbles still get explained.
 
@@ -142,4 +143,4 @@ Notes:
 | `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2 or local), EPUB parsing, PDF finalize and paper import |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
 | `app/reader/`, `app/components/reader/` | The readers: EPUBs (foliate-js), PDFs (pdf.js, `pdf-reader-view.tsx`, `pdf.ts`), panels and AI cards |
-| `app/api/reader/`, `lib/ai/reader.ts` | Explain and recap, using only text before the reader's position |
+| `app/api/reader/`, `lib/ai/reader.ts`, `app/components/reader/chat-panel.tsx` | Explain, recap and chat (a book's text only up to the reader's position) |

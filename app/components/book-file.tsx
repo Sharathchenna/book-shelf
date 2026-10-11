@@ -34,7 +34,7 @@ export function BookFile({
     setUpload({ stage: "uploading", progress: 0 });
     try {
       const { uploadBook } = await import("./reader/upload");
-      await uploadBook(file, (patch) => setUpload((u) => ({ ...u, ...patch })), shelfItemId);
+      await uploadBook(file, (patch) => setUpload((u) => ({ ...u, ...patch })), { shelfItemId });
       setUpload(null);
       onChanged();
     } catch (error) {

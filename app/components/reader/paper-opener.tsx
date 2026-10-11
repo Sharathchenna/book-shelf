@@ -5,9 +5,22 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { OpeningBook } from "./chrome";
 
+type Opened = {
+  id?: string;
+  ready?: boolean;
+  fileUrl?: string;
+  build?: "epub";
+  arxiv?: string;
+  title?: string;
+  authors?: string[];
+  replaces?: string[];
+  error?: string;
+};
+
 /**
- * Gets a clipped paper into the library (the server fetches its PDF; this page reads the pages,
- * as after an upload) and then opens it. Already-added papers open straight away.
+ * Gets a clipped paper into the library and opens it. An arXiv paper becomes an ebook, built here
+ * from arXiv's HTML version (reflowing text, real equations, figures); without one, or for other
+ * papers, the server fetches the PDF and this page reads its pages. Papers already added open at once.
  */
 export function PaperOpener({ paperId }: { paperId: string }) {
   const router = useRouter();
@@ -16,26 +29,52 @@ export function PaperOpener({ paperId }: { paperId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const ask = async (format?: "pdf") => {
       const res = await fetch("/api/books/papers", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ paperId }),
+        body: JSON.stringify({ paperId, format }),
       });
-      const data = (await res.json().catch(() => ({}))) as { id?: string; ready?: boolean; fileUrl?: string; error?: string };
-      if (!res.ok || !data.id) throw new Error(data.error ?? "Couldn't add this paper.");
+      const data = (await res.json().catch(() => ({}))) as Opened;
+      if (!res.ok) throw new Error(data.error ?? "Couldn't add this paper.");
+      return data;
+    };
+    const show = (text: string) => !cancelled && setLabel(text);
 
+    (async () => {
+      let data = await ask();
+
+      if (data.build === "epub" && data.arxiv) {
+        const { buildArxivEpub } = await import("./arxiv-epub");
+        const epub = await buildArxivEpub(
+          { paperId, arxiv: data.arxiv, title: data.title ?? data.arxiv, authors: data.authors ?? [] },
+          show,
+        ).catch(() => null);
+        if (epub) {
+          const { uploadBook } = await import("./upload");
+          const id = await uploadBook(
+            new File([epub], `${data.arxiv}.epub`, { type: "application/epub+zip" }),
+            (patch) => show(patch.stage === "uploading" ? `Saving to your library… ${Math.round((patch.progress ?? 0) * 100)}%` : "Reading it…"),
+            { paperId },
+          );
+          // A PDF copy added before this paper could be read as an ebook is no longer needed.
+          await Promise.all((data.replaces ?? []).map((old) => fetch(`/api/books/${old}`, { method: "DELETE" }).catch(() => {})));
+          if (!cancelled) router.replace(`/reader/${id}`);
+          return;
+        }
+        show("No ebook version; opening the PDF…");
+        data = await ask("pdf");
+      }
+
+      if (!data.id) throw new Error("Couldn't add this paper.");
       if (!data.ready && data.fileUrl) {
-        setLabel("Downloading the PDF…");
+        show("Downloading the PDF…");
         const file = await fetch(data.fileUrl).then((r) => {
           if (!r.ok) throw new Error("Couldn't download the PDF.");
           return r.arrayBuffer();
         });
         const { finalizePdf } = await import("./pdf");
-        await finalizePdf(data.id, file, {
-          paperId,
-          onProgress: (done, total) => !cancelled && setLabel(`Reading page ${done} of ${total}…`),
-        });
+        await finalizePdf(data.id, file, { paperId, onProgress: (done, total) => show(`Reading page ${done} of ${total}…`) });
       }
       if (!cancelled) router.replace(`/reader/${data.id}`);
     })().catch((err: Error) => !cancelled && setError(err.message));

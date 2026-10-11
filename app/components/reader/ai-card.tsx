@@ -65,7 +65,18 @@ export function useAiStream() {
   return { ai, run, close };
 }
 
-export function AiCard({ ai, onClose, onSaveNote }: { ai: AiState; onClose: () => void; onSaveNote?: (text: string) => void }) {
+export function AiCard({
+  ai,
+  onClose,
+  onSaveNote,
+  right,
+}: {
+  ai: AiState;
+  onClose: () => void;
+  onSaveNote?: (text: string) => void;
+  /** Distance from the right edge, to sit clear of the open chat. */
+  right?: string;
+}) {
   const lines = ai.kind === "recap" ? ai.text.split("\n").filter((l) => l.trim()) : null;
 
   return (
@@ -73,6 +84,7 @@ export function AiCard({ ai, onClose, onSaveNote }: { ai: AiState; onClose: () =
       role="dialog"
       aria-label={ai.title}
       className="reader-surface reader-pop fixed right-4 bottom-24 z-50 flex max-h-[min(70dvh,34rem)] w-[min(26rem,calc(100%-2rem))] flex-col rounded-3xl"
+      style={right ? { right } : undefined}
     >
       <header className="flex items-center justify-between gap-3 px-5 pt-4">
         <p className="flex items-center gap-2 text-xs font-medium tracking-[0.14em] text-muted uppercase">
