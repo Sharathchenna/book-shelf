@@ -14,7 +14,7 @@ bun run import path/to.csv # or a Goodreads "Export Library" CSV instead
 
 New books are looked up on Open Library for their cover, subjects, year, pages and description, and get a spine colour from the cover. Books already on the shelf keep what they had, so a sync only fetches what's new. `data/shelf.json` is only rewritten when something changed.
 
-**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand from the repo's **Actions** tab (**Goodreads sync → Run workflow**) after logging a book. Rate, review or move a book on Goodreads and the shelf follows.
+**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand after logging a book: sign in and press **Sync from Goodreads** next to "Updated …" under your name (or use the repo's **Actions** tab → **Goodreads sync** → **Run workflow**). The button needs a `GITHUB_SYNC_TOKEN` secret: a fine-grained GitHub token for this repository only, with **Actions: Read and write**. Rate, review or move a book on Goodreads and the shelf follows.
 
 Edit your name, bio, avatar and links in `shelf.config.ts`.
 
@@ -45,6 +45,7 @@ Copy `.env.example` to `.env.local`. Each feature turns on when its keys are set
 | Ask the shelf (Jev ranks the books) | `TYPESAFE_API_KEY` |
 | Short answers, and explain/recap in the reader (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Reading books on the shelf (password) | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
+| "Sync from Goodreads" button | `GITHUB_SYNC_TOKEN` (fine-grained, this repo, Actions read and write) |
 | Book and PDF storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
 Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.

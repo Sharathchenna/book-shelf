@@ -1,6 +1,7 @@
 import { getStats } from "@/lib/shelf";
 import type { Item } from "@/lib/types";
 import type { ShelfConfig } from "@/shelf.config";
+import { SyncButton } from "./sync-button";
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
 
@@ -19,7 +20,10 @@ export function Profile({ config, updatedAt }: { config: ShelfConfig; updatedAt:
         <div>
           <h2 className="font-serif text-5xl leading-none sm:text-6xl">{config.owner}&apos;s Shelf</h2>
           <p className="mt-2 max-w-xl text-muted">{config.bio}</p>
-          <p className="mt-1 text-xs text-muted/80">Updated {dateFormat.format(new Date(updatedAt))}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted/80">
+            Updated {dateFormat.format(new Date(updatedAt))}
+            <SyncButton />
+          </p>
         </div>
       </div>
       {config.links.length > 0 && (
