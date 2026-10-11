@@ -2,17 +2,21 @@
 
 import Link from "next/link";
 import { useOptionalShelf } from "./shelf-provider";
-import { useIsOwner } from "./use-owner";
+import { useMe } from "./use-owner";
 
-/** "Your books" in the top bar, shown only to the signed-in owner. */
+/**
+ * The reading room in the top bar: "Your books" for the signed-in owner, "Reading room" for
+ * visitors once there's something in it (the books are on show, locked).
+ */
 export function OwnerLink() {
   const shelf = useOptionalShelf();
-  // Outside the home page there's no shelf provider to ask, so check the session directly.
-  const standaloneOwner = useIsOwner(Boolean(shelf));
-  if (!(shelf ? shelf.owner : standaloneOwner)) return null;
+  // Outside the home page there's no shelf provider to ask, so check directly.
+  const standalone = useMe(Boolean(shelf));
+  const me = shelf?.library ? { owner: shelf.library.owner, books: shelf.library.size } : standalone;
+  if (!me || (!me.owner && me.books === 0)) return null;
   return (
     <Link href="/reader" className="pill">
-      Your books
+      {me.owner ? "Your books" : "Reading room"}
     </Link>
   );
 }

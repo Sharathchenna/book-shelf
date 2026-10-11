@@ -40,7 +40,9 @@ export function SelectionPopover({
 }) {
   // Keep the popover on screen; flip below the selection when it's near the top.
   const below = selected.y < 150;
-  const x = Math.min(Math.max(selected.x, 170), window.innerWidth - 170);
+  // Centred on the selection, but at least 12px from either edge of the screen.
+  const half = Math.min(176, (window.innerWidth - 24) / 2);
+  const x = Math.min(Math.max(selected.x, half + 12), window.innerWidth - half - 12);
 
   return (
     <div
@@ -73,14 +75,14 @@ export function SelectionPopover({
           </div>
         </form>
       ) : (
-        <div className="flex items-center gap-0.5">
+        <div className="flex flex-wrap items-center justify-center gap-0.5">
           {(Object.keys(HIGHLIGHT_HEX) as HighlightColor[]).map((color) => (
             <button
               key={color}
               onClick={() => onHighlight(color)}
               aria-label={`Highlight ${color}`}
               aria-pressed={note?.color === color}
-              className="grid size-9 place-items-center rounded-full hover:bg-chip"
+              className="grid size-8 place-items-center rounded-full hover:bg-chip sm:size-9"
             >
               <span
                 className="size-5 rounded-full ring-1 ring-black/10 [[aria-pressed=true]>&]:ring-2 [[aria-pressed=true]>&]:ring-fg"
@@ -88,7 +90,7 @@ export function SelectionPopover({
               />
             </button>
           ))}
-          <span className="mx-1 h-6 w-px bg-line" />
+          <span className="mx-0.5 h-6 w-px bg-line sm:mx-1" />
           <PopButton onClick={() => onDraft(note?.note ?? "")}>{note?.note ? "Edit note" : "Note"}</PopButton>
           <PopButton onClick={onExplain} accent>
             Explain
@@ -104,7 +106,7 @@ function PopButton({ onClick, accent, children }: { onClick: () => void; accent?
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors ${accent ? "text-accent hover:bg-accent/10" : "hover:bg-chip"}`}
+      className={`rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors sm:px-3 ${accent ? "text-accent hover:bg-accent/10" : "hover:bg-chip"}`}
     >
       {accent && <span aria-hidden>✦ </span>}
       {children}
@@ -132,7 +134,7 @@ export function BarButton({
       aria-label={label}
       title={label}
       aria-pressed={active}
-      className="grid size-9 shrink-0 place-items-center rounded-full transition-colors hover:bg-chip disabled:opacity-40 aria-pressed:bg-chip"
+      className="grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-chip disabled:opacity-40 aria-pressed:bg-chip sm:size-9"
     >
       {children}
     </button>

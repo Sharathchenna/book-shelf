@@ -199,13 +199,16 @@ export function SettingsPanel({ settings, onChange }: { settings: ReaderSettings
 
       <Slider label="Text size" value={settings.size} min={80} max={160} step={5} format={(v) => `${v}%`} onChange={(v) => set("size", v)} />
       <Slider label="Line spacing" value={settings.lineHeight} min={1.2} max={2.2} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => set("lineHeight", v)} />
-      <Slider label="Column width" value={settings.width} min={480} max={960} step={20} format={(v) => `${v}px`} onChange={(v) => set("width", v)} />
+      {/* A phone's screen is narrower than any column width, and never fits two pages. */}
+      <div className="hidden sm:block">
+        <Slider label="Column width" value={settings.width} min={480} max={960} step={20} format={(v) => `${v}px`} onChange={(v) => set("width", v)} />
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <Toggle on={settings.flow === "scrolled"} onClick={() => set("flow", settings.flow === "scrolled" ? "paginated" : "scrolled")}>
           Scroll
         </Toggle>
-        <Toggle on={settings.spread} onClick={() => set("spread", !settings.spread)}>
+        <Toggle on={settings.spread} onClick={() => set("spread", !settings.spread)} className="hidden sm:inline-flex">
           Two pages
         </Toggle>
         <Toggle on={settings.justify} onClick={() => set("justify", !settings.justify)}>
@@ -252,12 +255,12 @@ function Slider({
   );
 }
 
-function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Toggle({ on, onClick, className = "", children }: { on: boolean; onClick: () => void; className?: string; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={on}
-      className="rounded-full border border-line px-3 py-1.5 text-sm transition-colors aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-ink-fg"
+      className={`rounded-full border border-line px-3 py-1.5 text-sm transition-colors aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-ink-fg ${className}`}
     >
       {children}
     </button>

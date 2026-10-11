@@ -1,5 +1,5 @@
 import { haikuEnabled, streamText } from "@/lib/ai/haiku";
-import { EXPLAIN_PAPER_SYSTEM, EXPLAIN_SYSTEM, textSoFar } from "@/lib/ai/reader";
+import { byline, EXPLAIN_PAPER_SYSTEM, EXPLAIN_SYSTEM, textSoFar } from "@/lib/ai/reader";
 import { requireOwner } from "@/lib/auth/session";
 import { aiResponse } from "../stream";
 
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   const chapter = sofar.book.sections[body.sectionIndex]?.title ?? "";
   const isPaper = Boolean(sofar.book.paperId);
   const image = typeof body.image === "string" && body.image.length < MAX_IMAGE_CHARS && body.image.startsWith("/9j/") ? body.image : undefined;
-  const prompt = `${isPaper ? "Paper" : "Book"}: ${sofar.book.title} by ${sofar.book.author}\n${isPaper ? "Section" : "Chapter"}: ${chapter}\n\nThe text just before and around the passage:\n"""\n${sofar.text}\n"""\n\nThe passage they selected${image ? " (an image of it on the page is attached)" : ""}:\n"""\n${body.selection!.toString().slice(0, 2000)}\n"""`;
+  const prompt = `${isPaper ? "Paper" : "Book"}: ${byline(sofar.book)}\n${isPaper ? "Section" : "Chapter"}: ${chapter}\n\nThe text just before and around the passage:\n"""\n${sofar.text}\n"""\n\nThe passage they selected${image ? " (an image of it on the page is attached)" : ""}:\n"""\n${body.selection!.toString().slice(0, 2000)}\n"""`;
 
   return aiResponse(request.signal, (write) =>
     streamText(

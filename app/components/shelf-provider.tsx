@@ -21,11 +21,14 @@ type ShelfContextValue = {
    * (e.g. the filtered library) to let the dialog step through it with previous/next.
    */
   openBook: (id: string | null, sequence?: string[]) => void;
-  /** Set when the visitor is the signed-in owner: their EPUBs, keyed by shelf item id. */
-  owner: { epubs: Map<string, Epub> } | null;
+  /**
+   * The reading room, once known: which shelf books have an EPUB or PDF there (keyed by shelf
+   * item id), and whether the visitor is the signed-in owner who can open them.
+   */
+  library: { owner: boolean; size: number; epubs: Map<string, Epub> } | null;
 };
 
-/** An EPUB in the owner's reading room, and how far through it they are. */
+/** A book in the reading room, and (for the owner) how far through it they are. */
 export type Epub = { id: string; fraction: number };
 
 const ShelfContext = createContext<ShelfContextValue | null>(null);
@@ -48,20 +51,20 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
   const [openId, setOpenId] = useState<string | null>(null);
   const [sequence, setSequence] = useState<string[]>([]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
-  const [owner, setOwner] = useState<ShelfContextValue["owner"]>(null);
+  const [library, setLibrary] = useState<ShelfContextValue["library"]>(null);
 
-  // The page is static and public; only after it loads do we learn whether the owner is here.
+  // The page is static and public; only after it loads do we learn what's in the reading room.
   useEffect(() => {
     let current = true;
     void fetch("/api/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((me: { owner: boolean; library?: { id: string; shelfItemId?: string; fraction: number }[] } | null) => {
-        if (!current || !me?.owner) return;
+        if (!current || !me) return;
         const epubs = new Map<string, Epub>();
         for (const book of me.library ?? []) {
           if (book.shelfItemId) epubs.set(book.shelfItemId, { id: book.id, fraction: book.fraction });
         }
-        setOwner({ epubs });
+        setLibrary({ owner: me.owner, size: me.library?.length ?? 0, epubs });
       })
       .catch(() => {});
     return () => {
@@ -86,8 +89,8 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
   }, []);
 
   const value = useMemo(
-    () => ({ items, query, setQuery, category, setCategory, colour, setColour, openBook, owner }),
-    [items, query, category, colour, openBook, owner],
+    () => ({ items, query, setQuery, category, setCategory, colour, setColour, openBook, library }),
+    [items, query, category, colour, openBook, library],
   );
 
   const item = openId ? (byId.get(openId) ?? null) : null;
@@ -102,7 +105,8 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
         prevId={position > 0 ? sequence[position - 1] : undefined}
         nextId={position >= 0 ? sequence[position + 1] : undefined}
         sameAuthor={sameAuthor}
-        epub={item ? owner?.epubs.get(item.id) : undefined}
+        epub={item ? library?.epubs.get(item.id) : undefined}
+        locked={!library?.owner}
         onOpen={openBook}
         onClose={() => openBook(null)}
       />

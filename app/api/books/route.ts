@@ -1,26 +1,30 @@
 import { randomUUID } from "node:crypto";
-import { requireOwner } from "@/lib/auth/session";
+import { isOwner, requireOwner } from "@/lib/auth/session";
 import { CONTENT_TYPES, keys, readIndex } from "@/lib/library";
 import type { LibraryEntry, Progress } from "@/lib/library-types";
 import { getJson, getStorage, MAX_BOOK_BYTES } from "@/lib/storage";
 
-/** The owner's library, most recently read first. */
+/**
+ * The library, most recently read first. It's on show to everyone (locked), so visitors get each
+ * book's title, author and cover; the owner also gets their progress. The files stay owner-only.
+ */
 export async function GET() {
-  const denied = await requireOwner();
-  if (denied) return denied;
-
+  const owner = await isOwner();
   const storage = getStorage();
   const entries: LibraryEntry[] = await Promise.all(
     (await readIndex()).map(async (book) => ({
       ...book,
-      progress: (await getJson<Progress>(keys.progress(book.id))) ?? undefined,
+      progress: owner ? ((await getJson<Progress>(keys.progress(book.id))) ?? undefined) : undefined,
       coverUrl: book.coverKey ? await storage.downloadUrl(book.coverKey) : undefined,
     })),
   );
   entries.sort((a, b) =>
     (b.progress?.updatedAt ?? b.addedAt).localeCompare(a.progress?.updatedAt ?? a.addedAt),
   );
-  return Response.json({ books: entries, storage: storage.kind }, { headers: { "cache-control": "no-store" } });
+  return Response.json(
+    { books: entries, owner, storage: owner ? storage.kind : undefined },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 /**

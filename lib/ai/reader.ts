@@ -33,6 +33,9 @@ export async function textSoFar(
     : { book, text, truncated: false };
 }
 
+/** "Title by Author", or just the title when the file didn't say (common for PDFs). */
+export const byline = (book: Pick<LibraryBook, "title" | "author">) => (book.author ? `${book.title} by ${book.author}` : book.title);
+
 export const EXPLAIN_SYSTEM = `You help someone reading a book. They selected a passage and asked what it means.
 
 Explain it briefly (under 120 words): what is happening or being said, plus anything that makes it hard to follow, such as an old or unusual word, an allusion, a reference to an earlier event, or who a character is. Use only the context you are given about the book so far, and general knowledge about the world or the author. Never reveal or hint at anything that happens later in the book, even if you know the book well. Plain prose, no headings; at most one short list if it truly helps.`;

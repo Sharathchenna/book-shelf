@@ -94,7 +94,7 @@ async function finalizePdf(id: string, body: Record<string, unknown>) {
   const paper = typeof body.paperId === "string" ? clippings.items.find((c) => c.id === body.paperId && c.kind === "paper") : undefined;
   const text = (v: unknown, fallback: string) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 300) : fallback);
   const title = paper?.title ?? text(body.title, "Untitled PDF");
-  const author = paper?.paper?.authors.length ? authorLine(paper.paper.authors) : text(body.author, "Unknown author");
+  const author = paper?.paper?.authors.length ? authorLine(paper.paper.authors) : text(body.author, "");
 
   let coverKey: string | undefined;
   if (typeof body.cover === "string" && body.cover.length < (MAX_COVER_BYTES * 4) / 3) {

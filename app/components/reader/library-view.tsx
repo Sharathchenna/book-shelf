@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { textOn } from "@/lib/color";
 import type { LibraryEntry } from "@/lib/library-types";
 import type { Item } from "@/lib/types";
+import { LoginForm } from "../../login/login-form";
 import { Logo } from "../logo";
 
 type Upload = {
@@ -59,9 +60,19 @@ async function uploadBook(file: File, onProgress: (patch: Partial<Upload>) => vo
   }
 }
 
-export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "title" | "author" | "cover" | "color">[] }) {
+export function LibraryView({
+  shelfItems,
+  ownerName,
+}: {
+  shelfItems: Pick<Item, "id" | "title" | "author" | "cover" | "color">[];
+  ownerName: string;
+}) {
   const [books, setBooks] = useState<LibraryEntry[] | null>(null);
   const [storage, setStorage] = useState<"r2" | "local" | null>(null);
+  /** Null until known. Visitors see the books locked. */
+  const [owner, setOwner] = useState<boolean | null>(null);
+  /** The unlock dialog: where to go once the password is in. */
+  const [unlock, setUnlock] = useState<{ next: string; title?: string } | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -74,10 +85,11 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
   useEffect(() => {
     let current = true;
     void fetch("/api/books")
-      .then((res) => (res.ok ? (res.json() as Promise<{ books: LibraryEntry[]; storage: "r2" | "local" }>) : null))
+      .then((res) => (res.ok ? (res.json() as Promise<{ books: LibraryEntry[]; owner: boolean; storage?: "r2" | "local" }>) : null))
       .then((data) => {
         if (!current) return;
         setBooks(data?.books ?? []);
+        setOwner(data?.owner ?? false);
         setStorage(data?.storage ?? null);
       });
     return () => {
@@ -112,11 +124,13 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
     <div
       className="min-h-dvh"
       onDragOver={(e) => {
+        if (!owner) return;
         e.preventDefault();
         setDragging(true);
       }}
       onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
       onDrop={(e) => {
+        if (!owner) return;
         e.preventDefault();
         setDragging(false);
         void add(e.dataTransfer.files);
@@ -128,16 +142,24 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
             <Logo className="size-9" />
             <span className="leading-tight">
               <span className="block font-serif text-[17px] leading-none">Reading room</span>
-              <span className="mt-0.5 block text-xs text-muted">private · only you</span>
+              <span className="mt-0.5 block text-xs text-muted">{owner ? "signed in" : "locked · password to read"}</span>
             </span>
           </Link>
           <div className="flex items-center gap-2">
-            <Link href="/" className="pill hidden sm:inline-flex">
+            <Link href="/" className="pill">
               Shelf
             </Link>
-            <form action="/api/logout" method="post">
-              <button className="pill">Sign out</button>
-            </form>
+            {owner ? (
+              <form action="/api/logout" method="post">
+                <button className="pill">Sign out</button>
+              </form>
+            ) : (
+              owner === false && (
+                <button onClick={() => setUnlock({ next: "/reader" })} className="pill">
+                  Unlock
+                </button>
+              )
+            )}
           </div>
         </div>
       </header>
@@ -145,17 +167,21 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
       <main className="mx-auto max-w-6xl px-4 pt-14 pb-24">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="rise font-serif text-5xl sm:text-6xl">Your books</h1>
-            <p className="rise mt-2 text-muted" style={{ animationDelay: "80ms" }}>
-              EPUBs and PDFs you&apos;ve added. They&apos;re private to you, and your place, highlights and notes follow you between devices.
+            <h1 className="rise font-serif text-5xl sm:text-6xl">{owner === false ? `${ownerName}'s reading room` : "Your books"}</h1>
+            <p className="rise mt-2 max-w-2xl text-muted" style={{ animationDelay: "80ms" }}>
+              {owner === false
+                ? `The books and papers ${ownerName} is reading. They're locked: enter the password to open one.`
+                : "EPUBs and PDFs you've added. Visitors see this shelf, locked; your place, highlights and notes stay yours and follow you between devices."}
             </p>
           </div>
-          <button
-            onClick={() => input.current?.click()}
-            className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-ink-fg transition-transform hover:scale-[1.03] active:scale-95 sm:self-auto"
-          >
-            <span aria-hidden>＋</span> Add EPUB or PDF
-          </button>
+          {owner && (
+            <button
+              onClick={() => input.current?.click()}
+              className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-ink-fg transition-transform hover:scale-[1.03] active:scale-95 sm:self-auto"
+            >
+              <span aria-hidden>＋</span> Add EPUB or PDF
+            </button>
+          )}
           <input
             ref={input}
             type="file"
@@ -241,6 +267,8 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
                 </li>
               ))}
             </ul>
+          ) : books.length === 0 && !owner ? (
+            <p className="mt-5 rounded-3xl border border-dashed border-line px-6 py-16 text-center text-muted">Nothing on this shelf yet.</p>
           ) : books.length === 0 ? (
             <button
               onClick={() => input.current?.click()}
@@ -254,34 +282,56 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
               {books.map((book) => {
                 const p = Math.round((book.progress?.fraction ?? 0) * 100);
                 const linked = book.shelfItemId ? shelfById.get(book.shelfItemId) : undefined;
+                const card = (
+                  <>
+                    <div className="relative transition-transform duration-300 group-hover:-translate-y-1.5">
+                      <BookCover book={book} shelf={shelfById} className="tilt" />
+                      {owner && p > 0 && (
+                        <span className="glass absolute right-2 bottom-2 grid size-10 place-items-center rounded-full text-[10px] font-semibold tabular-nums">
+                          <span className="ring-progress absolute inset-1 rounded-full" style={{ "--p": p } as React.CSSProperties} />
+                          {p}%
+                        </span>
+                      )}
+                      {!owner && (
+                        <span className="glass absolute right-2 bottom-2 grid size-9 place-items-center rounded-full" aria-label="Locked">
+                          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                            <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-3 line-clamp-2 text-sm leading-snug font-semibold">{book.title}</p>
+                    <p className="truncate text-sm text-muted">{book.author}</p>
+                  </>
+                );
                 return (
                   <li key={book.id} className="group relative">
-                    <Link href={`/reader/${book.id}`} className="block">
-                      <div className="relative transition-transform duration-300 group-hover:-translate-y-1.5">
-                        <BookCover book={book} shelf={shelfById} className="tilt" />
-                        {p > 0 && (
-                          <span className="glass absolute right-2 bottom-2 grid size-10 place-items-center rounded-full text-[10px] font-semibold tabular-nums">
-                            <span className="ring-progress absolute inset-1 rounded-full" style={{ "--p": p } as React.CSSProperties} />
-                            {p}%
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-3 line-clamp-2 text-sm leading-snug font-semibold">{book.title}</p>
-                      <p className="truncate text-sm text-muted">{book.author}</p>
-                    </Link>
+                    {owner ? (
+                      <Link href={`/reader/${book.id}`} className="block">
+                        {card}
+                      </Link>
+                    ) : (
+                      <button onClick={() => setUnlock({ next: `/reader/${book.id}`, title: book.title })} className="block w-full text-left">
+                        {card}
+                      </button>
+                    )}
                     <p className="mt-1 text-[11px] text-muted">
                       {book.format === "pdf"
                         ? `PDF · ${book.sections.length} pages${book.paperId ? " · paper" : ""}`
-                        : linked
-                          ? "On your shelf"
-                          : "Not on your shelf"}
+                        : !owner
+                          ? "EPUB"
+                          : linked
+                            ? "On your shelf"
+                            : "Not on your shelf"}
                     </p>
-                    <button
-                      onClick={() => void remove(book)}
-                      className="absolute top-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100"
-                    >
-                      Remove
-                    </button>
+                    {owner && (
+                      <button
+                        onClick={() => void remove(book)}
+                        className="absolute top-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus:opacity-100"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -289,6 +339,8 @@ export function LibraryView({ shelfItems }: { shelfItems: Pick<Item, "id" | "tit
           )}
         </section>
       </main>
+
+      {unlock && <UnlockDialog next={unlock.next} title={unlock.title} onClose={() => setUnlock(null)} />}
 
       {dragging && (
         <div className="pointer-events-none fixed inset-3 z-50 grid place-items-center rounded-[32px] border-2 border-dashed border-accent bg-bg/70 backdrop-blur-sm">
@@ -327,6 +379,33 @@ function BookCover({
         </div>
       )}
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgb(0_0_0/0.2),rgb(255_255_255/0.12)_4%,transparent_10%)]" />
+    </div>
+  );
+}
+
+/** The password, asked in place; signing in goes straight on to the book. */
+function UnlockDialog({ next, title, onClose }: { next: string; title?: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label="Unlock" className="reader-surface reader-pop w-full max-w-sm rounded-[28px] p-7 text-center">
+        <span className="mx-auto grid size-12 place-items-center rounded-full bg-chip">
+          <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <h2 className="mt-4 font-serif text-3xl leading-tight text-balance">{title ? `“${title}”` : "Unlock the reading room"}</h2>
+        <p className="mt-2 text-sm text-muted">{title ? "is locked. Enter the password to open it." : "Enter the password to open the books."}</p>
+        <LoginForm next={next} submitLabel={title ? "Open" : "Unlock"} />
+        <button onClick={onClose} className="mt-4 text-sm text-muted hover:text-fg">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

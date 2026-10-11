@@ -13,13 +13,15 @@ type Props = {
   prevId?: string;
   nextId?: string;
   sameAuthor: Item[];
-  /** The owner's EPUB of this book, when they have one. */
+  /** This book's EPUB or PDF in the reading room, when there is one. */
   epub?: Epub;
+  /** Visitors see the Read button too; it asks for the password first. */
+  locked?: boolean;
   onOpen: (id: string) => void;
   onClose: () => void;
 };
 
-export function BookDialog({ item, prevId, nextId, sameAuthor, epub, onOpen, onClose }: Props) {
+export function BookDialog({ item, prevId, nextId, sameAuthor, epub, locked, onOpen, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -62,6 +64,7 @@ export function BookDialog({ item, prevId, nextId, sameAuthor, epub, onOpen, onC
           nextId={nextId}
           sameAuthor={sameAuthor}
           epub={epub}
+          locked={locked}
           onOpen={onOpen}
         />
       )}
@@ -69,7 +72,7 @@ export function BookDialog({ item, prevId, nextId, sameAuthor, epub, onOpen, onC
   );
 }
 
-function BookDetails({ item, prevId, nextId, sameAuthor, epub, onOpen }: Omit<Props, "item" | "onClose"> & { item: Item }) {
+function BookDetails({ item, prevId, nextId, sameAuthor, epub, locked, onOpen }: Omit<Props, "item" | "onClose"> & { item: Item }) {
   const [copied, setCopied] = useState(false);
   const candidates = [
     STATUS_LABEL[item.status],
@@ -156,13 +159,18 @@ function BookDetails({ item, prevId, nextId, sameAuthor, epub, onOpen }: Omit<Pr
           <div className="rise mt-6 flex flex-wrap gap-2" style={stagger(6)}>
             {epub && (
               <Link
-                href={`/reader/${epub.id}`}
+                // Visitors go through the password page, which then opens the book.
+                href={locked ? `/login?next=${encodeURIComponent(`/reader/${epub.id}`)}` : `/reader/${epub.id}`}
                 className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-fg transition-transform hover:scale-[1.03]"
               >
                 <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                  <path d="M12 7c-2-1.5-5-2-8-1.5v12c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-12c-3-.5-6 0-8 1.5zM12 7v12" strokeLinejoin="round" />
+                  {locked ? (
+                    <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" strokeLinejoin="round" />
+                  ) : (
+                    <path d="M12 7c-2-1.5-5-2-8-1.5v12c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-12c-3-.5-6 0-8 1.5zM12 7v12" strokeLinejoin="round" />
+                  )}
                 </svg>
-                {epub.fraction > 0.005 ? `Continue · ${Math.round(epub.fraction * 100)}%` : "Read"}
+                {locked ? "Read · locked" : epub.fraction > 0.005 ? `Continue · ${Math.round(epub.fraction * 100)}%` : "Read"}
               </Link>
             )}
             <a className="pill" href={goodreadsUrl(item)} target="_blank" rel="noreferrer">

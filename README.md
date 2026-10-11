@@ -67,7 +67,7 @@ Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without
 
 ## Using the reading room
 
-Sign in at `/login` (or open `/reader`). Then:
+`/reader` is public: visitors see your library (covers, titles, authors) with a lock, and opening a book asks for the password. Your progress, highlights and notes are never shown to them. Sign in there (or at `/login`), then:
 
 - Drop EPUBs or PDFs onto **Your books**. Each one is matched to its book on your shelf by title and author, and the shelf's book popup gets a **Read / Continue** button for you.
 - EPUBs reflow: themes (Paper, Sepia, Sage, Night), fonts, text size, spacing, column width, two-page or scrolling layout.
@@ -80,7 +80,8 @@ Sign in at `/login` (or open `/reader`). Then:
 
 ### Privacy and safety
 
-- **Owner only.** Books, PDFs, notes and the reader's AI features are private: every route checks your signed session cookie, so purchased books are never served publicly. Visitors only ever see shelf metadata.
+- **Locked, not hidden.** Visitors can see which books are in the reading room, but the files, your notes and progress, and the reader's AI features are owner-only: every route checks your signed session cookie, so purchased books are never served publicly.
+- **Password guessing.** Wrong passwords are answered slowly, and after 8 wrong tries in 15 minutes an address is turned away. That count lives in memory per Worker instance, so it's a speed bump; use a long password.
 - **No spoilers.** Explain and recap only send the model text from *before* your current position.
 - **pdf.js** is copied from `node_modules` to `public/pdfjs` on install (`scripts/copy-pdfjs.ts`) and loaded from there at runtime, so it's in neither the client bundle nor the Worker. `/reader` allows `'wasm-unsafe-eval'` for its WebAssembly image decoders, which permits compiling WebAssembly but not JavaScript `eval`.
 - **Scripts in EPUBs.** EPUBs can contain scripts. Before a chapter renders, the reader strips `<script>`, inline event handlers and `javascript:` links, and `/reader` sends a Content-Security-Policy that blocks scripts from anywhere else.

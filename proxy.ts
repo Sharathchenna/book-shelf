@@ -4,7 +4,8 @@ import { NextResponse, type NextRequest } from "next/server";
 const SESSION_COOKIE = "shelf_session";
 
 /**
- * Optimistic check only: sends visitors without a session cookie to the login page.
+ * Optimistic check only: sends visitors without a session cookie to the login page when they open
+ * a book. The library itself (/reader) is public: visitors see the books there, locked.
  * Pages and API routes still verify the session themselves (see lib/auth/session.ts).
  */
 export function proxy(request: NextRequest) {
@@ -15,5 +16,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/reader", "/reader/:path*"],
+  matcher: ["/reader/:path+"],
 };

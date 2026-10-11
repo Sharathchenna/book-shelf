@@ -549,18 +549,18 @@ export function PdfReaderView({ id }: { id: string }) {
 
       <header
         data-reader-ui
-        className={`reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-2 rounded-full px-2 transition-all duration-300 ${
+        className={`reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
           showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
         }`}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
-        <Link href="/reader" aria-label="Back to your books" className="grid size-9 place-items-center rounded-full hover:bg-chip">
+        <Link href="/reader" aria-label="Back to your books" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
           <Icon d="M15 6l-6 6 6 6" />
         </Link>
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>
           <Icon d="M4 6h16M4 12h16M4 18h10" />
         </BarButton>
-        <div className="min-w-0 flex-1 text-center">
+        <div className="min-w-0 flex-1 px-1 text-center">
           <p className="truncate font-serif text-[15px] leading-tight">{book?.title ?? "Opening…"}</p>
           <p className="truncate text-[11px] text-muted">{book?.author}</p>
         </div>
@@ -699,8 +699,8 @@ export function PdfReaderView({ id }: { id: string }) {
       )}
 
       {offerRecap && !ai && (
-        <div data-reader-ui className="reader-surface reader-pop fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full py-2 pr-2 pl-5">
-          <p className="text-sm">Welcome back. Want a quick recap?</p>
+        <div data-reader-ui className="reader-surface reader-pop fixed bottom-24 left-1/2 z-50 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-[28px] py-2 pr-2 pl-5">
+          <p className="min-w-0 text-sm leading-snug">Welcome back. Want a quick recap?</p>
           <button onClick={recap} className="rounded-full bg-ink px-4 py-1.5 text-sm font-medium whitespace-nowrap text-ink-fg">
             {book?.paperId ? "Where was I?" : "Previously…"}
           </button>
