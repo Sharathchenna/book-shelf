@@ -4,16 +4,17 @@ A personal bookshelf site: every book you've read, are reading, and mean to read
 
 ## Add your books
 
-1. On Goodreads, open **My Books → Import and export → Export Library**.
-2. Save the file as `data/goodreads.csv`.
-3. Run the import:
+The shelf syncs from Goodreads. Put the number from your profile URL (`goodreads.com/user/show/49386460-…`) in `shelf.config.ts` as `goodreadsUserId`, keep the profile public, and run:
 
-   ```bash
-   bun run import            # uses data/goodreads.csv
-   bun run import path/to.csv
-   ```
+```bash
+bun run import             # read, currently-reading and to-read, from your shelves' RSS feeds
+bun run import --refresh   # also look up every book again, not just new ones
+bun run import path/to.csv # or a Goodreads "Export Library" CSV instead
+```
 
-The import looks up every book on Open Library for its cover, subjects, year, pages and description, picks a spine colour from the cover, and writes `data/shelf.json`. Responses are cached in `.cache/`, so re-running after adding books only fetches the new ones.
+New books are looked up on Open Library for their cover, subjects, year, pages and description, and get a spine colour from the cover. Books already on the shelf keep what they had, so a sync only fetches what's new. `data/shelf.json` is only rewritten when something changed.
+
+**Nightly sync.** `.github/workflows/goodreads-sync.yml` runs the import every night, commits `data/shelf.json` when it changed, and the push to `main` redeploys the site. Run it by hand from the repo's **Actions** tab (**Goodreads sync → Run workflow**) after logging a book. Rate, review or move a book on Goodreads and the shelf follows.
 
 Edit your name, bio, avatar and links in `shelf.config.ts`.
 
@@ -110,7 +111,7 @@ To run the real Workers runtime locally first, copy `.dev.vars.example` to `.dev
 
 Notes:
 
-- **Data is baked in.** `data/shelf.json` and `data/clippings.json` are part of the build, so redeploy after `bun run import` or `bun run clip`.
+- **Data is baked in.** `data/shelf.json` and `data/clippings.json` are part of the build, so redeploy after `bun run import` or `bun run clip` (pushing to `main` does it).
 - **Plans.** The worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: pages are prerendered, and AI calls spend their time waiting, not computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's new `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
 - **`proxy.ts`** runs on OpenNext's Node.js middleware support, which it labels experimental. It only does the optimistic redirect from `/reader` to `/login`; the real check happens in every reader page and API route, so the site stays protected if it misbehaves.
@@ -119,8 +120,9 @@ Notes:
 
 | Path | What it is |
 | --- | --- |
-| `scripts/import.ts` | Goodreads CSV → enriched `data/shelf.json` |
-| `lib/goodreads.ts`, `lib/csv.ts`, `lib/categories.ts` | CSV parsing, Goodreads mapping, keyword categories |
+| `scripts/import.ts` | Goodreads feeds (or CSV) → enriched `data/shelf.json` |
+| `.github/workflows/goodreads-sync.yml` | Nightly import, committed and deployed |
+| `lib/goodreads.ts`, `lib/csv.ts`, `lib/categories.ts` | Goodreads RSS and CSV parsing, keyword categories |
 | `scripts/clip.ts`, `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,newsletters,tweets}/` | Clip articles, newsletters and tweets → `data/clippings.json`, and their pages |
 | `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment (OpenNext) |
 | `app/components/engine/` | The Shelf Engine: the isometric machine animation on the main page |

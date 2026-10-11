@@ -1,26 +1,33 @@
 /**
- * Builds data/shelf.json from a Goodreads export.
+ * Builds data/shelf.json from Goodreads.
  *
- *   bun run import [path/to/goodreads_library_export.csv]
+ *   bun run import                    # your public shelves, via shelf.config.ts → goodreadsUserId
+ *   bun run import path/to/export.csv # a Goodreads "Export Library" CSV instead
+ *   bun run import --refresh          # look every book up again, not just new ones
  *
- * Each book is enriched from Open Library (cover, subjects, year, pages,
- * description) and gets a dominant cover colour. Responses are cached in
- * .cache/openlibrary, so re-running after adding books is fast.
+ * New books are enriched from Open Library (cover, subjects, year, pages,
+ * description) and get a dominant cover colour; books already on the shelf keep
+ * what they had. Lookups are cached in .cache/openlibrary. The file is only
+ * rewritten when something changed, so a scheduled sync makes no empty commits.
  */
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import sharp from "sharp";
+import { shelfConfig } from "../shelf.config";
 import { categorize } from "../lib/categories";
-import { parseGoodreads } from "../lib/goodreads";
+import { parseGoodreads, parseGoodreadsRss, STATUS } from "../lib/goodreads";
 import type { Item, ShelfData } from "../lib/types";
 
 const CACHE_DIR = ".cache/openlibrary";
 const OUT = "data/shelf.json";
 const CONCURRENCY = 4;
 const HEADERS = { "User-Agent": "book-shelf-importer/0.1 (personal reading shelf)" };
+const FEED_PAGE = 200;
 
-const input = process.argv[2] ?? "data/goodreads.csv";
+const args = process.argv.slice(2);
+const refresh = args.includes("--refresh");
+const csvPath = args.find((a) => !a.startsWith("--"));
 
 type SearchDoc = {
   key: string;
@@ -32,29 +39,78 @@ type SearchDoc = {
 };
 
 async function main() {
-  if (!existsSync(input)) {
-    console.error(`No Goodreads export at ${input}. Save it there, or pass its path: bun run import path/to.csv`);
-    process.exit(1);
-  }
-  const items = parseGoodreads(await readFile(input, "utf8"));
-  console.log(`Read ${items.length} books from ${input}`);
-  await mkdir(CACHE_DIR, { recursive: true });
+  const { items, source } = await load();
+  console.log(`Read ${items.length} books from ${source}`);
 
+  const previous = existsSync(OUT) ? (JSON.parse(await readFile(OUT, "utf8")) as ShelfData) : undefined;
+  // A feed that comes back empty is far more likely a Goodreads hiccup than a deliberately emptied shelf.
+  if (items.length === 0 && previous?.items.length) {
+    throw new Error(`${source} has no books, but ${OUT} has ${previous.items.length}. Leaving it alone.`);
+  }
+  const known = new Map(refresh ? [] : previous?.items.map((i) => [i.id, i]));
+
+  await mkdir(CACHE_DIR, { recursive: true });
+  const fresh = items.filter((item) => !reuse(item, known.get(item.id)));
   let done = 0;
   let matched = 0;
-  await pool(items, CONCURRENCY, async (item) => {
+  await pool(fresh, CONCURRENCY, async (item) => {
+    const goodreadsCover = item.cover;
     try {
       if (await enrich(item)) matched++;
+      // Open Library had no cover, so the one from Goodreads stays and needs its colour.
+      if (item.cover && item.cover === goodreadsCover) item.color = (await coverColor(item.cover)) ?? item.color;
     } catch (error) {
       console.warn(`  skipped enrichment for "${item.title}": ${(error as Error).message}`);
     }
-    item.category = categorize(item);
-    if (++done % 10 === 0 || done === items.length) console.log(`  ${done}/${items.length}`);
+    if (item.description) item.description = cleanDescription(item.description);
+    if (++done % 10 === 0 || done === fresh.length) console.log(`  ${done}/${fresh.length}`);
   });
+  for (const item of items) item.category = categorize(item);
 
+  if (previous && JSON.stringify(previous.items) === JSON.stringify(items)) {
+    console.log(`No changes; ${OUT} left as it was.`);
+    return;
+  }
   const data: ShelfData = { updatedAt: new Date().toISOString(), items };
   await writeFile(OUT, JSON.stringify(data, null, 1) + "\n");
-  console.log(`Wrote ${OUT}: ${items.length} books, ${matched} matched on Open Library.`);
+  console.log(`Wrote ${OUT}: ${items.length} books, ${fresh.length} looked up, ${matched} matched on Open Library.`);
+}
+
+async function load(): Promise<{ items: Item[]; source: string }> {
+  if (csvPath) {
+    if (!existsSync(csvPath)) throw new Error(`No file at ${csvPath}.`);
+    return { items: parseGoodreads(await readFile(csvPath, "utf8")), source: csvPath };
+  }
+  const user = shelfConfig.goodreadsUserId;
+  if (!user) throw new Error("Set goodreadsUserId in shelf.config.ts, or pass a Goodreads CSV: bun run import path/to.csv");
+
+  const items: Item[] = [];
+  for (const [shelf, status] of Object.entries(STATUS)) {
+    for (let page = 1; ; page++) {
+      const url = `https://www.goodreads.com/review/list_rss/${user}?shelf=${shelf}&per_page=${FEED_PAGE}&page=${page}`;
+      const res = await fetchWithRetry(url);
+      if (!res.ok) {
+        throw new Error(`Goodreads answered ${res.status} for the "${shelf}" shelf. Is the profile public and the user id right?`);
+      }
+      const batch = parseGoodreadsRss(await res.text(), status);
+      items.push(...batch);
+      if (batch.length < FEED_PAGE) break;
+    }
+  }
+  return { items, source: `Goodreads user ${user}` };
+}
+
+/** Carries over what an earlier run looked up, so only new books hit Open Library. */
+function reuse(item: Item, before: Item | undefined): boolean {
+  if (!before) return false;
+  item.openLibraryKey = before.openLibraryKey;
+  item.subjects = before.subjects;
+  item.cover = before.cover ?? item.cover;
+  item.color = before.color;
+  item.description = before.description ?? item.description;
+  item.year ??= before.year;
+  item.pages ??= before.pages;
+  return true;
 }
 
 async function enrich(item: Item): Promise<boolean> {
@@ -68,9 +124,7 @@ async function enrich(item: Item): Promise<boolean> {
 
   if (doc.cover_i) {
     item.cover = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
-    const color = await memo(`color:${doc.cover_i}`, () =>
-      dominantColor(`https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`),
-    );
+    const color = await coverColor(`https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`);
     if (color) item.color = color;
   }
 
@@ -150,6 +204,8 @@ function cleanDescription(text: string): string {
   const end = cut.lastIndexOf(". ");
   return end > 200 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
 }
+
+const coverColor = (url: string) => memo(`color:${url}`, () => dominantColor(url));
 
 /** Average colour of the heaviest colour bucket. */
 async function dominantColor(url: string): Promise<string | undefined> {

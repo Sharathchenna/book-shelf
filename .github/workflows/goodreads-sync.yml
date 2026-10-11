@@ -1,0 +1,41 @@
+# Pulls your public Goodreads shelves into data/shelf.json every night and commits any change.
+# The push to main is what redeploys the site (Cloudflare Workers Builds).
+name: Goodreads sync
+
+on:
+  schedule:
+    - cron: "17 21 * * *" # 02:47 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: goodreads-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run import
+
+      - name: Commit changes
+        run: |
+          if git diff --quiet -- data/shelf.json; then
+            echo "Shelf unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync shelf from Goodreads" -- data/shelf.json
+          git push origin HEAD:main
