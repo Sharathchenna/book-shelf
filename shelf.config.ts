@@ -13,4 +13,5 @@ export const shelfConfig: ShelfConfig = {
   owner: "Sharath",
   bio: "A running catalog of what I read, with notes in the margins.",
   links: [],
+  siteUrl: "https://book-shelf.sharathchenna87.workers.dev",
 };
