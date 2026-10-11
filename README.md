@@ -18,18 +18,20 @@ New books are looked up on Open Library for their cover, subjects, year, pages a
 
 Edit your name, bio, avatar and links in `shelf.config.ts`.
 
-## Add articles, newsletters and tweets
+## Add articles, papers, newsletters and tweets
 
-The home page is only books. Things read on the web get their own pages: **/articles**, **/newsletters** and **/tweets**, each linked from the top bar once it has something in it. Add one by URL:
+The home page is only books. Things read on the web get their own pages: **/articles**, **/papers**, **/newsletters** and **/tweets**, each linked from the top bar once it has something in it. Add one by URL:
 
 ```bash
 bun run clip https://example.com/some-essay --note "Why it's worth keeping" --tags essays,craft
 bun run clip https://x.com/someone/status/123 https://someone.substack.com/p/issue   # several at once
+bun run clip arxiv:1706.03762 10.1038/nature14539 # papers by arXiv id or DOI
 bun run clip --remove https://example.com/some-essay
 ```
 
 - **Articles** are described from the page's Open Graph and JSON-LD metadata: title, author, publication, excerpt, image, date and reading time.
 - **Newsletters** are recognised by platform: Substack (including custom domains), beehiiv, Buttondown, Kit, Ghost and a few others. Pass `--kind newsletter` (or `article`) to override.
+- **Papers** come from the arXiv API (any arXiv link or `arxiv:<id>`), Crossref (any DOI), or the `citation_*` tags that journals and proceedings sites (NeurIPS, ACL Anthology, PMLR, most publishers) publish for Google Scholar. Semantic Scholar fills in a missing abstract and finds the free arXiv copy of a journal or conference paper. OpenReview blocks scripts, so clip a paper's arXiv link instead.
 - **Tweets** come from X's public embed endpoints and are stored as plain data (text, author, avatar, photos, likes). The site renders them itself, so no X script loads.
 
 Everything lands in `data/clippings.json`, newest first, and can be edited by hand. Clipping a URL again refreshes its metadata but keeps its note, tags and saved date. `--saved 2026-10-11` sets the saved date.
@@ -123,7 +125,7 @@ Notes:
 | `scripts/import.ts` | Goodreads feeds (or CSV) → enriched `data/shelf.json` |
 | `.github/workflows/goodreads-sync.yml` | Nightly import, committed and deployed |
 | `lib/goodreads.ts`, `lib/csv.ts`, `lib/categories.ts` | Goodreads RSS and CSV parsing, keyword categories |
-| `scripts/clip.ts`, `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,newsletters,tweets}/` | Clip articles, newsletters and tweets → `data/clippings.json`, and their pages |
+| `scripts/clip.ts`, `app/components/clippings.tsx`, `app/components/clip-page.tsx`, `app/{articles,papers,newsletters,tweets}/` | Clip articles, papers, newsletters and tweets → `data/clippings.json`, and their pages |
 | `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment (OpenNext) |
 | `app/components/engine/` | The Shelf Engine: the isometric machine animation on the main page |
 | `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, library |

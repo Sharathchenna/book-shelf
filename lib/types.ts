@@ -36,9 +36,9 @@ export type ShelfData = {
   items: Item[];
 };
 
-export type ClipKind = "article" | "newsletter" | "tweet";
+export type ClipKind = "article" | "paper" | "newsletter" | "tweet";
 
-/** Something read on the web: an article, a newsletter issue or a post. Added with `bun run clip <url>`. */
+/** Something read on the web: an article, a paper, a newsletter issue or a post. Added with `bun run clip <url>`. */
 export type Clip = {
   id: string;
   kind: ClipKind;
@@ -46,8 +46,9 @@ export type Clip = {
   /** Absent for tweets, whose text is the content. */
   title?: string;
   author?: string;
-  /** Site, publication or, for tweets, "X". */
+  /** Site, publication, journal or conference (papers), or "X" (tweets). */
   source: string;
+  /** Summary; a paper's abstract. */
   excerpt?: string;
   image?: string;
   /** ISO date the piece was published. */
@@ -58,6 +59,15 @@ export type Clip = {
   /** The reader's own note on it. */
   note?: string;
   tags: string[];
+  paper?: {
+    authors: string[];
+    year?: number;
+    /** arXiv id without its version, e.g. "1706.03762". */
+    arxiv?: string;
+    doi?: string;
+    /** A PDF anyone can read (arXiv, open proceedings). */
+    pdf?: string;
+  };
   tweet?: {
     name: string;
     handle: string;

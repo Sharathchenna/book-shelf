@@ -1,13 +1,16 @@
 /**
- * Adds articles, newsletter issues and tweets to data/clippings.json.
+ * Adds articles, papers, newsletter issues and tweets to data/clippings.json.
  *
  *   bun run clip <url> [<url> ...] [--note "Why it's worth keeping"] [--tags design,essays]
- *                [--kind article|newsletter|tweet] [--saved 2026-10-11]
+ *                [--kind article|paper|newsletter|tweet] [--saved 2026-10-11]
+ *   bun run clip arxiv:1706.03762 10.1038/nature14539
  *   bun run clip --remove <url>
  *
  * Articles are described from their Open Graph and JSON-LD metadata, newsletters are recognised
  * by their platform (Substack, Buttondown, beehiiv, ...), and tweets are fetched from X's public
  * embed endpoints and stored as plain data, so the site renders them without X's scripts.
+ * Papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that journals and
+ * proceedings sites publish for Google Scholar.
  * Adding a URL that is already clipped refreshes it, keeping its note, tags and saved date
  * unless new ones are given.
  */
@@ -21,6 +24,7 @@ const HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; book-shelf-clipper/0.1; personal reading shelf)",
   Accept: "text/html,application/xhtml+xml",
 };
+const API_HEADERS = { "User-Agent": HEADERS["User-Agent"], Accept: "application/json" };
 const WORDS_PER_MINUTE = 230;
 
 const NEWSLETTER_HOSTS = [
@@ -43,7 +47,7 @@ type Options = { note?: string; tags?: string[]; kind?: ClipKind; saved?: string
 async function main() {
   const { urls, options } = parseArgs(process.argv.slice(2));
   if (urls.length === 0) {
-    console.log('Usage: bun run clip <url> [<url> ...] [--note "..."] [--tags a,b] [--kind article|newsletter|tweet]');
+    console.log('Usage: bun run clip <url> [<url> ...] [--note "..."] [--tags a,b] [--kind article|paper|newsletter|tweet]');
     process.exit(1);
   }
 
@@ -60,7 +64,14 @@ async function main() {
     }
 
     try {
-      const fetched = tweetId(url) ? await fetchTweet(url) : await fetchPage(url, options.kind);
+      const fetched = tweetId(url)
+        ? await fetchTweet(url)
+        : arxivId(url)
+          ? await fetchArxiv(arxivId(url)!)
+          : doiOf(url)
+            ? await fetchCrossref(doiOf(url)!)
+            : await fetchPage(url, options.kind);
+      if (fetched.paper) await fillFromSemanticScholar(fetched);
       const clip: Clip = {
         ...fetched,
         id: existing?.id ?? id,
@@ -97,15 +108,29 @@ function parseArgs(args: string[]): { urls: string[]; options: Options } {
     else if (arg === "--kind") options.kind = args[++i] as ClipKind;
     else if (arg === "--saved") options.saved = args[++i];
     else if (arg === "--remove") options.remove = true;
-    else urls.push(arg);
+    else urls.push(expand(arg));
   }
   return { urls, options };
+}
+
+/**
+ * Shorthands: "arxiv:1706.03762" and bare DOIs ("10.1038/nature14539") become URLs, and
+ * arXiv's own DOIs (10.48550/arXiv.…) become arXiv links, so a paper has one id however it's clipped.
+ */
+function expand(arg: string): string {
+  const doi = arg.match(/^(?:https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/.+)$/i)?.[1];
+  const arxiv = arg.match(/^arxiv:(.+)$/i)?.[1] ?? doi?.match(/^10\.48550\/arxiv\.(.+)$/i)?.[1];
+  if (arxiv) return `https://arxiv.org/abs/${arxiv}`;
+  if (doi) return `https://doi.org/${doi}`;
+  return arg;
 }
 
 /** Stable id from the URL without tracking parameters, fragment or trailing slash. */
 function clipId(url: string): string {
   const tweet = tweetId(url);
   if (tweet) return `tweet-${tweet}`;
+  const arxiv = arxivId(url);
+  if (arxiv) return `arxiv-${arxiv.replace("/", "-")}`;
   const u = new URL(url);
   for (const key of [...u.searchParams.keys()]) if (/^(utm_|ref|source|s$|r$)/.test(key)) u.searchParams.delete(key);
   u.hash = "";
@@ -115,6 +140,165 @@ function clipId(url: string): string {
 
 function tweetId(url: string): string | undefined {
   return url.match(/^https?:\/\/(?:www\.|mobile\.)?(?:twitter|x)\.com\/[^/]+\/status(?:es)?\/(\d+)/)?.[1];
+}
+
+/** "1706.03762" from abs, pdf and html links (any version), and old-style ids like "hep-th/9901001". */
+function arxivId(url: string): string | undefined {
+  return url.match(
+    /^https?:\/\/(?:www\.|export\.)?(?:arxiv|alphaxiv)\.org\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[a-z]{2})?\/\d{7})/i,
+  )?.[1];
+}
+
+function doiOf(url: string): string | undefined {
+  const doi = url.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,9}\/.+)$/i)?.[1];
+  return doi && decodeURIComponent(doi);
+}
+
+// ---- papers --------------------------------------------------------------------------------------
+
+type Fetched = Omit<Clip, "id" | "saved" | "tags">;
+
+async function fetchArxiv(id: string): Promise<Fetched> {
+  const res = await fetch(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`, { headers: HEADERS });
+  if (!res.ok) throw new Error(`arXiv returned ${res.status}`);
+  const entry = (await res.text()).match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
+  // Unknown ids come back as an entry whose id points at arXiv's error docs.
+  if (!entry || entry.includes("arxiv.org/api/errors")) throw new Error(`arXiv has no paper ${id}`);
+  const tag = (name: string) => clean(entry.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1]);
+  const authors = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)].map((m) => clean(m[1])!);
+  const published = tag("published")?.slice(0, 10);
+  const doi = tag("arxiv:doi");
+
+  return paperClip({
+    url: `https://arxiv.org/abs/${id}`,
+    title: tag("title"),
+    authors,
+    venue: tag("arxiv:journal_ref") ?? "arXiv",
+    date: published,
+    abstract: tag("summary"),
+    arxiv: id,
+    doi,
+    pdf: `https://arxiv.org/pdf/${id}`,
+  });
+}
+
+type CrossrefWork = {
+  title?: string[];
+  author?: { given?: string; family?: string; name?: string }[];
+  "container-title"?: string[];
+  publisher?: string;
+  published?: { "date-parts": number[][] };
+  issued?: { "date-parts": number[][] };
+  abstract?: string;
+};
+
+async function fetchCrossref(doi: string): Promise<Fetched> {
+  const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, { headers: API_HEADERS });
+  if (!res.ok) throw new Error(`Crossref returned ${res.status} for ${doi}`);
+  const work = ((await res.json()) as { message: CrossrefWork }).message;
+  const parts = (work.published ?? work.issued)?.["date-parts"]?.[0] ?? [];
+
+  return paperClip({
+    url: `https://doi.org/${doi}`,
+    title: clean(work.title?.[0]),
+    authors: (work.author ?? []).map((a) => a.name ?? [a.given, a.family].filter(Boolean).join(" ")).filter(Boolean),
+    venue: clean(work["container-title"]?.[0]) ?? clean(work.publisher),
+    date: parts.map((n, i) => (i ? String(n).padStart(2, "0") : String(n))).join("-"),
+    // JATS XML, usually opening with a "Abstract" heading.
+    abstract: clean(work.abstract?.replace(/<jats:title>[\s\S]*?<\/jats:title>/, "")),
+    doi,
+  });
+}
+
+/** Journals and proceedings sites describe papers with Highwire citation_* tags, for Google Scholar. */
+function citationPaper(html: string, url: string): Fetched | undefined {
+  const tags = metaTags(html);
+  const one = (...keys: string[]) => clean(keys.map((k) => tags.find(([key]) => key === k)?.[1]).find(Boolean));
+  const title = one("citation_title");
+  if (!title) return undefined;
+  const pdf = one("citation_pdf_url");
+
+  return paperClip({
+    url,
+    title,
+    // "Vaswani, Ashish" → "Ashish Vaswani".
+    authors: tags
+      .filter(([key]) => key === "citation_author")
+      .map(([, name]) => clean(name)!.replace(/^([^,]+),\s*([^,]+)$/, "$2 $1")),
+    venue:
+      one("citation_journal_title", "citation_conference_title", "citation_publisher", "og:site_name") ??
+      new URL(url).host.replace(/^www\./, ""),
+    date: one("citation_publication_date", "citation_date", "citation_online_date")?.replaceAll("/", "-"),
+    abstract: meaningful(one("citation_abstract", "og:description", "description")),
+    arxiv: one("citation_arxiv_id"),
+    doi: one("citation_doi")?.replace(/^doi:/i, ""),
+    pdf: pdf && new URL(pdf, url).toString(),
+  });
+}
+
+/**
+ * Semantic Scholar knows most papers by DOI or arXiv id: it fills in an abstract the source
+ * didn't give, and an arXiv copy (and so a free PDF) of a journal or proceedings paper.
+ * Best effort: its public API is rate limited, and the clip is fine without it.
+ */
+async function fillFromSemanticScholar(clip: Fetched) {
+  const paper = clip.paper!;
+  if (clip.excerpt && (paper.arxiv || paper.pdf)) return;
+  const id = paper.doi ? `DOI:${paper.doi}` : paper.arxiv && `ARXIV:${paper.arxiv}`;
+  const fields = "title,abstract,externalIds";
+  const base = "https://api.semanticscholar.org/graph/v1/paper";
+  const url = id
+    ? `${base}/${encodeURIComponent(id)}?fields=${fields}`
+    : `${base}/search/match?query=${encodeURIComponent(clip.title!)}&fields=${fields}`;
+  try {
+    let res = await fetch(url, { headers: API_HEADERS });
+    // The shared public pool throttles bursts; one patient retry usually gets through.
+    if (res.status === 429) res = await new Promise((r) => setTimeout(r, 3000)).then(() => fetch(url, { headers: API_HEADERS }));
+    if (!res.ok) return;
+    type Found = { title?: string; abstract?: string | null; externalIds?: { ArXiv?: string } };
+    const body = (await res.json()) as Found & { data?: Found[] };
+    const found = id ? body : body.data?.[0];
+    // A title search can return a near miss; only an exact title is the same paper.
+    if (!found || (!id && simplify(found.title ?? "") !== simplify(clip.title!))) return;
+    clip.excerpt ??= clean(found.abstract ?? undefined);
+    if (!paper.arxiv && found.externalIds?.ArXiv) {
+      paper.arxiv = found.externalIds.ArXiv;
+      paper.pdf ??= `https://arxiv.org/pdf/${paper.arxiv}`;
+    }
+  } catch {
+    // Offline or rate limited; keep what the source gave.
+  }
+}
+
+function simplify(title: string): string {
+  return title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function paperClip(p: {
+  url: string;
+  title?: string;
+  authors: string[];
+  venue?: string;
+  /** YYYY, YYYY-MM or YYYY-MM-DD. */
+  date?: string;
+  abstract?: string;
+  arxiv?: string;
+  doi?: string;
+  pdf?: string;
+}): Fetched {
+  if (!p.title) throw new Error("no title found");
+  const year = Number(p.date?.slice(0, 4)) || undefined;
+  return {
+    kind: "paper",
+    url: p.url,
+    title: p.title,
+    author: p.authors.length > 2 ? `${p.authors[0]} et al.` : p.authors.join(" and ") || undefined,
+    source: p.venue ?? "Paper",
+    // Some sites' descriptions are just the author list and venue, not an abstract.
+    excerpt: p.authors.slice(0, 2).every((a) => p.abstract?.includes(a)) && p.authors.length > 1 ? undefined : p.abstract,
+    published: /^\d{4}-\d{2}-\d{2}$/.test(p.date ?? "") ? p.date : undefined,
+    paper: { authors: p.authors, year, arxiv: p.arxiv, doi: p.doi, pdf: p.pdf },
+  };
 }
 
 // ---- tweets ------------------------------------------------------------------------------------
@@ -131,7 +315,7 @@ type Syndicated = {
   mediaDetails?: { type: string; media_url_https: string }[];
 };
 
-async function fetchTweet(url: string): Promise<Omit<Clip, "id" | "saved" | "tags">> {
+async function fetchTweet(url: string): Promise<Fetched> {
   const id = tweetId(url)!;
   // The token X's own embed widget sends; derived from the id.
   const token = ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
@@ -162,7 +346,7 @@ async function fetchTweet(url: string): Promise<Omit<Clip, "id" | "saved" | "tag
 }
 
 /** Fallback for tweets the syndication endpoint won't describe: X's oEmbed, text and author only. */
-async function fetchTweetOembed(url: string): Promise<Omit<Clip, "id" | "saved" | "tags">> {
+async function fetchTweetOembed(url: string): Promise<Fetched> {
   const res = await fetch(`https://publish.twitter.com/oembed?omit_script=1&url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error(`X returned ${res.status}; the tweet may be deleted or private`);
   const { html, author_name, author_url } = (await res.json()) as { html: string; author_name: string; author_url: string };
@@ -183,10 +367,17 @@ async function fetchTweetOembed(url: string): Promise<Omit<Clip, "id" | "saved" 
 
 // ---- articles and newsletters --------------------------------------------------------------------
 
-async function fetchPage(url: string, kind?: ClipKind): Promise<Omit<Clip, "id" | "saved" | "tags">> {
+async function fetchPage(url: string, kind?: ClipKind): Promise<Fetched> {
+  if (/^https?:\/\/(www\.)?openreview\.net\//.test(url)) {
+    throw new Error("OpenReview shows scripts a browser check instead of the paper; clip its arXiv link instead");
+  }
   const res = await fetch(url, { headers: HEADERS, redirect: "follow" });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const html = await res.text();
+  if (!kind || kind === "paper") {
+    const paper = citationPaper(html, res.url || url);
+    if (paper) return paper;
+  }
   const meta = readMeta(html);
   const ld = readJsonLd(html);
   const finalUrl = new URL(meta["og:url"] || canonical(html) || res.url || url, res.url || url).toString();
@@ -216,16 +407,26 @@ async function fetchPage(url: string, kind?: ClipKind): Promise<Omit<Clip, "id" 
   };
 }
 
+/** Every <meta> tag as [property, name or itemprop; content], in page order. Values may be unquoted. */
+function metaTags(html: string): [string, string][] {
+  const tags: [string, string][] = [];
+  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const attrs = Object.fromEntries(
+      [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)].map((m) => [
+        m[1].toLowerCase(),
+        m[2] ?? m[3] ?? m[4].replace(/\/$/, ""),
+      ]),
+    );
+    const key = (attrs.property ?? attrs.name ?? attrs.itemprop)?.toLowerCase();
+    if (key && attrs.content) tags.push([key, attrs.content]);
+  }
+  return tags;
+}
+
 /** <meta> tags keyed by property, name or itemprop. The first value for a key wins. */
 function readMeta(html: string): Record<string, string> {
   const meta: Record<string, string> = {};
-  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
-    const attrs = Object.fromEntries(
-      [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map((m) => [m[1].toLowerCase(), m[2] ?? m[3]]),
-    );
-    const key = (attrs.property ?? attrs.name ?? attrs.itemprop)?.toLowerCase();
-    if (key && attrs.content && !(key in meta)) meta[key] = attrs.content;
-  }
+  for (const [key, content] of metaTags(html)) if (!(key in meta)) meta[key] = content;
   return meta;
 }
 

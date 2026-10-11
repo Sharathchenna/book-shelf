@@ -11,6 +11,7 @@ import { sectionLinks, TopBar } from "./top-bar";
 
 const BLURB: Record<ClipKind, (items: Clip[]) => string> = {
   article: () => "Essays and long reads from around the web, with notes in the margins.",
+  paper: () => "Research worth the close read: abstracts, authors and where each one appeared.",
   newsletter: (items) => {
     const publications = new Set(items.map((c) => c.source)).size;
     return `Issues worth keeping from ${publications} ${publications === 1 ? "publication" : "publications"} in the inbox.`;
@@ -26,7 +27,7 @@ export function clipMetadata(kind: ClipKind): Metadata {
   return { title, description, openGraph: { title, description }, twitter: { title, description } };
 }
 
-/** One kind of clipping (articles, newsletters or tweets) on its own page. */
+/** One kind of clipping (articles, papers, newsletters or tweets) on its own page. */
 export function ClipPage({ kind }: { kind: ClipKind }) {
   const items = itemsOf(kind);
   if (items.length === 0) notFound();

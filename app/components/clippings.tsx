@@ -12,8 +12,10 @@ const date = (iso: string, format = monthYear) => format.format(new Date(`${iso}
 const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip }) => React.ReactNode }> = {
   // Masonry: cards with and without images keep their natural heights.
   article: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: ArticleCard },
+  // Two wide columns: titles and abstracts need the measure.
+  paper: { list: "grid grid-cols-1 gap-4 md:grid-cols-2 [&>li>a]:h-full", Card: PaperCard },
   // An even grid, so the letter-style cards and their postmarks line up.
-  newsletter: { list: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a]:h-full", Card: NewsletterCard },
+  newsletter: { list: "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a]:h-full", Card: NewsletterCard },
   tweet: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: TweetCard },
 };
 
@@ -54,6 +56,35 @@ function ArticleCard({ clip }: { clip: Clip }) {
         <Byline parts={[clip.author !== clip.source && clip.author, clip.published && date(clip.published)]} />
       </div>
     </>
+  );
+}
+
+/** Styled like a title page: venue and year, title, authors, then the abstract. */
+function PaperCard({ clip }: { clip: Clip }) {
+  const paper = clip.paper!;
+  const shown = paper.authors.slice(0, 4);
+  const more = paper.authors.length - shown.length;
+  return (
+    <div className="flex h-full flex-col p-6">
+      <p className="flex items-baseline justify-between gap-3 text-[11px] font-medium tracking-[0.14em] text-muted uppercase">
+        <span className="truncate">{clip.source}</span>
+        {paper.year && <span className="shrink-0 font-serif text-sm tracking-normal normal-case italic">{paper.year}</span>}
+      </p>
+      <h3 className="mt-3 font-serif text-xl leading-snug text-balance">{clip.title}</h3>
+      {shown.length > 0 && (
+        <p className="mt-2 text-sm text-fg/80">
+          {shown.join(", ")}
+          {more > 0 && <span className="text-muted"> + {more} more</span>}
+        </p>
+      )}
+      {clip.excerpt && <p className="mt-3 line-clamp-4 text-sm text-muted">{clip.excerpt}</p>}
+      <Note text={clip.note} />
+      <p className="mt-auto flex flex-wrap items-center gap-2 pt-4 text-xs text-muted">
+        {paper.arxiv && <span className="rounded-md bg-chip px-1.5 py-0.5 font-mono">arXiv:{paper.arxiv}</span>}
+        {!paper.arxiv && paper.doi && <span className="truncate rounded-md bg-chip px-1.5 py-0.5 font-mono">doi:{paper.doi}</span>}
+        {paper.pdf && <span className="rounded-md border border-line px-1.5 py-0.5 font-medium">PDF</span>}
+      </p>
+    </div>
   );
 }
 
