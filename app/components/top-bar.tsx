@@ -3,6 +3,7 @@ import { CLIP_LABEL, clipPath, inPageOrder } from "@/lib/clippings";
 import type { ClipKind } from "@/lib/types";
 import { AddClip } from "./add-clip";
 import { Logo } from "./logo";
+import { SearchPalette } from "./search-palette";
 import { SyncButton } from "./sync-button";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -41,6 +42,7 @@ export function TopBar({ owner, current, kinds }: { owner: string; current: Sect
               {label}
             </Link>
           ))}
+          <SearchPalette />
           <AddClip />
           <SyncButton />
           <ThemeToggle />

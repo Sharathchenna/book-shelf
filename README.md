@@ -32,12 +32,12 @@ Copy `.env.example` to `.env.local`. Each feature turns on when its keys are set
 
 | Feature | Keys |
 | --- | --- |
-| Ask the shelf (Jev ranks the books) | `TYPESAFE_API_KEY` |
+| Ask the shelf, and search the whole site by meaning (Jev ranks) | `TYPESAFE_API_KEY` |
 | Short answers, and explain/recap in the reader (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Reading books on the shelf (password) | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters) |
 | Book and PDF storage in Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 
-Without `TYPESAFE_API_KEY`, the search box falls back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.
+Without `TYPESAFE_API_KEY`, the search box and the site search fall back to keyword search. Without R2, development stores books in `./.data`. Production refuses to start the reader without R2 unless you set `ALLOW_LOCAL_STORAGE=1`.
 
 ### Cloudflare R2
 
@@ -69,7 +69,7 @@ Every book's card can carry its own EPUB or PDF. Sign in with **Sign in** in the
 - Both readers have contents, in-book search, and highlights with notes. Your position, highlights and notes sync to R2.
 - Select a passage and choose **Explain**, or use the recap button (**Previously…**, or **Where you left off** in a paper). When you come back after a few days, a recap is offered. In a PDF, Explain also sends Claude an image of the selection, so equations and symbols that text extraction garbles still get explained.
 
-**Keyboard:** ←/→ turn pages, `T` contents, `N` notes, `/` search, `A` settings (theme and zoom in PDFs), `+`/`-`/`0` zoom in, out and fit (PDFs), `F` fullscreen, `Esc` closes things. On the shelf, `/` focuses search and `R` opens a random unread book.
+**Keyboard:** ←/→ turn pages, `T` contents, `N` notes, `/` search, `A` settings (theme and zoom in PDFs), `+`/`-`/`0` zoom in, out and fit (PDFs), `F` fullscreen, `Esc` closes things. On the shelf, `/` focuses search and `R` opens a random unread book. Anywhere on the site, `⌘K` (or Ctrl+K) opens site search.
 
 ### Privacy and safety
 
@@ -139,6 +139,7 @@ Notes:
 | `app/components/engine/` | The Shelf Engine: the isometric machine animation on the main page |
 | `app/page.tsx` | The shelf: spine marquee, ask box, Shelf Engine, profile, stats, insights, library |
 | `app/api/ask/route.ts`, `lib/ai/jev.ts`, `lib/ai/haiku.ts` | Ask the shelf: BM25 pre-filter → Jev ranking → streamed Haiku answer |
+| `app/api/search/route.ts`, `lib/search/site.ts`, `app/components/search-palette.tsx` | Site search (Search in the top bar, `⌘K`): books, papers, articles, newsletters and tweets, ranked by Jev |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login (signed JWT cookie) |
 | `lib/storage.ts`, `lib/library.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2 or local), EPUB parsing, PDF finalize and paper import |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |

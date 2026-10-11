@@ -47,20 +47,49 @@ type RankOptions = {
  * Ranks books against a request with one Jev "noul" (yes/no probability) per book,
  * the pattern TypeSafe documents for re-ranking. The probability is the % match.
  */
-export async function rankWithJev(items: Item[], options: RankOptions): Promise<Ranked[]> {
-  const batches: Item[][] = [];
-  for (let i = 0; i < items.length; i += BATCH) batches.push(items.slice(i, i + BATCH));
+export function rankWithJev(items: Item[], options: RankOptions): Promise<Ranked[]> {
+  return rankCards(
+    items.map((item) => ({ id: item.id, card: bookCard(item) })),
+    (key) => ({
+      type: "noul",
+      instructions:
+        options.instructions?.replace("{book}", `\`books.${key}\``) ??
+        `Does the book \`books.${key}\` fit what the reader is asking for in \`request\`?`,
+      criteria: {
+        true: "The book clearly fits: its subject, mood, genre, plot or the reader's own notes match the request.",
+        false: "The book does not fit, or only shares a word or surface topic with the request.",
+      },
+    }),
+    options,
+  );
+}
 
-  const question = (key: string): NoulQuestion => ({
-    type: "noul",
-    instructions:
-      options.instructions?.replace("{book}", `\`books.${key}\``) ??
-      `Does the book \`books.${key}\` fit what the reader is asking for in \`request\`?`,
-    criteria: {
-      true: "The book clearly fits: its subject, mood, genre, plot or the reader's own notes match the request.",
-      false: "The book does not fit, or only shares a word or surface topic with the request.",
-    },
-  });
+/**
+ * Ranks anything on the site (books, papers, articles, newsletter issues, tweets) against a
+ * search, each described by a short card.
+ */
+export function rankForSearch(cards: { id: string; card: string }[], query: string): Promise<Ranked[]> {
+  return rankCards(
+    cards,
+    (key) => ({
+      type: "noul",
+      instructions: `Is \`books.${key}\` something the person is looking for with the search in \`request\`?`,
+      criteria: {
+        true: "It clearly matches: its subject, ideas, author, kind or the reader's own notes are what the search is about.",
+        false: "It doesn't match, or only shares a word or a surface topic with the search.",
+      },
+    }),
+    { request: query },
+  );
+}
+
+async function rankCards(
+  items: { id: string; card: string }[],
+  question: (key: string) => NoulQuestion,
+  options: Pick<RankOptions, "request" | "context">,
+): Promise<Ranked[]> {
+  const batches: { id: string; card: string }[][] = [];
+  for (let i = 0; i < items.length; i += BATCH) batches.push(items.slice(i, i + BATCH));
 
   const results: Ranked[] = [];
   let next = 0;
@@ -74,7 +103,7 @@ export async function rankWithJev(items: Item[], options: RankOptions): Promise<
           state: {
             request: options.request,
             ...(options.context ? { reader_context: options.context } : {}),
-            books: Object.fromEntries(batch.map((item, i) => [keys[i], bookCard(item)])),
+            books: Object.fromEntries(batch.map((item, i) => [keys[i], item.card])),
           },
           questions: Object.fromEntries(keys.map((key) => [key, question(key)])),
         });

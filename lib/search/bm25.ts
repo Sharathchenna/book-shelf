@@ -32,10 +32,20 @@ export function searchText(item: Item): string {
  * so it favours recall: ties and zero scores keep their original (recent-first) order.
  */
 export function bm25(query: string, items: Item[], limit: number): Item[] {
-  const terms = [...new Set(tokens(query))];
-  if (!terms.length) return items.slice(0, limit);
+  return bm25By(query, items, searchText, limit);
+}
 
-  const docs = items.map((item) => tokens(searchText(item)));
+/** BM25 over anything, given its searchable text. */
+export function bm25By<T>(query: string, items: T[], text: (item: T) => string, limit: number): T[] {
+  return bm25Scored(query, items, text, limit).map((s) => s.item);
+}
+
+/** As `bm25By`, with each item's score (0 when no search term appears in it). */
+export function bm25Scored<T>(query: string, items: T[], text: (item: T) => string, limit: number): { item: T; score: number }[] {
+  const terms = [...new Set(tokens(query))];
+  if (!terms.length) return items.slice(0, limit).map((item) => ({ item, score: 0 }));
+
+  const docs = items.map((item) => tokens(text(item)));
   const avgLength = docs.reduce((sum, d) => sum + d.length, 0) / Math.max(docs.length, 1);
   const df = new Map<string, number>();
   for (const doc of docs) for (const t of new Set(doc)) df.set(t, (df.get(t) ?? 0) + 1);
@@ -58,5 +68,5 @@ export function bm25(query: string, items: Item[], limit: number): Item[] {
   return scored
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, limit)
-    .map((s) => s.item);
+    .map(({ item, score }) => ({ item, score }));
 }
