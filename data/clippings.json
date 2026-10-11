@@ -1,0 +1,240 @@
+{
+ "items": [
+  {
+   "kind": "newsletter",
+   "url": "https://www.henrikkarlsson.xyz/p/looking-for-alice",
+   "title": "Looking for Alice",
+   "author": "Henrik Karlsson",
+   "source": "Escaping Flatland",
+   "image": "https://substackcdn.com/image/fetch/$s_!yPWW!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fbucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com%2Fpublic%2Fimages%2F3c6398db-b77f-41fe-8604-5639f4717a9a_800x688.jpeg",
+   "published": "2023-01-17",
+   "minutes": 13,
+   "id": "19cb7c03d77e",
+   "saved": "2026-10-02",
+   "tags": [
+    "life"
+   ]
+  },
+  {
+   "kind": "article",
+   "url": "https://paulgraham.com/greatwork.html",
+   "title": "How to Do Great Work",
+   "source": "Paul Graham",
+   "minutes": 51,
+   "id": "fedc86cb6681",
+   "saved": "2026-09-28",
+   "tags": [
+    "essays",
+    "craft"
+   ],
+   "author": "Paul Graham",
+   "note": "Curiosity, delight and the desire to do something impressive. Reread every year."
+  },
+  {
+   "kind": "article",
+   "url": "https://www.robinsloan.com/notes/home-cooked-app/",
+   "title": "An app can be a home-cooked meal",
+   "source": "Robin Sloan",
+   "excerpt": "I made a messaging app for my family and my family only.",
+   "image": "https://www.robinsloan.com/img/boopsnoop-card-v2.png",
+   "minutes": 7,
+   "id": "793e86e6d5cb",
+   "saved": "2026-09-12",
+   "tags": [
+    "software",
+    "craft"
+   ],
+   "author": "Robin Sloan"
+  },
+  {
+   "kind": "newsletter",
+   "url": "https://www.experimental-history.com/p/the-rise-and-fall-of-peer-review",
+   "title": "The rise and fall of peer review",
+   "author": "Adam Mastroianni",
+   "source": "Experimental History",
+   "excerpt": "Why the greatest scientific experiment in history failed, and why that's a great thing",
+   "image": "https://substackcdn.com/image/fetch/$s_!zcXf!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fbucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com%2Fpublic%2Fimages%2F24ab2184-c024-44c5-81cc-4bc14851b965_1762x1173.jpeg",
+   "published": "2022-12-13",
+   "minutes": 16,
+   "id": "d3869fdf1f54",
+   "saved": "2026-09-05",
+   "tags": [
+    "science"
+   ],
+   "note": "Funny and devastating."
+  },
+  {
+   "kind": "article",
+   "url": "https://maggieappleton.com/garden-history",
+   "title": "A Brief History & Ethos of the Digital Garden",
+   "author": "Maggie Appleton",
+   "source": "Maggie Appleton",
+   "excerpt": "A newly revived philosophy for publishing personal knowledge on the web",
+   "image": "https://maggieappleton.com/og/garden-history.png",
+   "published": "2020-06-10",
+   "minutes": 21,
+   "id": "710d01e65a26",
+   "saved": "2026-08-19",
+   "tags": [
+    "web",
+    "notes"
+   ],
+   "note": "Why this shelf has notes in the margins instead of finished reviews."
+  },
+  {
+   "kind": "tweet",
+   "url": "https://x.com/patrickc/status/929862403763798016",
+   "author": "Patrick Collison",
+   "source": "X",
+   "published": "2017-11-13",
+   "tweet": {
+    "name": "Patrick Collison",
+    "handle": "patrickc",
+    "avatar": "https://pbs.twimg.com/profile_images/825622525342199809/_iAaSUQf_bigger.jpg",
+    "text": "So, Sunday evening Twitter: which five books have influenced you the most? (In terms of shaping your worldview.)",
+    "media": [],
+    "likes": 2329
+   },
+   "id": "tweet-929862403763798016",
+   "saved": "2026-08-02",
+   "tags": [
+    "books"
+   ],
+   "note": "The replies are a better reading list than most reading lists."
+  },
+  {
+   "kind": "article",
+   "url": "https://paulgraham.com/read.html",
+   "title": "The Need to Read",
+   "source": "Paul Graham",
+   "minutes": 2,
+   "id": "50b1b7eb47a5",
+   "saved": "2026-07-03",
+   "tags": [
+    "essays",
+    "writing"
+   ],
+   "author": "Paul Graham"
+  },
+  {
+   "kind": "article",
+   "url": "https://danluu.com/look-stupid/",
+   "title": "Willingness to look stupid",
+   "source": "Dan Luu",
+   "minutes": 25,
+   "id": "ec0c8d8c2b0d",
+   "saved": "2026-06-21",
+   "tags": [
+    "essays",
+    "learning"
+   ],
+   "author": "Dan Luu"
+  },
+  {
+   "kind": "tweet",
+   "url": "https://x.com/jack/status/20",
+   "author": "jack",
+   "source": "X",
+   "published": "2006-03-21",
+   "tweet": {
+    "name": "jack",
+    "handle": "jack",
+    "avatar": "https://pbs.twimg.com/profile_images/1661201415899951105/azNjKOSH_bigger.jpg",
+    "text": "just setting up my twttr",
+    "media": [],
+    "likes": 311819
+   },
+   "id": "tweet-20",
+   "saved": "2026-06-01",
+   "tags": [
+    "internet history"
+   ]
+  },
+  {
+   "kind": "article",
+   "url": "https://www.theparisreview.org/interviews/4825/the-art-of-fiction-no-21-ernest-hemingway",
+   "title": "Ernest Hemingway, The Art of Fiction No. 21",
+   "author": "Interviewed by George Plimpton",
+   "source": "The Paris Review",
+   "excerpt": "From things that have happened and from things as they exist and from all things that you know and all those you cannot know, you make something through your invention that is not a representation but a whole new thing truer than anything true and alive, and you make it alive, and if you make it wel...",
+   "image": "https://www.theparisreview.org/il/415e22c282/medium/ErnestHemingway-1.jpg",
+   "minutes": 8,
+   "id": "e029cdd386de",
+   "saved": "2026-05-30",
+   "tags": [
+    "writing",
+    "interviews"
+   ],
+   "note": "The iceberg, the standing desk, and rewriting the last page of Farewell to Arms 39 times."
+  },
+  {
+   "kind": "article",
+   "url": "https://www.theatlantic.com/magazine/archive/2008/07/is-google-making-us-stupid/306868/",
+   "title": "Is Google Making Us Stupid?",
+   "author": "Nicholas Carr",
+   "source": "The Atlantic",
+   "excerpt": "What the Internet is doing to our brains",
+   "image": "https://cdn.theatlantic.com/thumbor/-krK-VdrbsjAvT9zYgi1Oq7EE98=/133x285:2028x1272/1200x625/media/img/2017/10/0708_WEL_Carr_Mach01-1/original.jpg",
+   "published": "2008-07-01",
+   "minutes": 18,
+   "id": "133f7bf10e70",
+   "saved": "2026-04-17",
+   "tags": [
+    "attention",
+    "reading"
+   ]
+  },
+  {
+   "kind": "newsletter",
+   "url": "https://stratechery.com/2015/aggregation-theory/",
+   "title": "Aggregation Theory",
+   "source": "Stratechery",
+   "excerpt": "The disruption caused by the Internet in industry after industry has a common theoretical basis described by Aggregation Theory.",
+   "image": "https://i0.wp.com/stratechery.com/wp-content/uploads/2015/07/Screen-Shot-2018-03-27-at-12.47.09-PM.png?fit=1200%2C515&ssl=1",
+   "published": "2015-07-21",
+   "minutes": 6,
+   "id": "3e99320073ce",
+   "saved": "2026-03-08",
+   "tags": [
+    "strategy",
+    "tech"
+   ],
+   "author": "Ben Thompson"
+  },
+  {
+   "kind": "newsletter",
+   "url": "https://www.astralcodexten.com/p/heuristics-that-almost-always-work",
+   "title": "Heuristics That Almost Always Work",
+   "author": "Scott Alexander",
+   "source": "Astral Codex Ten",
+   "image": "https://substackcdn.com/image/fetch/$s_!G9wI!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fbucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com%2Fpublic%2Fimages%2F5adbf108-fe67-4cd8-97a9-7c434c9a715b_736x526.jpeg",
+   "published": "2022-02-08",
+   "minutes": 10,
+   "id": "8b36c415b991",
+   "saved": "2026-02-14",
+   "tags": [
+    "thinking"
+   ]
+  },
+  {
+   "kind": "tweet",
+   "url": "https://x.com/naval/status/1002103360646823936",
+   "author": "Naval",
+   "source": "X",
+   "published": "2018-05-31",
+   "tweet": {
+    "name": "Naval",
+    "handle": "naval",
+    "avatar": "https://pbs.twimg.com/profile_images/1256841238298292232/ycqwaMI2_bigger.jpg",
+    "text": "How to Get Rich (without getting lucky):",
+    "media": [],
+    "likes": 287816
+   },
+   "id": "tweet-1002103360646823936",
+   "saved": "2026-01-11",
+   "tags": [
+    "threads"
+   ]
+  }
+ ]
+}

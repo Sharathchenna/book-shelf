@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Built by `bun run deploy` (OpenNext); don't change `main` or `assets`.
+  "main": ".open-next/worker.js",
+  "name": "book-shelf",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  // Must match `name`: OpenNext calls back into the worker for some requests.
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "book-shelf" }],
+  "observability": { "enabled": true }
+}

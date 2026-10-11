@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# open library import cache
+/.cache/
+
+# local development storage for the reader
+/.data/
+!.env.example
+
+# cloudflare workers (opennext)
+/.open-next/
+/.wrangler/
+.dev.vars*
+!.dev.vars.example

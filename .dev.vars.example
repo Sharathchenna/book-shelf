@@ -1,0 +1,11 @@
+# Secrets for `bun run preview` (the Workers runtime locally). Copy to .dev.vars.
+# In production set each with `bunx wrangler secret put NAME`.
+NEXTJS_ENV=development
+OWNER_PASSWORD=
+SESSION_SECRET=
+TYPESAFE_API_KEY=
+ANTHROPIC_API_KEY=
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=
