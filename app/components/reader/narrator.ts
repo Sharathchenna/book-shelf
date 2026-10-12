@@ -38,6 +38,8 @@ export type NarratorState = {
   download?: { loaded: number; total: number };
   voice: string;
   rate: number;
+  /** Tap to read: while listening, a tap on a sentence reads from there. */
+  tapToRead: boolean;
   section: number;
   /** The sentence being read, and how many the chapter has. */
   line: number;
@@ -105,13 +107,34 @@ async function spokenByServer(text: string, voice: string): Promise<Float32Array
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const prefs = (): { voice: string; rate: number } => {
+const prefs = (): { voice: string; rate: number; tapToRead: boolean } => {
+  const defaults = { voice: VOICES[0].id, rate: 1, tapToRead: false };
   try {
-    return { voice: VOICES[0].id, rate: 1, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+    return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
   } catch {
-    return { voice: VOICES[0].id, rate: 1 };
+    return defaults;
   }
 };
+
+/** The text position at a point in a document, as a collapsed range, or null where there's no text. */
+function caretAt(doc: Document, x: number, y: number): Range | null {
+  const at = (doc as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null })
+    .caretPositionFromPoint?.(x, y);
+  let range: Range | null = null;
+  if (at) {
+    range = doc.createRange();
+    range.setStart(at.offsetNode, at.offset);
+  } else {
+    range = doc.caretRangeFromPoint?.(x, y) ?? null;
+  }
+  // Only on text: a tap in a margin or on a picture snaps to the nearest text, which isn't what was meant.
+  const node = range?.startContainer;
+  if (!range || node?.nodeType !== 3) return null;
+  const word = doc.createRange();
+  word.selectNodeContents(node);
+  const hit = [...word.getClientRects()].some((r) => x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4);
+  return hit ? range : null;
+}
 
 /**
  * The voice: the GPU server when it's there, else Kokoro in the worker, which also splits text
@@ -318,11 +341,12 @@ export class Narrator {
     private view: FoliateView,
     private book: NarratorBook,
   ) {
-    const { voice, rate } = prefs();
+    const { voice, rate, tapToRead } = prefs();
     this.state = {
       status: "off",
       voice,
       rate,
+      tapToRead,
       section: 0,
       line: 0,
       lines: 0,
@@ -347,7 +371,9 @@ export class Narrator {
   getState = () => this.state;
 
   private set(patch: Partial<NarratorState>) {
+    const wasOff = this.state.status === "off";
     this.state = { ...this.state, ...patch };
+    if (wasOff !== (this.state.status === "off")) this.pointer();
     for (const fn of this.subscribers) fn();
   }
 
@@ -364,6 +390,32 @@ export class Narrator {
   startAt(section: number, range: Range) {
     this.unlock();
     void this.play(section, offsetAt(this.textOf(range.startContainer.ownerDocument!), range.startContainer, range.startOffset));
+  }
+
+  /**
+   * With tap to read on, reads from the sentence at a tap on the page (`x`, `y` in the page's own
+   * coordinates). Returns false, leaving the tap to do what it usually does, when it's off or the
+   * tap wasn't on text.
+   */
+  tapAt(doc: Document, x: number, y: number): boolean {
+    if (!this.state.tapToRead || this.state.status === "off") return false;
+    const content = this.view.renderer.getContents().find((c) => c.doc === doc);
+    const range = content && caretAt(doc, x, y);
+    if (!content || !range) return false;
+    this.startAt(content.index, range);
+    return true;
+  }
+
+  setTapToRead(on: boolean) {
+    this.set({ tapToRead: on });
+    this.savePrefs();
+    this.pointer();
+  }
+
+  /** Shows, with the pointer, that a tap on the page reads from there (the `narrator-tap` rule in foliate.ts). */
+  private pointer(docs = this.view.renderer.getContents().map((c) => c.doc)) {
+    const on = this.state.tapToRead && this.state.status !== "off";
+    for (const doc of docs) doc.documentElement.classList.toggle("narrator-tap", on);
   }
 
   pause() {
@@ -1129,8 +1181,9 @@ export class Narrator {
 
   /** A chapter laid out again (or newly shown): put the highlight back on it. */
   private onLoad = (event: Event) => {
-    const { index } = (event as CustomEvent<{ index: number }>).detail;
+    const { doc, index } = (event as CustomEvent<{ doc: Document; index: number }>).detail;
     if (this.reading?.section === index) requestAnimationFrame(() => void this.show(false));
+    this.pointer([doc]);
   };
 
   // ---- the lock screen and headphone buttons -------------------------------------------------
@@ -1169,7 +1222,7 @@ export class Narrator {
   }
 
   private savePrefs() {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.state.voice, rate: this.state.rate }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.state.voice, rate: this.state.rate, tapToRead: this.state.tapToRead }));
   }
 }
 

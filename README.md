@@ -305,6 +305,10 @@ A search costs a fraction of a cent and returns in under a second. Without Jev, 
 
 EPUBs, papers included, can be read aloud. `L`, or the headphones button, starts at the top of the page on screen. The sentence being read is highlighted, and the page turns with it.
 
+To start somewhere else:
+- **From a selection:** select text and choose **Listen**.
+- **Tap to read:** turn it on with the pointer button in the player, or the switch in the player's menu (phones use the switch). While listening, a tap on any sentence reads from there instead of turning the page. The setting is remembered.
+
 - **The voice** is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), run in the browser with [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js), so it costs nothing and has no usage limit. There are five voices: Heart, Bella, Emma, Michael and George.
   - **Download:** the model downloads from Hugging Face the first time, 326 MB, then stays in the browser's cache.
   - **Speed:** on a computer's GPU (WebGPU), it speaks several times faster than it reads. Without one, it uses a smaller 92 MB model on the CPU, which is slower than real time, so there are pauses between sentences.

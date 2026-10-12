@@ -104,6 +104,11 @@ export function ListenBar({
         >
           {s.rate}×
         </button>
+        <span className="hidden sm:contents">
+          <RoundButton label="Tap a sentence to read from it" active={s.tapToRead} onClick={() => narrator.setTapToRead(!s.tapToRead)}>
+            <Icon d="M9 9l10 4.2-4.3 1.5L13.2 19zM4.5 4.5l1.8 1.8M9.5 3v2.5M3 9.5h2.5" />
+          </RoundButton>
+        </span>
         <RoundButton
           label="Voice and saving"
           active={menu}
@@ -179,6 +184,21 @@ function ListenMenu({
           </button>
         ))}
       </div>
+
+      <button
+        role="switch"
+        aria-checked={s.tapToRead}
+        onClick={() => narrator.setTapToRead(!s.tapToRead)}
+        className="mt-4 flex w-full items-center gap-3 rounded-2xl text-left"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Tap to read from a sentence</span>
+          <span className="block text-[11px] text-muted">While listening, tapping a sentence on the page reads from there.</span>
+        </span>
+        <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${s.tapToRead ? "bg-ink" : "bg-chip"}`} aria-hidden>
+          <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-[left] ${s.tapToRead ? "left-[18px]" : "left-0.5"}`} />
+        </span>
+      </button>
 
       <p className="mt-4 text-xs font-semibold tracking-wide text-muted uppercase">Listen anywhere</p>
       <p className="mt-1.5 text-sm leading-snug">

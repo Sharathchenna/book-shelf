@@ -189,6 +189,8 @@ export function bookCss(s: ReaderSettings): string {
     ::selection { background: ${s.theme === "night" ? "rgba(111,211,168,.35)" : "rgba(30,122,88,.22)"}; }
     /* The sentence being read aloud (see narrator.ts). */
     ::highlight(narration) { background-color: ${s.theme === "night" ? "rgba(111,211,168,.22)" : "rgba(30,122,88,.14)"}; color: inherit; }
+    /* Tap to read: a tap on the page reads from there. A class, since foliate hides the cursor with an inline style. */
+    html.narrator-tap { cursor: pointer; }
     pre { white-space: pre-wrap !important; }
     aside[epub|type~="footnote"], aside[epub|type~="endnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
   `;

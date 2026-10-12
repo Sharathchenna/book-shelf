@@ -310,6 +310,8 @@ export function ReaderView({ id }: { id: string }) {
       setPanel(null);
       return;
     }
+    // Tap to read, while listening: the tap reads from the sentence tapped instead.
+    if (listening && narrator?.tapAt(doc, e.clientX, e.clientY)) return;
     const frame = doc.defaultView?.frameElement?.getBoundingClientRect();
     const x = (frame?.left ?? 0) + e.clientX;
     const zone = x / window.innerWidth;
