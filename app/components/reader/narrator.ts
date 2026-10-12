@@ -50,8 +50,11 @@ export type NarratorState = {
   saved: number;
   /** Chapters there are to save. */
   savable: number;
-  /** Saving the whole book: whether it's running, and the chapter it's on. */
-  saving: { section: number | null } | null;
+  /**
+   * Saving the whole book: whether it's running, the chapter it's on, and how far into that
+   * chapter: sentences made, of how many, and roughly how many seconds are left.
+   */
+  saving: { section: number | null; made?: number; total?: number; left?: number } | null;
   /** Where the voice runs here, once known. Saving needs the GPU. */
   engine?: Engine;
 };
@@ -161,7 +164,17 @@ class Voice {
 }
 
 /** A chapter being recorded: every sentence in order, encoded to MP3 as it comes, then saved. */
-type Take = { section: number; voice: string; cancelled: boolean; done: Promise<void>; lines: Map<number, Promise<Float32Array>> };
+type Take = {
+  section: number;
+  voice: string;
+  cancelled: boolean;
+  done: Promise<void>;
+  lines: Map<number, Promise<Float32Array>>;
+  /** Sentences encoded so far, of how many, and when the recording started. */
+  made: number;
+  total: number;
+  started: number;
+};
 
 const silence = (seconds: number) => new Float32Array(Math.round(SAMPLE_RATE * seconds));
 
@@ -410,7 +423,9 @@ export class Narrator {
         if (job.cancelled) break;
         if (!this.readable(section) || this.savedSections.has(section)) continue;
         this.set({ saving: { section } });
-        await this.record(await this.script(section)).done;
+        const take = this.record(await this.script(section));
+        this.showTake(take);
+        await take.done;
       }
     } catch (error) {
       if (!(error instanceof Stopped)) this.set({ error: (error as Error).message });
@@ -712,7 +727,7 @@ export class Narrator {
     const voice = this.ensureVoice();
     // Urgent while it's the chapter being listened to.
     const priority = () => (this.state.status !== "off" && this.state.section === section ? 0 : 1);
-    const take: Take = { section, voice: voiceId, cancelled: false, lines: new Map(), done: Promise.resolve() };
+    const take: Take = { section, voice: voiceId, cancelled: false, lines: new Map(), done: Promise.resolve(), made: 0, total: script.lines.length, started: Date.now() };
     // Every sentence is asked for now, in order; the queue makes them one at a time. Playback
     // takes them from `take.lines` (and drops them once played); the recording keeps its own list.
     const pending: (Promise<Float32Array> | null)[] = script.lines.map((line) => {
@@ -729,7 +744,11 @@ export class Narrator {
       let t = 0;
       for (let i = 0; i < script.lines.length; i++) {
         const line = script.lines[i];
-        const pcm = await pending[i]!;
+        // A sentence the voice fails on is tried once more before the chapter is given up.
+        const pcm = await pending[i]!.catch((error: Error) => {
+          if (error instanceof Stopped || take.cancelled) throw error;
+          return voice.speak(line.say, voiceId, priority, () => !take.cancelled);
+        });
         pending[i] = null;
         if (take.cancelled) throw new Stopped();
         // Not wanted for playback (heard already, or nobody's listening here): let it go.
@@ -737,6 +756,8 @@ export class Narrator {
         timings.push({ start: line.start, end: line.end, text: line.text, t0: round(t), t1: round(t + pcm.length / SAMPLE_RATE) });
         t += (pcm.length + Math.round(SAMPLE_RATE * line.pause)) / SAMPLE_RATE;
         await voice.encodeAdd(tag, concat(pcm, silence(line.pause)));
+        take.made = i + 1;
+        this.showTake(take);
       }
       const mp3 = await voice.encodeEnd(tag);
       if (take.cancelled) throw new Stopped();
@@ -751,6 +772,17 @@ export class Narrator {
       });
     this.takes.set(key, take);
     return take;
+  }
+
+  /** Shows how far the chapter being saved has got, when it's the one "save the whole book" is on. */
+  private showTake(take: Take) {
+    const saving = this.state.saving;
+    if (!saving || saving.section !== take.section || take.voice !== this.state.voice) return;
+    const { made, total } = take;
+    // Time left, from the pace so far; only once there's enough of it to go on.
+    const elapsed = (Date.now() - take.started) / 1000;
+    const left = made >= 10 && elapsed > 30 ? (elapsed / made) * (total - made) : undefined;
+    this.set({ saving: { section: take.section, made, total, left } });
   }
 
   private async upload(section: number, voice: string, mp3: Uint8Array, duration: number, lines: AudioLine[]) {

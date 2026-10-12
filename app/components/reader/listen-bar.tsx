@@ -14,6 +14,14 @@ const clock = (seconds: number) => {
 
 const mb = (bytes: number) => Math.max(1, Math.round(bytes / 1e6));
 
+/** "about 12 min left", rounded up so it never promises too soon. */
+const timeLeft = (seconds: number) => {
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 2) return "about a minute left";
+  if (minutes < 90) return `about ${minutes} min left`;
+  return `about ${Math.round(minutes / 60)} hours left`;
+};
+
 /** What the player says under the chapter title. */
 function status(s: NarratorState): string {
   if (s.status === "error") return s.error ?? "Something went wrong.";
@@ -56,7 +64,7 @@ export function ListenBar({
       className="fixed inset-x-3 z-40 transition-[bottom] duration-300"
       style={{ bottom: raised ? "4.6rem" : "0.75rem", right }}
     >
-      {menu && <ListenMenu narrator={narrator} state={s} onClose={() => setMenu(false)} />}
+      {menu && <ListenMenu narrator={narrator} state={s} chapter={chapter} onClose={() => setMenu(false)} />}
       <div className="reader-surface reader-pop mx-auto flex max-w-xl items-center gap-1 rounded-full py-1.5 pr-1.5 pl-2 sm:gap-2">
         <RoundButton label="Previous sentence" onClick={() => narrator.skip(-1)}>
           <Icon d="M11 7l-5 5 5 5M18 7l-5 5 5 5" />
@@ -112,8 +120,19 @@ export function ListenBar({
   );
 }
 
-function ListenMenu({ narrator, state: s, onClose }: { narrator: Narrator; state: NarratorState; onClose: () => void }) {
+function ListenMenu({
+  narrator,
+  state: s,
+  chapter,
+  onClose,
+}: {
+  narrator: Narrator;
+  state: NarratorState;
+  chapter: (section: number) => string;
+  onClose: () => void;
+}) {
   const noGpu = s.engine && s.engine.device !== "webgpu";
+  const saving = s.saving;
   return (
     <div role="dialog" aria-label="Voice and saving" className="reader-surface reader-pop mx-auto mb-2 max-w-xl rounded-[28px] p-4">
       <div className="flex items-center justify-between">
@@ -160,15 +179,26 @@ function ListenMenu({ narrator, state: s, onClose }: { narrator: Narrator; state
       </p>
       {noGpu ? (
         <p className="mt-2 text-sm text-muted">This browser speaks without a GPU, so it can&apos;t save chapters. Open the book in Chrome or Safari on a computer to save it.</p>
-      ) : s.saving ? (
-        <div className="mt-3 flex items-center gap-3">
-          <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-fg/20 border-t-accent" aria-hidden />
-          <p className="min-w-0 flex-1 text-sm">
-            {s.saving.section === null ? "Getting ready…" : `Saving chapter ${s.saving.section + 1}… Keep this tab open.`}
-          </p>
-          <button onClick={() => narrator.stopSaving()} className="rounded-full px-3 py-1.5 text-sm hover:bg-chip">
-            Stop
-          </button>
+      ) : saving ? (
+        <div className="mt-3">
+          <div className="flex items-center gap-3">
+            <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-fg/20 border-t-accent" aria-hidden />
+            <p className="min-w-0 flex-1 truncate text-sm">{saving.section === null ? "Getting ready…" : `Saving “${chapter(saving.section)}”`}</p>
+            <button onClick={() => narrator.stopSaving()} className="rounded-full px-3 py-1.5 text-sm hover:bg-chip">
+              Stop
+            </button>
+          </div>
+          {saving.total ? (
+            <>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-chip" role="progressbar" aria-valuemin={0} aria-valuemax={saving.total} aria-valuenow={saving.made ?? 0}>
+                <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${((saving.made ?? 0) / saving.total) * 100}%` }} />
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted tabular-nums">
+                Sentence {saving.made ?? 0} of {saving.total}
+                {saving.left !== undefined && ` · ${timeLeft(saving.left)}`} · Keep this tab open; the chapter is stored when it&apos;s done.
+              </p>
+            </>
+          ) : null}
         </div>
       ) : (
         s.saved < s.savable && (
