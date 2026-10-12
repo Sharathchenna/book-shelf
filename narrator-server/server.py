@@ -11,14 +11,25 @@ The Worker asks it for two things:
   its sentences' timings, through the same routes the browser saves with (narrator.ts), signed
   with the narrator token. GET /jobs?book= reports progress; DELETE /jobs?book= stops them.
 
+The GPU is shared, so the voice only holds GPU memory while it's working. This process never
+touches the GPU; the speaking happens in voice processes that it starts when there's work and
+that exit when there isn't: one for listening (started by /health, when the reader opens, and
+gone after LIVE_IDLE seconds unused), and up to WORKERS saving chapters side by side (gone
+WORKER_IDLE seconds after the last chapter). One sentence at a time leaves an A100 mostly idle,
+so several processes are what keep it busy. Each is capped at GPU_MB, and none starts unless
+the GPU has that much free beyond GPU_RESERVE_MB, which is left for whatever else runs there.
+
 Jobs waiting are kept in jobs/ and picked up again after a restart. Setup is in the README
-(Listening on a GPU server); narrator.service and narrator-tunnel.service keep it running.
+(On a GPU server); narrator.service and narrator-tunnel.service keep it running.
 """
 
 import json
 import logging
+import multiprocessing as mp
 import os
+import queue
 import re
+import subprocess
 import threading
 import time
 import urllib.error
@@ -29,8 +40,6 @@ from pathlib import Path
 
 import lameenc
 import numpy as np
-import torch
-from kokoro import KModel, KPipeline
 
 HOME = Path(__file__).resolve().parent
 PORT = int(os.environ.get("PORT", "8880"))
@@ -39,107 +48,35 @@ TOKEN = (HOME / "site-token").read_text().strip()
 JOBS = HOME / "jobs"
 REPO = "hexgrad/Kokoro-82M"
 
+WORKERS = int(os.environ.get("WORKERS", "4"))
+GPU_MB = int(os.environ.get("GPU_MB", "1536"))
+GPU_RESERVE_MB = int(os.environ.get("GPU_RESERVE_MB", "1024"))
+LIVE_IDLE = int(os.environ.get("LIVE_IDLE", "600"))
+WORKER_IDLE = int(os.environ.get("WORKER_IDLE", "60"))
+# A saving process that reports nothing for this long is stuck: it's stopped, and its chapter
+# retried. One that takes longer than LOAD to start is stopped too.
+STALL = 180
+LOAD = 300
+# What CUDA itself takes in each process, besides the memory PyTorch is capped at.
+CUDA_CONTEXT_MB = 512
+RETRIES = 2
+
 # The same as narrator.ts and narrator.worker.ts, so a chapter saved here plays like one saved there.
 SAMPLE_RATE = 24_000
 MP3_KBPS = 64
 CHUNK_GAP = round(SAMPLE_RATE * 0.06)
+# Saving speaks several sentences in one pass, up to this many phonemes (Kokoro takes 510): one
+# sentence at a time leaves the GPU mostly waiting. Each sentence is cut back out of the audio.
+GROUP = 500
 VOICES = {"af_heart", "af_bella", "bf_emma", "am_michael", "bm_george"}
 BOOK_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(processName)s %(message)s")
 log = logging.getLogger("narrator")
-
-# One model on the GPU, with a pronunciation pipeline per accent: American (a) and British (b).
-model = KModel(repo_id=REPO).to("cuda").eval()
-pipelines = {lang: KPipeline(lang_code=lang, repo_id=REPO, model=model) for lang in "ab"}
-# The GPU speaks one sentence at a time; a sentence to listen to waits for at most one being saved.
-gpu = threading.Lock()
-
-
-def speak(text: str, voice: str) -> np.ndarray:
-    """A sentence's audio at 24 kHz. Kokoro splits a long one into pieces, joined with a short gap."""
-    with gpu, torch.inference_mode():
-        parts = [r.audio.cpu().numpy() for r in pipelines[voice[0]](text, voice=voice, split_pattern=None) if r.audio is not None]
-    if not parts:
-        return np.zeros(0, dtype=np.float32)
-    gap = np.zeros(CHUNK_GAP, dtype=np.float32)
-    joined = [parts[0]]
-    for part in parts[1:]:
-        joined += [gap, part]
-    return np.concatenate(joined).astype(np.float32)
 
 
 def pcm16(audio: np.ndarray) -> bytes:
     return (np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
-
-
-# ---- saving chapters ------------------------------------------------------------------------
-
-
-class Job:
-    def __init__(self, book: str, voice: str, section: int, lines: list, urgent: bool):
-        self.book, self.voice, self.section, self.lines, self.urgent = book, voice, section, lines, urgent
-        self.state = "queued"
-        self.made = 0
-        self.started = 0.0
-        self.error = ""
-        self.cancelled = False
-
-    @property
-    def key(self) -> str:
-        return f"{self.book}.{self.voice}.{self.section}"
-
-    def report(self) -> dict:
-        out = {"section": self.section, "voice": self.voice, "state": self.state, "made": self.made, "total": len(self.lines)}
-        elapsed = time.time() - self.started
-        if self.state == "making" and self.made >= 10 and elapsed > 2:
-            out["left"] = round(elapsed / self.made * (len(self.lines) - self.made), 1)
-        if self.error:
-            out["error"] = self.error
-        return out
-
-
-jobs: dict[str, Job] = {}
-changed = threading.Condition()
-
-
-def save_file(job: Job):
-    JOBS.mkdir(exist_ok=True)
-    data = {"book": job.book, "voice": job.voice, "section": job.section, "lines": job.lines}
-    (JOBS / f"{job.key}.json").write_text(json.dumps(data))
-
-
-def drop_file(job: Job):
-    (JOBS / f"{job.key}.json").unlink(missing_ok=True)
-
-
-def enqueue(book: str, voice: str, chapters: list, urgent: bool) -> int:
-    added = 0
-    with changed:
-        for chapter in chapters:
-            job = Job(book, voice, int(chapter["section"]), chapter["lines"], urgent)
-            current = jobs.get(job.key)
-            if current and current.state in ("making", "saving"):
-                current.urgent = current.urgent or urgent
-                continue
-            jobs[job.key] = job
-            save_file(job)
-            added += 1
-        changed.notify()
-    return added
-
-
-def next_job() -> Job:
-    """Chapters someone is waiting to listen to first, then the rest in the order asked for."""
-    with changed:
-        while True:
-            queued = [j for j in jobs.values() if j.state == "queued"]
-            if queued:
-                job = next((j for j in reversed(queued) if j.urgent), queued[0])
-                job.state = "making"
-                job.started = time.time()
-                return job
-            changed.wait()
 
 
 def site(method: str, path: str, body=None, raw: bytes | None = None, content_type="application/json", absolute=False):
@@ -165,7 +102,117 @@ def site(method: str, path: str, body=None, raw: bytes | None = None, content_ty
         time.sleep(2**attempt)
 
 
-def make(job: Job):
+# ---- a voice process -------------------------------------------------------------------------
+
+
+class Cancelled(Exception):
+    pass
+
+
+def voice_process(wid: str, inbox, events, cancel):
+    """
+    Loads Kokoro on the GPU, then speaks what it's given until there's nothing for a while, and
+    exits, which gives the GPU its memory back. "live" speaks sentences; the others save chapters.
+    """
+    import torch
+    from kokoro import KModel, KPipeline
+
+    # Many of these run at once: a few CPU threads each is plenty for the parts on the CPU.
+    torch.set_num_threads(2)
+    total = torch.cuda.get_device_properties(0).total_memory
+    torch.cuda.set_per_process_memory_fraction(min(1.0, GPU_MB * 2**20 / total))
+    model = KModel(repo_id=REPO).to("cuda").eval()
+    # A pronunciation pipeline per accent, American (a) and British (b), and the same without the model.
+    pipelines = {lang: KPipeline(lang_code=lang, repo_id=REPO, model=model) for lang in "ab"}
+    g2p = {lang: KPipeline(lang_code=lang, repo_id=REPO, model=False) for lang in "ab"}
+    tokens = lambda ps: sum(1 for c in ps if c in model.vocab)  # noqa: E731 - what the model reads of a phoneme string
+
+    def speak(text: str, voice: str) -> np.ndarray:
+        """A sentence's audio at 24 kHz. Kokoro splits a long one into pieces, joined with a short gap."""
+        with torch.inference_mode():
+            parts = [r.audio.cpu().numpy() for r in pipelines[voice[0]](text, voice=voice, split_pattern=None) if r.audio is not None]
+        if not parts:
+            return np.zeros(0, dtype=np.float32)
+        gap = np.zeros(CHUNK_GAP, dtype=np.float32)
+        joined = [parts[0]]
+        for part in parts[1:]:
+            joined += [gap, part]
+        return np.concatenate(joined).astype(np.float32)
+
+    def speak_all(says: list[str], voice: str):
+        """
+        Each text's speech and the pause the voice leaves after it, in order: several sentences
+        to a pass, cut apart where each one's phonemes end (the model reports how long it spends
+        on each). A text too long for one pass is spoken in pieces, joined.
+        """
+        lang = voice[0]
+        pack = pipelines[lang].load_voice(voice).to("cuda")
+        pieces = [(i, r.phonemes) for i, say in enumerate(says) for r in g2p[lang](say, split_pattern=None) if r.phonemes]
+        last = {i: k for k, (i, _) in enumerate(pieces)}
+        groups, current = [], []
+        for piece in pieces:
+            if current and len(" ".join(ps for _, ps in current + [piece])) > GROUP:
+                groups.append(current)
+                current = []
+            current.append(piece)
+        if current:
+            groups.append(current)
+
+        speech: dict[int, list[np.ndarray]] = {}
+        gaps: dict[int, np.ndarray] = {}
+        emitted, done = 0, -1
+        for group in groups:
+            joined = " ".join(ps for _, ps in group)
+            with torch.inference_mode():
+                out = model(joined, pack[len(joined) - 1], return_output=True)
+            audio = out.audio.cpu().numpy().astype(np.float32)
+            frames = np.concatenate([[0], np.cumsum(out.pred_dur.cpu().numpy())])
+            per_frame = len(audio) / frames[-1]
+            at = lambda token: round(frames[token] * per_frame)  # noqa: E731 - where a token's speech starts
+            token = 1  # after the start-of-text token
+            for k, (i, ps) in enumerate(group):
+                end = token + tokens(ps)
+                # The space after it, and for the last piece the end-of-text token, are its pause.
+                after = end + (tokens(" ") if k < len(group) - 1 else 1)
+                start_sample = 0 if k == 0 else at(token)
+                speech.setdefault(i, []).append(audio[start_sample : at(end)])
+                gaps[i] = audio[at(end) : at(after)] if k < len(group) - 1 else audio[at(end) :]
+                token = after
+                done += 1
+            # Texts whose pieces are all spoken, in order. Texts with nothing to say are silent.
+            while emitted < len(says) and (emitted not in last or last[emitted] <= done):
+                parts = speech.pop(emitted, [])
+                yield emitted, (np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)), gaps.pop(emitted, np.zeros(0, dtype=np.float32))
+                emitted += 1
+        while emitted < len(says):
+            yield emitted, np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.float32)
+            emitted += 1
+
+    speak("Ready.", "af_heart")
+    events.put((wid, "ready", None))
+    while True:
+        try:
+            task = inbox.get(timeout=LIVE_IDLE if wid == "live" else WORKER_IDLE)
+        except queue.Empty:
+            return
+        if wid == "live":
+            rid, text, voice = task
+            try:
+                events.put((wid, "spoken", (rid, pcm16(speak(text, voice)))))
+            except Exception as error:  # noqa: BLE001 - reported to the request waiting for it
+                log.warning("couldn't speak: %s", error)
+                events.put((wid, "spoken", (rid, None)))
+            continue
+        try:
+            make(task, speak_all, lambda made: events.put((wid, "progress", (task["key"], made))), cancel)
+            events.put((wid, "done", task["key"]))
+        except Cancelled:
+            events.put((wid, "cancelled", task["key"]))
+        except Exception as error:  # noqa: BLE001 - one chapter failing mustn't stop the rest
+            events.put((wid, "failed", (task["key"], str(error))))
+
+
+def make(task: dict, speak_all, progress, cancel):
     """Speaks a chapter, encodes it as the browser does, and saves it with its sentences' timings."""
     encoder = lameenc.Encoder()
     encoder.set_bit_rate(MP3_KBPS)
@@ -175,42 +222,253 @@ def make(job: Job):
     mp3 = bytearray()
     timings = []
     t = 0.0
-    for i, line in enumerate(job.lines):
-        if job.cancelled:
-            return
-        audio = speak(line["say"], job.voice)
+    lines = task["lines"]
+    for i, audio, gap in speak_all([line["say"] for line in lines], task["voice"]):
+        if cancel.is_set():
+            raise Cancelled()
+        line = lines[i]
         timings.append({"start": line["start"], "end": line["end"], "text": line["text"], "t0": round(t, 3), "t1": round(t + len(audio) / SAMPLE_RATE, 3)})
-        pause = np.zeros(round(SAMPLE_RATE * float(line.get("pause", 0))), dtype=np.float32)
-        t += (len(audio) + len(pause)) / SAMPLE_RATE
-        mp3 += encoder.encode(pcm16(np.concatenate([audio, pause])))
-        job.made = i + 1
+        # The pause the reader asks for after it (longer after a paragraph or heading), of which the voice left `gap`.
+        rest = np.zeros(max(0, round(SAMPLE_RATE * float(line.get("pause", 0))) - len(gap)), dtype=np.float32)
+        t += (len(audio) + len(gap) + len(rest)) / SAMPLE_RATE
+        mp3 += encoder.encode(pcm16(np.concatenate([audio, gap, rest])))
+        if (i + 1) % 10 == 0 or i + 1 == len(lines):
+            progress(i + 1)
     mp3 += encoder.flush()
 
-    job.state = "saving"
-    base = f"/api/books/{job.book}/audio/{job.section}"
-    start = site("POST", base, {"voice": job.voice, "bytes": len(mp3)})
+    progress(-1)  # saving
+    base = f"/api/books/{task['book']}/audio/{task['section']}"
+    start = site("POST", base, {"voice": task["voice"], "bytes": len(mp3)})
     # A presigned storage URL, or (without R2) one on the site carrying its own token.
     upload = urllib.parse.urljoin(SITE + "/", start["uploadUrl"])
     site("PUT", upload, raw=bytes(mp3), content_type="audio/mpeg", absolute=True)
-    site("PUT", base, {"voice": job.voice, "bytes": len(mp3), "duration": round(t, 3), "lines": timings})
+    site("PUT", base, {"voice": task["voice"], "bytes": len(mp3), "duration": round(t, 3), "lines": timings})
 
 
-def work():
+# ---- the voice processes, from here ----------------------------------------------------------
+
+ctx = mp.get_context("spawn")
+
+
+def nvidia_smi(query: str) -> list[list[int]]:
+    out = subprocess.run(["nvidia-smi", query, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10, check=True)
+    return [[int(x) for x in line.split(",")] for line in out.stdout.strip().splitlines() if line.strip()]
+
+
+class Voice:
+    """A voice process, and what it's doing."""
+
+    count = 0
+
+    def __init__(self, wid: str, events):
+        self.wid = wid
+        self.inbox = ctx.Queue()
+        self.cancel = ctx.Event()
+        self.ready = False
+        self.job: "Job | None" = None
+        self.heard = self.born = time.time()
+        self.process = ctx.Process(target=voice_process, args=(wid, self.inbox, events, self.cancel), name=f"voice-{wid}", daemon=True)
+        self.process.start()
+
+    def alive(self) -> bool:
+        return self.process.is_alive()
+
+    def stop(self):
+        self.process.kill()
+
+
+class Job:
+    def __init__(self, book: str, voice: str, section: int, lines: list, urgent: bool):
+        self.book, self.voice, self.section, self.lines, self.urgent = book, voice, section, lines, urgent
+        self.state = "queued"
+        self.made = 0
+        self.started = 0.0
+        self.error = ""
+        self.cancelled = False
+        self.tries = 0
+
+    @property
+    def key(self) -> str:
+        return f"{self.book}.{self.voice}.{self.section}"
+
+    def task(self) -> dict:
+        return {"key": self.key, "book": self.book, "voice": self.voice, "section": self.section, "lines": self.lines}
+
+    def report(self) -> dict:
+        out = {"section": self.section, "voice": self.voice, "state": self.state, "made": self.made, "total": len(self.lines)}
+        elapsed = time.time() - self.started
+        if self.state == "making" and self.made >= 10 and elapsed > 2:
+            out["left"] = round(elapsed / self.made * (len(self.lines) - self.made), 1)
+        if self.error:
+            out["error"] = self.error
+        return out
+
+
+jobs: dict[str, Job] = {}
+voices: dict[str, Voice] = {}
+changed = threading.Condition()
+events = None  # the voice processes' reports, made in main()
+spoken: dict[int, list] = {}  # live requests waiting: id -> [threading.Event, pcm]
+asked = 0
+
+
+def save_file(job: Job):
+    JOBS.mkdir(exist_ok=True)
+    data = {"book": job.book, "voice": job.voice, "section": job.section, "lines": job.lines}
+    (JOBS / f"{job.key}.json").write_text(json.dumps(data))
+
+
+def drop_file(job: Job):
+    (JOBS / f"{job.key}.json").unlink(missing_ok=True)
+
+
+def enqueue(book: str, voice: str, chapters: list, urgent: bool) -> int:
+    added = 0
+    with changed:
+        for chapter in chapters:
+            job = Job(book, voice, int(chapter["section"]), chapter["lines"], urgent)
+            current = jobs.get(job.key)
+            if current and current.state in ("making", "saving"):
+                current.urgent = current.urgent or urgent
+                continue
+            jobs[job.key] = job
+            save_file(job)
+            added += 1
+        changed.notify_all()
+    return added
+
+
+def finish(job: Job, state: str, error: str = ""):
+    job.state, job.error = state, error
+    drop_file(job)
+    log.info("%s %s: %d sentences in %.0fs %s", state, job.key, len(job.lines), time.time() - job.started, error)
+
+
+def room(more: int) -> bool:
+    """
+    Whether `more` voice processes fit beside those running. The budget is the GPU's memory less
+    what everything else on it uses and GPU_RESERVE_MB, and each process is counted at its
+    most: one that's starting, or between chapters, takes more than it holds now.
+    """
+    try:
+        [[total, used]] = nvidia_smi("--query-gpu=memory.total,memory.used")
+        apps = nvidia_smi("--query-compute-apps=pid,used_memory")
+    except Exception:  # noqa: BLE001 - when in doubt, don't
+        return False
+    running = [v for v in voices.values() if v.alive()]
+    mine = {v.process.pid for v in running}
+    others = used - sum(mb for pid, mb in apps if pid in mine)
+    return len(running) + more <= (total - others - GPU_RESERVE_MB) // (GPU_MB + CUDA_CONTEXT_MB)
+
+
+def live_voice() -> Voice | None:
+    """The listening voice: started if it isn't running and the GPU has room."""
+    with changed:
+        live = voices.get("live")
+        if live and live.alive():
+            return live
+        if not room(1):
+            return None
+        voices["live"] = Voice("live", events)
+        return voices["live"]
+
+
+def speak_live(text: str, voice: str) -> bytes | None:
+    global asked
+    live = live_voice()
+    if not live:
+        return None
+    with changed:
+        asked += 1
+        rid = asked
+        spoken[rid] = [threading.Event(), None]
+    live.inbox.put((rid, text, voice))
+    # Long enough for a voice process that's starting to load first.
+    spoken[rid][0].wait(90)
+    return spoken.pop(rid)[1]
+
+
+def schedule():
+    """Starts saving processes while there are chapters to save, and hands each a chapter as it's free."""
     while True:
-        job = next_job()
-        try:
-            make(job)
-            job.state = "cancelled" if job.cancelled else "done"
-            log.info("%s %s: %d sentences in %.0fs", job.state, job.key, len(job.lines), time.time() - job.started)
-        except Exception as error:  # noqa: BLE001 - one chapter failing mustn't stop the rest
-            job.state, job.error = "failed", str(error)
-            log.warning("failed %s: %s", job.key, error)
-        drop_file(job)
         with changed:
-            # Finished chapters are reported for a while, so the reader sees them through.
-            for key, old in list(jobs.items()):
-                if old.state in ("done", "failed", "cancelled") and time.time() - old.started > 3600:
-                    del jobs[key]
+            now = time.time()
+            for wid, v in list(voices.items()):
+                stuck = (v.job and v.ready and now - v.heard > STALL) or (not v.ready and now - v.born > LOAD)
+                if stuck:
+                    v.stop()
+                if v.alive() and not stuck:
+                    continue
+                del voices[wid]
+                job = v.job
+                if job and job.state in ("making", "saving"):
+                    # The process stopped (or stalled) partway: the chapter goes back in the queue.
+                    job.tries += 1
+                    if job.cancelled:
+                        finish(job, "cancelled")
+                    elif job.tries > RETRIES:
+                        finish(job, "failed", "the voice process kept stopping")
+                    else:
+                        log.warning("retrying %s: the voice process %s", job.key, "stalled" if stuck else "stopped")
+                        job.state, job.made = "queued", 0
+
+            queued = [j for j in jobs.values() if j.state == "queued"]
+            savers = [v for v in voices.values() if v.wid != "live"]
+            busy = sum(1 for v in savers if v.job)
+            # Saving always leaves room for the listening voice, if it isn't running.
+            listening = 0 if "live" in voices else 1
+            if len(savers) < min(WORKERS, len(queued) + busy) and room(1 + listening):
+                Voice.count += 1
+                wid = f"saver{Voice.count}"
+                voices[wid] = Voice(wid, events)
+                log.info("started %s (%d saving)", wid, len(savers) + 1)
+
+            for v in savers:
+                if not (v.ready and v.job is None and v.alive()):
+                    continue
+                queued = [j for j in jobs.values() if j.state == "queued"]
+                if not queued:
+                    break
+                # Chapters someone is waiting to listen to first, then the rest in the order asked for.
+                job = next((j for j in reversed(queued) if j.urgent), queued[0])
+                job.state, job.made, job.started = "making", 0, time.time()
+                v.job, v.heard = job, time.time()
+                v.cancel.clear()
+                v.inbox.put(job.task())
+            changed.wait(1)
+
+
+def listen():
+    """What the voice processes report."""
+    while True:
+        wid, kind, data = events.get()
+        with changed:
+            v = voices.get(wid)
+            if v:
+                v.heard = time.time()
+            if kind == "ready" and v:
+                v.ready = True
+            elif kind == "spoken":
+                rid, pcm = data
+                if rid in spoken:
+                    spoken[rid][1] = pcm
+                    spoken[rid][0].set()
+            elif kind == "progress":
+                job = jobs.get(data[0])
+                if job:
+                    job.made, job.state = (job.made, "saving") if data[1] < 0 else (data[1], job.state)
+            elif kind in ("done", "failed", "cancelled"):
+                key, error = (data, "") if kind != "failed" else data
+                job = jobs.get(key)
+                if job:
+                    finish(job, kind, error)
+                if v:
+                    v.job = None
+                # Finished chapters are reported for an hour, so the reader sees them through.
+                for k, old in list(jobs.items()):
+                    if old.state in ("done", "failed", "cancelled") and time.time() - old.started > 3600:
+                        del jobs[k]
+            changed.notify_all()
 
 
 def resume():
@@ -264,7 +522,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
-            return self.json(200, {"ok": True, "device": torch.cuda.get_device_name(0)})
+            # The reader asks when it opens: get the listening voice ready, in case it's wanted.
+            threading.Thread(target=live_voice, daemon=True).start()
+            with changed:
+                running = {wid: {"ready": v.ready, "job": v.job.key if v.job else None} for wid, v in voices.items()}
+            return self.json(200, {"ok": True, "voices": running})
         if path == "/jobs":
             book = self.query().get("book", "")
             with changed:
@@ -284,8 +546,10 @@ class Handler(BaseHTTPRequestHandler):
             text = body.get("text")
             if not isinstance(text, str) or not text.strip() or len(text) > 5000:
                 return self.json(400, {"error": "Invalid text."})
-            audio = speak(text, body["voice"])
-            return self.send(200, pcm16(audio), "application/octet-stream", {"x-sample-rate": str(SAMPLE_RATE)})
+            pcm = speak_live(text, body["voice"])
+            if pcm is None:
+                return self.json(503, {"error": "The voice isn't available."})
+            return self.send(200, pcm, "application/octet-stream", {"x-sample-rate": str(SAMPLE_RATE)})
         if path == "/jobs":
             book, chapters = body.get("book"), body.get("chapters")
             if not isinstance(book, str) or not BOOK_ID.match(book) or not isinstance(chapters, list) or not all(map(valid_chapter, chapters)):
@@ -299,20 +563,29 @@ class Handler(BaseHTTPRequestHandler):
         q = self.query()
         with changed:
             for job in jobs.values():
-                if job.book == q.get("book") and job.voice == q.get("voice") and job.state in ("queued", "making"):
-                    job.cancelled = True
-                    if job.state == "queued":
-                        job.state = "cancelled"
-                        drop_file(job)
+                if job.book != q.get("book") or job.voice != q.get("voice") or job.state not in ("queued", "making"):
+                    continue
+                job.cancelled = True
+                if job.state == "queued":
+                    finish(job, "cancelled")
+            for v in voices.values():
+                if v.job and v.job.cancelled:
+                    v.cancel.set()
         self.send(204)
 
     def log_message(self, format, *args):  # noqa: A002 - quiet; jobs log what matters
         pass
 
 
-if __name__ == "__main__":
-    speak("Ready.", "af_heart")
+def main():
+    global events
+    events = ctx.Queue()
     resume()
-    threading.Thread(target=work, daemon=True).start()
-    log.info("listening on 127.0.0.1:%d, saving to %s", PORT, SITE)
+    threading.Thread(target=listen, daemon=True).start()
+    threading.Thread(target=schedule, daemon=True).start()
+    log.info("listening on 127.0.0.1:%d, saving to %s, up to %d saving at once", PORT, SITE, WORKERS)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

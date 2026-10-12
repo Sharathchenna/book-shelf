@@ -23,6 +23,7 @@ export async function POST(request: Request) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: body.text, voice: body.voice }),
-  });
+    // The listening voice may still be starting: it only holds the GPU while it's used.
+  }, 90_000);
   return relay(res);
 }

@@ -321,11 +321,20 @@ EPUBs, papers included, can be read aloud. `L`, or the headphones button, starts
 
 ### On a GPU server
 
-With a GPU machine of your own, the same Kokoro voices run there (`narrator-server/`) instead of in the browser. On an A100 that's about 30–100× faster than real time, so a whole book saves in minutes.
+With a GPU machine of your own, the same Kokoro voices run there (`narrator-server/`) instead of in the browser. On an A100 it saves about 150–200× faster than real time: a 26-hour book in about 10 minutes.
 - **Saving:** **Save the whole book** splits the chapters into sentences in the browser, then hands them to the server. The server speaks, encodes and saves each chapter itself, so you can close the tab. The menu shows its progress.
 - **Listening:** an unsaved chapter starts at once, sentence by sentence from the server. The server saves that chapter first, and playback switches to the saved copy when it's ready.
 - **Phones:** don't download the model, so they can listen to any chapter.
 - **When the server is down:** the reader falls back to the voice in the browser.
+- **Sharing the GPU.** The server holds GPU memory only while it's working.
+  - **The main process** never touches the GPU.
+  - **The voice processes** do the speaking:
+    - A listening process starts when the reader opens and exits after `LIVE_IDLE` seconds unused (default 600).
+    - Up to `WORKERS` saving processes (default 4) run while chapters are queued, and exit `WORKER_IDLE` seconds (default 60) after the last one.
+  - **Memory:** each process is capped at `GPU_MB` (default 1536, plus about 0.5 GB for CUDA itself).
+  - **Starting:** a process only starts if it fits beside everything else on the GPU with `GPU_RESERVE_MB` (default 1024) to spare. Saving always leaves room for the listening process.
+  - **Settings:** these are environment variables in `narrator.service`.
+- **Why it's fast:** one sentence at a time leaves a GPU mostly idle. Saving speaks several sentences in each pass, up to Kokoro's 510 phonemes, then cuts each sentence back out using the length the model gives each phoneme. A few processes run side by side.
 - **Connection.** The server listens on `127.0.0.1:8880`, and a Cloudflare Tunnel connects it to the Worker through [Workers VPC](https://developers.cloudflare.com/workers-vpc/) (the `NARRATOR` binding in `wrangler.jsonc`).
   - **Private:** the tunnel has no public hostname and the machine opens no ports, so only the Worker can reach it.
   - **Saving back:** the server saves chapters through the same routes the browser uses (`/api/books/[id]/audio/[section]`). It signs those requests with `NARRATOR_TOKEN`, which only those routes accept.
