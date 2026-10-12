@@ -1,0 +1,207 @@
+"use client";
+
+import { useState, useSyncExternalStore } from "react";
+import { Icon } from "./chrome";
+import { RATES, VOICES, type Narrator, type NarratorState } from "./narrator";
+
+const clock = (seconds: number) => {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+};
+
+const mb = (bytes: number) => Math.max(1, Math.round(bytes / 1e6));
+
+/** What the player says under the chapter title. */
+function status(s: NarratorState): string {
+  if (s.status === "error") return s.error ?? "Something went wrong.";
+  // Shown while the model downloads; loading it from the browser's cache reports progress too, all at once.
+  if (s.download && s.download.total && s.download.loaded < s.download.total) {
+    return `Downloading the voice, once · ${mb(s.download.loaded)} of ${mb(s.download.total)} MB`;
+  }
+  const paused = s.status === "paused" ? "Paused · " : "";
+  if (s.status === "loading") return "Starting…";
+  if (s.waiting && !paused) return s.engine?.device === "wasm" ? "This device speaks slowly · next sentence coming…" : "Getting the next sentence ready…";
+  if (s.time) return `${paused}${clock(s.time.at)} / ${clock(s.time.duration)}`;
+  if (s.lines) return `${paused}Sentence ${s.line + 1} of ${s.lines}`;
+  return paused ? "Paused" : "";
+}
+
+/** The narrator's controls, above the page while listening. */
+export function ListenBar({
+  narrator,
+  chapter,
+  raised,
+  right,
+  onClose,
+}: {
+  narrator: Narrator;
+  /** Title of the chapter being read. */
+  chapter: (section: number) => string;
+  /** Sits above the reader's bottom bar while that's showing. */
+  raised: boolean;
+  right?: string;
+  onClose: () => void;
+}) {
+  const s = useSyncExternalStore(narrator.subscribe, narrator.getState, narrator.getState);
+  const [menu, setMenu] = useState(false);
+  const playing = s.status === "playing" || s.status === "loading";
+  const busy = (s.status === "loading" || s.waiting) && s.status !== "paused";
+  const nextRate = RATES[(RATES.indexOf(s.rate) + 1) % RATES.length] ?? 1;
+
+  return (
+    <div
+      className="fixed inset-x-3 z-40 transition-[bottom] duration-300"
+      style={{ bottom: raised ? "4.6rem" : "0.75rem", right }}
+    >
+      {menu && <ListenMenu narrator={narrator} state={s} onClose={() => setMenu(false)} />}
+      <div className="reader-surface reader-pop mx-auto flex max-w-xl items-center gap-1 rounded-full py-1.5 pr-1.5 pl-2 sm:gap-2">
+        <RoundButton label="Previous sentence" onClick={() => narrator.skip(-1)}>
+          <Icon d="M11 7l-5 5 5 5M18 7l-5 5 5 5" />
+        </RoundButton>
+        <button
+          onClick={() => narrator.toggle()}
+          aria-label={playing ? "Pause" : "Play"}
+          className="relative grid size-10 shrink-0 place-items-center rounded-full bg-ink text-ink-fg"
+        >
+          {busy && <span className="absolute inset-0 animate-spin rounded-full border-2 border-ink-fg/25 border-t-ink-fg" aria-hidden />}
+          <svg viewBox="0 0 24 24" className="size-[18px]" fill="currentColor" aria-hidden>
+            {playing ? <path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" /> : <path d="M8 5.5v13l11-6.5z" />}
+          </svg>
+        </button>
+        <RoundButton label="Next sentence" onClick={() => narrator.skip(1)}>
+          <Icon d="M6 7l5 5-5 5M13 7l5 5-5 5" />
+        </RoundButton>
+
+        <div className="min-w-0 flex-1 px-1">
+          <p className="truncate font-serif text-[14px] leading-tight">{s.status === "off" ? "Listen" : chapter(s.section)}</p>
+          <p className={`truncate text-[11px] tabular-nums ${s.status === "error" ? "text-red-600 dark:text-red-400" : "text-muted"}`}>
+            {status(s)}
+          </p>
+        </div>
+
+        {s.away && s.status !== "off" && (
+          <button onClick={() => narrator.follow()} className="hidden shrink-0 rounded-full px-2.5 py-1 text-xs font-medium hover:bg-chip sm:block">
+            Back to reading
+          </button>
+        )}
+        <button
+          onClick={() => narrator.setRate(nextRate)}
+          aria-label={`Speed ${s.rate}×, change to ${nextRate}×`}
+          title="Speed"
+          className="h-8 shrink-0 rounded-full px-2 text-xs font-semibold tabular-nums hover:bg-chip"
+        >
+          {s.rate}×
+        </button>
+        <RoundButton label="Voice and saving" active={menu} onClick={() => setMenu((m) => !m)}>
+          <Icon d="M4 8h10M18 8h2M4 16h4M12 16h8M14 6v4M8 14v4" />
+        </RoundButton>
+        <RoundButton
+          label="Stop listening"
+          onClick={() => {
+            narrator.stop();
+            onClose();
+          }}
+        >
+          <Icon d="M6 6l12 12M18 6L6 18" />
+        </RoundButton>
+      </div>
+    </div>
+  );
+}
+
+function ListenMenu({ narrator, state: s, onClose }: { narrator: Narrator; state: NarratorState; onClose: () => void }) {
+  const noGpu = s.engine && s.engine.device !== "webgpu";
+  return (
+    <div role="dialog" aria-label="Voice and saving" className="reader-surface reader-pop mx-auto mb-2 max-w-xl rounded-[28px] p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold tracking-wide text-muted uppercase">Voice</p>
+        <button onClick={onClose} aria-label="Close" className="grid size-7 place-items-center rounded-full hover:bg-chip">
+          ×
+        </button>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+        {VOICES.map((v) => (
+          <button
+            key={v.id}
+            onClick={() => narrator.setVoice(v.id)}
+            aria-pressed={s.voice === v.id}
+            className="rounded-2xl px-3 py-2 text-left transition-colors hover:bg-chip aria-pressed:bg-ink aria-pressed:text-ink-fg"
+          >
+            <span className="block text-sm font-medium">{v.name}</span>
+            <span className="block text-[11px] opacity-70">{v.accent}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="mt-4 text-xs font-semibold tracking-wide text-muted uppercase">Speed</p>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {RATES.map((r) => (
+          <button
+            key={r}
+            onClick={() => narrator.setRate(r)}
+            aria-pressed={s.rate === r}
+            className="rounded-full px-2.5 py-1 text-sm tabular-nums hover:bg-chip aria-pressed:bg-ink aria-pressed:text-ink-fg"
+          >
+            {r}×
+          </button>
+        ))}
+      </div>
+
+      <p className="mt-4 text-xs font-semibold tracking-wide text-muted uppercase">Listen anywhere</p>
+      <p className="mt-1.5 text-sm leading-snug">
+        {s.saved} of {s.savable} chapters saved in this voice.{" "}
+        <span className="text-muted">
+          Saved chapters play instantly, on your phone too, with the lock-screen controls. Chapters you listen to from their start are saved as
+          they play.
+        </span>
+      </p>
+      {noGpu ? (
+        <p className="mt-2 text-sm text-muted">This browser speaks without a GPU, so it can&apos;t save chapters. Open the book in Chrome or Safari on a computer to save it.</p>
+      ) : s.saving ? (
+        <div className="mt-3 flex items-center gap-3">
+          <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-fg/20 border-t-accent" aria-hidden />
+          <p className="min-w-0 flex-1 text-sm">
+            {s.saving.section === null ? "Getting ready…" : `Saving chapter ${s.saving.section + 1}… Keep this tab open.`}
+          </p>
+          <button onClick={() => narrator.stopSaving()} className="rounded-full px-3 py-1.5 text-sm hover:bg-chip">
+            Stop
+          </button>
+        </div>
+      ) : (
+        s.saved < s.savable && (
+          <button onClick={() => void narrator.saveBook()} className="mt-3 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-fg">
+            Save the whole book
+          </button>
+        )
+      )}
+      <p className="mt-4 text-[11px] text-muted">Voice: Kokoro, made in this browser.</p>
+    </div>
+  );
+}
+
+function RoundButton({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className="grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-chip aria-pressed:bg-chip sm:size-9"
+    >
+      {children}
+    </button>
+  );
+}

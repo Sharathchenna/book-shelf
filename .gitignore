@@ -55,4 +55,5 @@ next-env.d.ts
 
 # pdf.js assets, copied from node_modules on install
 /public/pdfjs/
+/public/ort/
 /cloudflare-env.d.ts

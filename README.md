@@ -73,7 +73,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 | Next.js 16 (App Router), React 19, Tailwind CSS 4 | The site |
 | `@opennextjs/cloudflare` | Running Next.js on Cloudflare Workers |
 | Cloudflare D1 | Shelf, clippings, library index, reading progress, highlights and notes (`migrations/`) |
-| Cloudflare R2 (S3 API, presigned URLs) | Book files, covers, extracted text for the AI |
+| Cloudflare R2 (S3 API, presigned URLs) | Book files, covers, extracted text for the AI, narrated chapters |
 | Cloudflare Vectorize + Workers AI (`qwen3-embedding-0.6b`) | The search index: an embedding of every book and clipping |
 | foliate-js | The EPUB reader |
 | pdf.js (`pdfjs-dist`, loaded at runtime from `/pdfjs`) | The PDF reader, and reading PDF text in the browser |
@@ -249,7 +249,7 @@ Open a book's card and choose **Add EPUB or PDF**. The file uploads straight to 
 | --- | --- |
 | Anywhere | `⌘K` / `Ctrl+K` site search |
 | Shelf | `/` focuses Ask, `R` opens a random unread book |
-| Reader | `←`/`→` turn pages, `T` contents, `N` notes, `/` search, `A` settings, `C` chat, `F` fullscreen, `Esc` closes things |
+| Reader | `←`/`→` turn pages, `T` contents, `N` notes, `/` search, `A` settings, `C` chat, `L` listen, `F` fullscreen, `Esc` closes things |
 | PDFs | `+` / `-` / `0` zoom in, out and fit |
 
 ## Search
@@ -300,6 +300,24 @@ A search costs a fraction of a cent and returns in under a second. Without Jev, 
   A **PDF ↗** button opens the original. Other papers, and arXiv papers without an HTML version, open as PDFs, which the server fetches into R2. The first open takes a few seconds, and after that it's instant. The conversion is versioned (`ARXIV_EPUB_BUILD` in `lib/library-types.ts`): ebooks made by an older version are rebuilt the next time they're opened.
 - **Both readers** have contents, in-book search, highlights with notes, and a scrubber with chapter ticks and minutes left in the chapter. Your position, highlights and notes are saved to D1 and follow you across devices.
 
+## Listening
+
+EPUBs, papers included, can be read aloud. `L`, or the headphones button, starts at the top of the page on screen. The sentence being read is highlighted, and the page turns with it.
+
+- **The voice** is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), run in the browser with [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js), so it costs nothing and has no usage limit. There are five voices: Heart, Bella, Emma, Michael and George.
+  - **Download:** the model downloads from Hugging Face the first time, 326 MB, then stays in the browser's cache.
+  - **Speed:** on a computer's GPU (WebGPU), it speaks several times faster than it reads. Without one, it uses a smaller 92 MB model on the CPU, which is slower than real time, so there are pauses between sentences.
+- **Saved chapters.** On a GPU, a chapter you listen to from its start is recorded as it plays. **Save the whole book**, in the player's menu, records the rest. Keep the tab open while it runs.
+  - **Where they go:** each chapter is stored as a 64 kbps MP3 in R2 (`audio/<book>/<voice>/<section>.mp3`, about 0.5 MB a minute), with each sentence's timing in D1.
+  - **Playback:** saved chapters play straight from storage on any device. A phone needs no model and no GPU, and gets lock-screen and headphone controls: previous and next track change chapter, skip back and forward change sentence.
+- **Playing:** speed changes from 0.8× to 2× without changing pitch. A different voice is a separate recording.
+- **Turning away:** if you turn away from the page being read, the page stops following until you tap **Back to reading**.
+- **Papers** are read for the ear:
+  - **Skipped:** citations, the references, data tables, display equations and equation numbers.
+  - **Read:** figure captions.
+  - **Inline maths** is spoken: "1 over the square root of d k".
+- **Books** skip footnote marks and illustration captions.
+
 ## AI features and cost
 
 All of these are owner-only, apart from the answer under Ask the shelf. They run on Claude Haiku 5.5 and stream as they're written.
@@ -335,6 +353,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
   - Cache Components (partial prerendering) is off: OpenNext on Workers serves a partially prerendered page's static shell without resuming its dynamic part.
 - **Plans.** The Worker (about 14 MB) fits the free plan's size limit. Free plans allow 10 ms of CPU per request, which covers browsing and search: a page is a few small D1 queries and a render, and AI calls spend their time waiting rather than computing. Parsing an uploaded EPUB can need more, which needs the Workers Paid plan. PDFs are read in the browser and cost the Worker almost nothing.
 - **pdf.js** is copied from `node_modules` to `public/pdfjs` on install (`scripts/copy-pdfjs.ts`) and loaded at runtime, so it's in neither the client bundle nor the Worker.
+- **The narrator's runtime.** ONNX Runtime's WebAssembly (21.6 MB, under the 25 MiB asset limit) is copied to `public/ort` on install (`scripts/copy-ort.ts`), because the reader's CSP doesn't allow loading it from a CDN. The voice model itself comes from Hugging Face, which the reader's CSP allows.
 - **Adapter patch.** `patches/@opennextjs%2Fcloudflare@1.20.10.patch` adds Next 16.4's `preview-props.json` to the manifests OpenNext bundles ([opennextjs-cloudflare#1355](https://github.com/opennextjs/opennextjs-cloudflare/issues/1355)). Remove it, and the `patchedDependencies` entry in `package.json`, once a release includes the fix.
 - **`proxy.ts`** runs on OpenNext's Node.js middleware support, which OpenNext labels experimental. It only does an optimistic redirect from `/reader/<id>` to `/login`. The real check happens in every reader page and API route, so the site stays protected if it misbehaves.
 - **Search index in development.** Vectorize has no local simulation, so `bun dev` and `bun run preview` use the real index (`"remote": true`). Set `SEARCH_NAMESPACE=dev` in `.env.local` / `.dev.vars` to keep local vectors in their own namespace, with their ids prefixed `dev:`. Workers AI embeddings always run remotely and count against your account's free allowance.
@@ -351,6 +370,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | A paper opens as a PDF instead of an ebook | It has no HTML version on arXiv (some older or very large papers). |
 | The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
 | A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
+| Listening pauses between sentences | This browser has no WebGPU, so the voice runs on the CPU. Save the book from Chrome or Safari on a computer; saved chapters play smoothly anywhere. |
 | A figure is missing from a paper ebook | Check the paper on arxiv.org/html: if arXiv's own page shows no image, its LaTeX conversion dropped it, and **PDF ↗** has it. |
 | Local changes don't show in `bun dev` | Restart the dev server; if it still serves an old page, check with `bun run preview`. |
 
@@ -373,5 +393,6 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
 | `app/reader/`, `app/components/reader/` | The readers: EPUB (foliate-js), PDF (pdf.js), arXiv-to-EPUB, panels, chat |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain, Recap and Chat |
+| `app/components/reader/{narrator,narrator.worker,speech}.ts`, `listen-bar.tsx`, `app/api/books/[id]/audio/` | Listening: the text read aloud, Kokoro in a worker, saved chapters |
 | `worker.ts`, `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment: edge cache, nightly sync |
 | `shelf.config.ts` | Your name, bio, links, site URL and Goodreads id |

@@ -1,6 +1,6 @@
 import "server-only";
 import { db, records } from "./db";
-import type { Highlight, LibraryBook, Progress } from "./library-types";
+import type { AudioLine, AudioSection, Highlight, LibraryBook, Progress } from "./library-types";
 import type { Item } from "./types";
 
 /** Where each book's bytes live in storage (R2). Everything else about it is in D1. */
@@ -8,6 +8,7 @@ export const keys = {
   file: (book: Pick<LibraryBook, "id" | "format">) => `books/${book.id}.${book.format ?? "epub"}`,
   text: (id: string) => `text/${id}.json`,
   cover: (id: string, ext: string) => `covers/${id}.${ext}`,
+  audio: (id: string, voice: string, section: number) => `audio/${id}/${voice}/${section}.mp3`,
 };
 
 export const CONTENT_TYPES = { epub: "application/epub+zip", pdf: "application/pdf" } as const;
@@ -35,11 +36,11 @@ export async function putFile(book: LibraryBook) {
     .run();
 }
 
-/** Forgets a file and the owner's place and notes in it. The caller deletes the bytes. */
+/** Forgets a file, the owner's place and notes in it, and its narration. The caller deletes the bytes. */
 export async function removeFile(id: string) {
   const database = await db();
   await database.batch(
-    ["files", "progress", "notes"].map((table) =>
+    ["files", "progress", "notes", "audio"].map((table) =>
       database.prepare(`DELETE FROM ${table} WHERE ${table === "files" ? "id" : "file_id"} = ?1`).bind(id),
     ),
   );
@@ -76,6 +77,47 @@ async function upsert(table: "progress" | "notes", id: string, value: unknown) {
     .prepare(`INSERT INTO ${table} (file_id, data) VALUES (?1, ?2) ON CONFLICT (file_id) DO UPDATE SET data = ?2`)
     .bind(id, JSON.stringify(value))
     .run();
+}
+
+// ---- narration ---------------------------------------------------------------------------------
+
+/** Voice ids are Kokoro's (af_heart, bm_george): checked before they go into a storage key. */
+export const validVoice = (voice: string) => /^[a-z]{2}_[a-z]{2,16}$/.test(voice);
+
+/** The chapters read aloud in one voice, without their sentences. */
+export async function listAudio(id: string, voice: string): Promise<{ section: number; duration: number }[]> {
+  const { results } = await (await db())
+    .prepare("SELECT section, duration FROM audio WHERE file_id = ?1 AND voice = ?2 ORDER BY section")
+    .bind(id, voice)
+    .all<{ section: number; duration: number }>();
+  return results;
+}
+
+export async function getAudio(id: string, voice: string, section: number): Promise<AudioSection | null> {
+  const row = await (await db())
+    .prepare("SELECT duration, data FROM audio WHERE file_id = ?1 AND voice = ?2 AND section = ?3")
+    .bind(id, voice, section)
+    .first<{ duration: number; data: string }>();
+  return row ? { section, voice, duration: row.duration, lines: JSON.parse(row.data) as AudioLine[] } : null;
+}
+
+export async function putAudio(id: string, audio: AudioSection, bytes: number) {
+  await (await db())
+    .prepare(
+      `INSERT INTO audio (file_id, voice, section, duration, bytes, created_at, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT (file_id, voice, section) DO UPDATE SET duration = ?4, bytes = ?5, created_at = ?6, data = ?7`,
+    )
+    .bind(id, audio.voice, audio.section, audio.duration, bytes, new Date().toISOString(), JSON.stringify(audio.lines))
+    .run();
+}
+
+/** Every stored narration of a file, for deleting it with the file. */
+export async function audioKeys(id: string): Promise<string[]> {
+  const { results } = await (await db())
+    .prepare("SELECT voice, section FROM audio WHERE file_id = ?1")
+    .bind(id)
+    .all<{ voice: string; section: number }>();
+  return results.map((row) => keys.audio(id, row.voice, row.section));
 }
 
 // ---- matching files to shelf books -------------------------------------------------------------

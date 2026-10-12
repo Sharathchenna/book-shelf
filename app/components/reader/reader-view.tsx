@@ -18,6 +18,8 @@ import {
 } from "./foliate";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { backHref, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
+import { ListenBar } from "./listen-bar";
+import { Narrator } from "./narrator";
 import { Drawer, NotesPanel, SearchPanel, SettingsPanel, TocPanel } from "./panels";
 
 const SETTINGS_KEY = "reader-settings";
@@ -89,6 +91,9 @@ export function ReaderView({ id }: { id: string }) {
   const [explained, setExplained] = useState<Selected | null>(null);
   /** The open view, mirrored from viewRef for rendering (panels that need it). */
   const [view, setView] = useState<FoliateView | null>(null);
+  /** Reading aloud: made the first time Listen is pressed. */
+  const [narrator, setNarrator] = useState<Narrator | null>(null);
+  const [listening, setListening] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pending = useRef<Progress | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -204,6 +209,40 @@ export function ReaderView({ id }: { id: string }) {
     );
   };
 
+  // ---- listening ------------------------------------------------------------------------
+
+  const openNarrator = (): Narrator | null => {
+    const view = viewRef.current;
+    if (!view || !book) return null;
+    const n = narrator ?? new Narrator(view, { id, title: book.title, author: book.author, paper: Boolean(book.paperId), sections: book.sections });
+    setNarrator(n);
+    setListening(true);
+    return n;
+  };
+
+  const listen = () => {
+    if (listening) {
+      narrator?.stop();
+      setListening(false);
+    } else {
+      openNarrator()?.start();
+    }
+  };
+
+  /** Reads aloud from the start of a selection. */
+  const listenFrom = (sel: Selected) => {
+    const doc = viewRef.current?.renderer.getContents().find((c) => c.index === sel.sectionIndex)?.doc;
+    const selection = doc?.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    const n = openNarrator();
+    if (range) n?.startAt(sel.sectionIndex, range);
+    else n?.start();
+    viewRef.current?.deselect();
+    setSelected(null);
+  };
+
+  useEffect(() => () => narrator?.destroy(), [narrator]);
+
   // ---- input ----------------------------------------------------------------------------
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
@@ -222,6 +261,7 @@ export function ReaderView({ id }: { id: string }) {
       " ": () => void (e.shiftKey ? view.prev() : view.next()),
       t: () => setPanel((p) => (p === "toc" ? null : "toc")),
       c: () => setChat((c) => !c),
+      l: () => listen(),
       n: () => setPanel((p) => (p === "notes" ? null : "notes")),
       "/": () => setPanel("search"),
       a: () => setPanel((p) => (p === "settings" ? null : "settings")),
@@ -490,6 +530,9 @@ export function ReaderView({ id }: { id: string }) {
         <BarButton label={book?.paperId ? "Where you left off (recap)" : "Previously… (recap)"} onClick={recap} disabled={status !== "ready"}>
           <Icon d="M12 8v4l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v4h4" />
         </BarButton>
+        <BarButton label="Listen (L)" active={listening} onClick={listen} disabled={status !== "ready"}>
+          <Icon d="M4 15v-3a8 8 0 0 1 16 0v3M4 15a2 2 0 0 1 2-2h1v7H6a2 2 0 0 1-2-2zM20 15a2 2 0 0 0-2-2h-1v7h1a2 2 0 0 0 2-2z" />
+        </BarButton>
         <BarButton label="Search (/)" active={panel === "search"} onClick={() => setPanel(panel === "search" ? null : "search")}>
           <Icon d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4" />
         </BarButton>
@@ -613,6 +656,7 @@ export function ReaderView({ id }: { id: string }) {
             setSelected(null);
           }}
           onExplain={() => explain(selected)}
+          onListen={selected.noteId ? undefined : () => listenFrom(selected)}
           onAsk={() => {
             setChatQuote({ text: selected.text });
             setChat(true);
@@ -652,6 +696,17 @@ export function ReaderView({ id }: { id: string }) {
                 }
               : undefined
           }
+        />
+      )}
+
+      {listening && narrator && (
+        <ListenBar
+          narrator={narrator}
+          // The contents entry for the page shown (which follows the reading), else the file's title.
+          chapter={(i) => (i === sectionIndex && loc?.tocItem?.label?.trim()) || book?.sections[i]?.title || `Chapter ${i + 1}`}
+          raised={showChrome}
+          right={besideChat}
+          onClose={() => setListening(false)}
         />
       )}
 

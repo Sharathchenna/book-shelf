@@ -57,3 +57,9 @@ export type Highlight = {
 
 /** A library entry as listed for the owner: the book plus where they are in it. */
 export type LibraryEntry = LibraryBook & { progress?: Progress; coverUrl?: string };
+
+/** A sentence of a narrated chapter: where it is in the chapter's text (see speech.ts) and in its audio, in seconds. */
+export type AudioLine = { start: number; end: number; text: string; t0: number; t1: number };
+
+/** A chapter read aloud in one voice. Its MP3 is in storage. */
+export type AudioSection = { section: number; voice: string; duration: number; lines: AudioLine[] };

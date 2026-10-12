@@ -18,8 +18,10 @@ const readerCsp = [
   "style-src 'self' 'unsafe-inline' blob:",
   "img-src 'self' blob: data: https://*.r2.cloudflarestorage.com https://covers.openlibrary.org",
   "font-src 'self' blob: data:",
-  "media-src 'self' blob:",
-  "connect-src 'self' blob: https://*.r2.cloudflarestorage.com",
+  // Narrated chapters stream straight from R2.
+  "media-src 'self' blob: https://*.r2.cloudflarestorage.com",
+  // The narrator's voice model (Kokoro) downloads from Hugging Face once, then stays in the browser's cache.
+  "connect-src 'self' blob: https://*.r2.cloudflarestorage.com https://huggingface.co https://*.huggingface.co https://*.hf.co",
   "frame-src 'self' blob:",
   "worker-src 'self' blob:",
   "object-src 'none'",

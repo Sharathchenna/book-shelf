@@ -1,6 +1,6 @@
 import { requireOwner } from "@/lib/auth/session";
 import { getClipping, getShelf } from "@/lib/data";
-import { getFile, getNotes, getProgress, keys, putFile, removeFile, shelfItemFor } from "@/lib/library";
+import { audioKeys, getFile, getNotes, getProgress, keys, putFile, removeFile, shelfItemFor } from "@/lib/library";
 import { getStorage } from "@/lib/storage";
 
 /** Everything the reader needs to open a book: metadata, a short-lived file URL, position and notes. */
@@ -56,10 +56,11 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/books/[i
   const book = await getFile(id);
   if (!book) return Response.json({ error: "Unknown book." }, { status: 404 });
 
+  const narration = await audioKeys(id);
   await removeFile(id);
   const storage = getStorage();
   await Promise.all(
-    [keys.file(book), keys.text(id), book.coverKey]
+    [keys.file(book), keys.text(id), book.coverKey, ...narration]
       .filter((key): key is string => Boolean(key))
       .map((key) => storage.delete(key)),
   );

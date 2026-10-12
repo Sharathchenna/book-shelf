@@ -21,7 +21,8 @@ export type Annotation = { value: string; color?: string };
 export type FoliateView = HTMLElement & {
   book: {
     toc?: TocItem[];
-    sections: { linear?: string }[];
+    /** `createDocument` parses a section's file as the book stores it, without laying it out. */
+    sections: { linear?: string; createDocument: () => Promise<Document> }[];
     dir?: string;
     transformTarget?: EventTarget;
     metadata?: { title?: unknown };
@@ -29,6 +30,8 @@ export type FoliateView = HTMLElement & {
   renderer: HTMLElement & {
     setStyles?: (css: string) => void;
     getContents: () => { doc: Document; index: number }[];
+    /** Turns to the page showing a range. */
+    scrollToAnchor: (anchor: Range, select?: boolean) => Promise<void>;
   };
   lastLocation?: Location;
   open: (file: Blob | File) => Promise<void>;
@@ -184,6 +187,8 @@ export function bookCss(s: ReaderSettings): string {
     img, svg { max-width: 100%; height: auto; }
     ${s.theme === "night" ? "img { filter: brightness(.85) contrast(1.05); }" : ""}
     ::selection { background: ${s.theme === "night" ? "rgba(111,211,168,.35)" : "rgba(30,122,88,.22)"}; }
+    /* The sentence being read aloud (see narrator.ts). */
+    ::highlight(narration) { background-color: ${s.theme === "night" ? "rgba(111,211,168,.22)" : "rgba(30,122,88,.14)"}; color: inherit; }
     pre { white-space: pre-wrap !important; }
     aside[epub|type~="footnote"], aside[epub|type~="endnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
   `;

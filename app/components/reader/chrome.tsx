@@ -33,6 +33,7 @@ export function SelectionPopover({
   onSaveNote,
   onExplain,
   onAsk,
+  onListen,
   onCopy,
   onRemove,
 }: {
@@ -45,6 +46,8 @@ export function SelectionPopover({
   onExplain: () => void;
   /** Opens the chat with this passage quoted. */
   onAsk?: () => void;
+  /** Reads aloud from here. */
+  onListen?: () => void;
   onCopy: () => void;
   onRemove?: () => void;
 }) {
@@ -106,6 +109,7 @@ export function SelectionPopover({
             Explain
           </PopButton>
           {onAsk && <PopButton onClick={onAsk}>Ask</PopButton>}
+          {onListen && <PopButton onClick={onListen}>Listen</PopButton>}
           {onRemove ? <PopButton onClick={onRemove}>Remove</PopButton> : !onAsk && <PopButton onClick={onCopy}>Copy</PopButton>}
         </div>
       )}

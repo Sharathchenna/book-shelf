@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
     "cloudflare-env.d.ts",
     // pdf.js assets copied from node_modules (scripts/copy-pdfjs.ts).
     "public/pdfjs/**",
+    // ONNX Runtime for the narrator's voice (scripts/copy-ort.ts).
+    "public/ort/**",
   ]),
 ]);
 
