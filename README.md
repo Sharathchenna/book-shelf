@@ -129,6 +129,7 @@ Each feature switches on when its keys are set. Locally they go in `.env.local` 
 | Answers under search, Explain, Recap and Chat, and enriching clippings (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Signing in as the owner | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters, e.g. `openssl rand -base64 48`) |
 | Book files in R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
+| Listening on a GPU server (see [On a GPU server](#on-a-gpu-server)) | `NARRATOR_TOKEN`, shared with the server |
 
 What happens when keys are missing:
 
@@ -318,6 +319,29 @@ EPUBs, papers included, can be read aloud. `L`, or the headphones button, starts
   - **Inline maths** is spoken: "1 over the square root of d k".
 - **Books** skip footnote marks and illustration captions.
 
+### On a GPU server
+
+With a GPU machine of your own, the same Kokoro voices run there (`narrator-server/`) instead of in the browser. On an A100 that's about 30–100× faster than real time, so a whole book saves in minutes.
+- **Saving:** **Save the whole book** splits the chapters into sentences in the browser, then hands them to the server. The server speaks, encodes and saves each chapter itself, so you can close the tab. The menu shows its progress.
+- **Listening:** an unsaved chapter starts at once, sentence by sentence from the server. The server saves that chapter first, and playback switches to the saved copy when it's ready.
+- **Phones:** don't download the model, so they can listen to any chapter.
+- **When the server is down:** the reader falls back to the voice in the browser.
+- **Connection.** The server listens on `127.0.0.1:8880`, and a Cloudflare Tunnel connects it to the Worker through [Workers VPC](https://developers.cloudflare.com/workers-vpc/) (the `NARRATOR` binding in `wrangler.jsonc`).
+  - **Private:** the tunnel has no public hostname and the machine opens no ports, so only the Worker can reach it.
+  - **Saving back:** the server saves chapters through the same routes the browser uses (`/api/books/[id]/audio/[section]`). It signs those requests with `NARRATOR_TOKEN`, which only those routes accept.
+- **Setup** on the machine, which needs Linux, an NVIDIA GPU and Python 3.12 via [uv](https://docs.astral.sh/uv/); no root needed:
+  ```sh
+  mkdir -p ~/narrator && cd ~/narrator            # copy narrator-server/server.py here
+  uv venv --python 3.12 .venv && . .venv/bin/activate
+  uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+  uv pip install "kokoro>=0.9.4" lameenc pip
+  (umask 077; openssl rand -hex 32 > site-token)  # then, on your computer:
+  ssh <machine> 'cat ~/narrator/site-token' | bunx wrangler secret put NARRATOR_TOKEN
+  ```
+  - **Tunnel:** `bunx wrangler tunnel create <name>`, put its token in `~/narrator/tunnel-token` (mode 600), then `bunx wrangler vpc service create <name> --type http --tunnel-id <id> --ipv4 127.0.0.1 --http-port 8880`. Put the service id in `wrangler.jsonc`.
+  - **Keep it running:** copy `narrator.service` and `narrator-tunnel.service` to `~/.config/systemd/user/` and run `systemctl --user enable --now narrator narrator-tunnel`. To have them start at boot without a login, run `loginctl enable-linger <user>` once.
+  - **Restarts:** chapters waiting to be saved are kept in `~/narrator/jobs/` and resume after a restart. `journalctl --user -u narrator` shows what it saved.
+
 ## AI features and cost
 
 All of these are owner-only, apart from the answer under Ask the shelf. They run on Claude Haiku 5.5 and stream as they're written.
@@ -370,7 +394,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | A paper opens as a PDF instead of an ebook | It has no HTML version on arXiv (some older or very large papers). |
 | The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
 | A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
-| Listening pauses between sentences | This browser has no WebGPU, so the voice runs on the CPU. Save the book from Chrome or Safari on a computer; saved chapters play smoothly anywhere. |
+| Listening pauses between sentences | The voice is running in a browser without WebGPU, on the CPU. Save the book on the GPU server, or from Chrome or Safari on a computer; saved chapters play smoothly anywhere. |
+| The menu says "made in this browser" with a GPU server set up | The server isn't answering. On the machine, check `systemctl --user status narrator narrator-tunnel`, and `bunx wrangler tunnel info <name>` for the tunnel. |
 | A figure is missing from a paper ebook | Check the paper on arxiv.org/html: if arXiv's own page shows no image, its LaTeX conversion dropped it, and **PDF ↗** has it. |
 | Local changes don't show in `bun dev` | Restart the dev server; if it still serves an old page, check with `bun run preview`. |
 
@@ -394,5 +419,6 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `app/reader/`, `app/components/reader/` | The readers: EPUB (foliate-js), PDF (pdf.js), arXiv-to-EPUB, panels, chat |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain, Recap and Chat |
 | `app/components/reader/{narrator,narrator.worker,speech}.ts`, `listen-bar.tsx`, `app/api/books/[id]/audio/` | Listening: the text read aloud, Kokoro in a worker, saved chapters |
+| `narrator-server/`, `lib/narrator.ts`, `app/api/narrate/`, `app/api/books/[id]/narrate/` | Listening on a GPU server: Kokoro on CUDA behind a Cloudflare Tunnel (Workers VPC) |
 | `worker.ts`, `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment: edge cache, nightly sync |
 | `shelf.config.ts` | Your name, bio, links, site URL and Goodreads id |

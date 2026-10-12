@@ -1,0 +1,12 @@
+# The Cloudflare Tunnel the site's Worker reaches the narrator through (Workers VPC). Outbound only.
+[Unit]
+Description=book-shelf narrator tunnel
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file %h/narrator/tunnel-token
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

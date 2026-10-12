@@ -2,9 +2,11 @@
  * Reads a book aloud, highlighting each sentence on the page as it's spoken.
  *
  * Chapters already saved (as MP3 in storage) stream from there, on any device. Others are spoken
- * here, sentence by sentence, by Kokoro running in a worker (narrator.worker.ts). When the
- * browser has a GPU, a chapter heard from its start is recorded as it plays and saved, and
- * "save the whole book" records the rest, so a phone can play the book without making any of it.
+ * sentence by sentence by Kokoro: on the GPU server when there is one (narrator-server/, which
+ * also saves chapters itself, so "save the whole book" carries on with the tab closed), else
+ * here, in a worker (narrator.worker.ts). Without the server, a browser with a GPU records a
+ * chapter heard from its start as it plays and saves it, and "save the whole book" records the
+ * rest, so a phone can play the book without making any of it.
  */
 import type { AudioLine, AudioSection } from "@/lib/library-types";
 import type { FoliateView } from "./foliate";
@@ -51,23 +53,57 @@ export type NarratorState = {
   /** Chapters there are to save. */
   savable: number;
   /**
-   * Saving the whole book: whether it's running, the chapter it's on, and how far into that
-   * chapter: sentences made, of how many, and roughly how many seconds are left.
+   * Saving chapters: the one being saved, how far into it (sentences made, of how many, and
+   * roughly how many seconds are left), and how many more are waiting. `remote` when the GPU
+   * server is saving them, which carries on with the tab closed.
    */
-  saving: { section: number | null; made?: number; total?: number; left?: number } | null;
-  /** Where the voice runs here, once known. Saving needs the GPU. */
-  engine?: Engine;
+  saving: { section: number | null; made?: number; total?: number; left?: number; queued?: number; remote?: boolean } | null;
+  /** Where the voice runs, once known. Saving needs the GPU server, or a GPU here. */
+  engine?: Voicing;
 };
+
+/** Where the voice runs: the GPU server, or this browser (on its GPU, else its CPU). */
+export type Voicing = Engine | { device: "server" };
 
 /** A sentence to read: where it is in its chapter's text, what to say, and the pause after it. */
 type Line = { start: number; end: number; text: string; say: string; pause: number };
 type Script = { section: number; lines: Line[] };
 type Saved = AudioSection & { url: string; fetchedAt: number };
+/** A chapter the GPU server is saving, as it reports it. */
+type ServerJob = { section: number; state: "queued" | "making" | "saving" | "done" | "failed" | "cancelled"; made: number; total: number; left?: number; error?: string };
 
 class Stopped extends Error {}
 
 /** A request to the worker, before it's given an id. */
 type Ask = Request extends infer R ? (R extends unknown ? Omit<R, "id"> : never) : never;
+
+/** Sentences asked of the GPU server at once: enough to hide the trip there and back. */
+const SERVER_AT_ONCE = 4;
+/** How often to ask the GPU server how its chapters are getting on. */
+const WATCH_MS = 2500;
+
+/** Whether the GPU server is there to read with. */
+async function serverUp(): Promise<boolean> {
+  const res = await fetch("/api/narrate").catch(() => null);
+  return Boolean(res?.ok && ((await res.json()) as { available?: boolean }).available);
+}
+
+/** A sentence spoken by the GPU server, or null when it isn't answering. */
+async function spokenByServer(text: string, voice: string): Promise<Float32Array | null> {
+  const res = await fetch("/api/narrate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, voice }),
+  }).catch(() => null);
+  if (!res || res.status >= 500) return null;
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "The voice couldn't say that.");
+  const pcm = new Int16Array(await res.arrayBuffer());
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 0x8000;
+  return out;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const prefs = (): { voice: string; rate: number } => {
   try {
@@ -77,16 +113,26 @@ const prefs = (): { voice: string; rate: number } => {
   }
 };
 
-/** The worker, with one sentence spoken at a time, most urgent first. */
+/**
+ * The voice: the GPU server when it's there, else Kokoro in the worker, which also splits text
+ * into sentences and encodes MP3 either way. Sentences are spoken most urgent first: one at a
+ * time here, a few at once on the server.
+ */
 class Voice {
   private worker = new Worker(new URL("./narrator.worker.ts", import.meta.url), { type: "module" });
   private next = 1;
   private pending = new Map<number, { resolve: (v: never) => void; reject: (e: Error) => void }>();
   private queue: { priority: () => number; wanted: () => boolean; start: () => void; reject: (e: Error) => void }[] = [];
-  private speaking = false;
-  engine: Promise<Engine>;
+  private speaking = 0;
+  private atOnce = 1;
+  engine: Promise<Voicing>;
 
-  constructor(onProgress: (loaded: number, total: number) => void) {
+  constructor(
+    onProgress: (loaded: number, total: number) => void,
+    server: Promise<boolean>,
+    /** Told when the voice moves here from the server, which stopped answering. */
+    private onFallBack: (engine: Promise<Voicing>) => void,
+  ) {
     this.worker.addEventListener("message", (event: MessageEvent<Reply>) => {
       const reply = event.data;
       if ("type" in reply) return onProgress(reply.loaded, reply.total);
@@ -99,7 +145,28 @@ class Voice {
       for (const { reject } of this.pending.values()) reject(new Error(event.message || "The voice stopped working."));
       this.pending.clear();
     });
+    this.engine = server.then((up): Promise<Voicing> | Voicing => {
+      if (!up) return this.call<Engine>({ type: "load" });
+      this.atOnce = SERVER_AT_ONCE;
+      return { device: "server" } as const;
+    });
+  }
+
+  /** The server stopped answering: the voice here takes over (loading the model, the first time). */
+  private fallBack() {
+    if (this.atOnce === 1) return;
+    this.atOnce = 1;
     this.engine = this.call<Engine>({ type: "load" });
+    this.onFallBack(this.engine);
+  }
+
+  private async say(text: string, voice: string): Promise<Float32Array> {
+    if ((await this.engine).device === "server") {
+      const pcm = await spokenByServer(text, voice);
+      if (pcm) return pcm;
+      this.fallBack();
+    }
+    return this.call<Float32Array>({ type: "speak", text, voice });
   }
 
   private call<T>(request: Ask, transfer: Transferable[] = []): Promise<T> {
@@ -122,10 +189,10 @@ class Voice {
         wanted,
         reject,
         start: () => {
-          this.call<Float32Array>({ type: "speak", text, voice })
+          this.say(text, voice)
             .then(resolve, reject)
             .finally(() => {
-              this.speaking = false;
+              this.speaking--;
               this.pump();
             });
         },
@@ -136,14 +203,14 @@ class Voice {
   }
 
   private pump() {
-    if (this.speaking) return;
     this.queue = this.queue.filter((job) => job.wanted() || void job.reject(new Stopped()));
-    if (!this.queue.length) return;
-    let best = 0;
-    for (let i = 1; i < this.queue.length; i++) if (this.queue[i].priority() < this.queue[best].priority()) best = i;
-    const [job] = this.queue.splice(best, 1);
-    this.speaking = true;
-    job.start();
+    while (this.speaking < this.atOnce && this.queue.length) {
+      let best = 0;
+      for (let i = 1; i < this.queue.length; i++) if (this.queue[i].priority() < this.queue[best].priority()) best = i;
+      const [job] = this.queue.splice(best, 1);
+      this.speaking++;
+      job.start();
+    }
   }
 
   encodeBegin(key: string) {
@@ -234,6 +301,12 @@ export class Narrator {
   private clips = new Map<string, Promise<Float32Array>>();
   private takes = new Map<string, Take>();
   private job: { cancelled: boolean } | null = null;
+  /** Whether the GPU server is there, asked once. */
+  private server: Promise<boolean> | null = null;
+  /** Chapters given to the GPU server to save, by voice and section. */
+  private sent = new Set<string>();
+  private watcher: Promise<void> | null = null;
+  private destroyed = false;
   private texts = new WeakMap<Document, SpeechText>();
   /** The sentence being read: its place in its chapter's text. */
   private reading: { section: number; start: number; end: number; text: string } | null = null;
@@ -395,8 +468,10 @@ export class Narrator {
   }
 
   destroy() {
+    this.destroyed = true;
     this.stop();
-    this.stopSaving();
+    // The GPU server's saving carries on without the page; the browser's own doesn't.
+    if (!this.state.saving?.remote) this.stopSaving();
     this.view.removeEventListener("relocate", this.onRelocate);
     this.view.removeEventListener("load", this.onLoad);
     this.voice?.terminate();
@@ -405,7 +480,10 @@ export class Narrator {
 
   // ---- saving the whole book ----------------------------------------------------------------
 
-  /** Records every chapter not yet saved in this voice, starting with the one on screen. Needs a GPU. */
+  /**
+   * Saves every chapter not yet saved in this voice, starting with the one on screen: on the GPU
+   * server when there is one, else recorded here, which needs a GPU.
+   */
   async saveBook() {
     if (this.job) return;
     const job = { cancelled: false };
@@ -414,12 +492,10 @@ export class Narrator {
     try {
       const engine = await this.ensureVoice().engine;
       this.set({ engine });
+      if (engine.device === "server") return await this.saveOnServer(job);
       if (engine.device !== "webgpu") throw new Error("Saving the book needs a browser with WebGPU, such as Chrome or Safari on a computer.");
       await this.loadSaved();
-      const from = this.state.status === "off" ? this.visibleOffset().section : this.state.section;
-      const n = this.book.sections.length;
-      const order = [...Array(n).keys()].map((i) => (from + i) % n);
-      for (const section of order) {
+      for (const section of this.saveOrder()) {
         if (job.cancelled) break;
         if (!this.readable(section) || this.savedSections.has(section)) continue;
         this.set({ saving: { section } });
@@ -437,7 +513,85 @@ export class Narrator {
     }
   }
 
+  /** Every chapter, starting with the one being read (or shown). */
+  private saveOrder(): number[] {
+    const from = this.state.status === "off" ? this.visibleOffset().section : this.state.section;
+    const n = this.book.sections.length;
+    return [...Array(n).keys()].map((i) => (from + i) % n);
+  }
+
+  /** Gives the GPU server every chapter not saved yet, a few at a time, then follows it until it's done. */
+  private async saveOnServer(job: { cancelled: boolean }) {
+    await this.loadSaved(true);
+    const wanted = this.saveOrder().filter((section) => this.readable(section) && !this.savedSections.has(section));
+    this.set({ saving: { section: null, remote: true } });
+    // The server starts on the first chapters while the rest are being split into sentences.
+    for (let i = 0; i < wanted.length && !job.cancelled; i += 3) await this.sendChapters(wanted.slice(i, i + 3), false);
+    if (!job.cancelled) await this.watch();
+  }
+
+  /** Asks the GPU server to save chapters; `urgent` puts them before any it's already saving. */
+  private async sendChapters(sections: number[], urgent: boolean) {
+    const voice = this.state.voice;
+    const fresh = sections.filter((s) => !this.savedSections.has(s) && (urgent || !this.sent.has(`${voice}:${s}`)));
+    const scripts = await Promise.all(fresh.map((s) => this.script(s)));
+    const chapters = scripts.filter((script) => script.lines.length).map(({ section, lines }) => ({ section, lines }));
+    if (!chapters.length) return;
+    const res = await fetch(`/api/books/${this.book.id}/narrate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ voice, chapters, urgent }),
+    });
+    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "The narrator server didn't take the chapters.");
+    for (const { section } of chapters) this.sent.add(`${voice}:${section}`);
+    void this.watch();
+  }
+
+  /**
+   * Follows the chapters the GPU server is saving for this book until none are left, showing
+   * how far it has got and picking up each chapter as it's saved (which lets reading switch to it).
+   */
+  private watch(): Promise<void> {
+    this.watcher ??= (async () => {
+      const reported = new Set<number>();
+      try {
+        while (!this.destroyed) {
+          const voice = this.state.voice;
+          const res = await fetch(`/api/books/${this.book.id}/narrate?voice=${voice}`).catch(() => null);
+          if (!res?.ok || voice !== this.state.voice) break;
+          const { jobs } = (await res.json()) as { jobs: ServerJob[] };
+          if (jobs.some((j) => j.state === "done" && !this.savedSections.has(j.section))) await this.loadSaved(true);
+          for (const j of jobs) {
+            if (j.state !== "failed" || reported.has(j.section)) continue;
+            reported.add(j.section);
+            this.set({ error: `Couldn't save “${this.book.sections[j.section]?.title || `chapter ${j.section + 1}`}”: ${j.error}` });
+          }
+          const active = jobs.filter((j) => j.state === "queued" || j.state === "making" || j.state === "saving");
+          if (!active.length) break;
+          const current = active.find((j) => j.state !== "queued");
+          this.set({
+            saving: { section: current?.section ?? null, made: current?.made, total: current?.total, left: current?.left, queued: active.length - (current ? 1 : 0), remote: true },
+          });
+          await sleep(WATCH_MS);
+        }
+      } finally {
+        this.watcher = null;
+        if (this.state.saving?.remote) this.set({ saving: null });
+      }
+    })();
+    return this.watcher;
+  }
+
   stopSaving() {
+    if (this.state.saving?.remote) {
+      const voice = this.state.voice;
+      void fetch(`/api/books/${this.book.id}/narrate?voice=${voice}`, { method: "DELETE" }).catch(() => {});
+      for (const key of this.sent) if (key.startsWith(`${voice}:`)) this.sent.delete(key);
+      if (this.job) this.job.cancelled = true;
+      this.job = null;
+      this.set({ saving: null });
+      return;
+    }
     if (!this.job) return;
     this.job.cancelled = true;
     const section = this.state.saving?.section;
@@ -566,12 +720,17 @@ export class Narrator {
     const lines = script.lines;
     const first = lines.findIndex((l) => l.end > offset);
     if (first < 0) return;
-    // A chapter heard from its start is recorded as it plays, where the voice runs on a GPU.
     const engine = await voice.engine;
     this.set({ engine, download: undefined });
-    if (first === 0 && engine.device === "webgpu") this.record(script);
+    // The GPU server saves the chapter being heard before any other, and reading moves to the
+    // saved chapter once it's there. Without it, a chapter heard from its start is recorded as
+    // it plays, where the voice runs on a GPU here.
+    const remote = engine.device === "server";
+    if (remote) void this.sendChapters([section], true).catch(() => {});
+    else if (first === 0 && engine.device === "webgpu") this.record(script);
 
     for (let i = first; i < lines.length; i++) {
+      if (remote && i > first && this.savedSections.has(section)) return this.playSaved(run, section, lines[i].start);
       for (let k = i; k < Math.min(lines.length, i + 1 + AHEAD); k++) void this.clip(script, k).catch(() => {});
       if (i >= lines.length - 2) void this.prefetch(section + 1);
       this.set({ section, line: i, lines: lines.length, waiting: true, time: undefined });
@@ -633,19 +792,31 @@ export class Narrator {
 
   // ---- making speech ------------------------------------------------------------------------
 
+  private serverUp(): Promise<boolean> {
+    return (this.server ??= serverUp());
+  }
+
   private ensureVoice(): Voice {
     if (!this.voice) {
-      this.voice = new Voice((loaded, total) => this.set({ download: { loaded, total } }));
-      this.voice.engine.then(
-        (engine) => this.set({ engine, download: undefined }),
-        (error: Error) => {
-          this.voice?.terminate();
-          this.voice = null;
-          this.set({ status: "error", error: `The voice couldn't load: ${error.message}`, download: undefined });
-        },
+      this.voice = new Voice(
+        (loaded, total) => this.set({ download: { loaded, total } }),
+        this.serverUp(),
+        (engine) => this.useEngine(engine),
       );
+      this.useEngine(this.voice.engine);
     }
     return this.voice;
+  }
+
+  private useEngine(engine: Promise<Voicing>) {
+    engine.then(
+      (engine) => this.set({ engine, download: undefined }),
+      (error: Error) => {
+        this.voice?.terminate();
+        this.voice = null;
+        this.set({ status: "error", error: `The voice couldn't load: ${error.message}`, download: undefined });
+      },
+    );
   }
 
   /** A chapter's sentences, read from its document as the book stores it (not as it's laid out). */
@@ -712,8 +883,9 @@ export class Narrator {
     const script = await this.script(section).catch(() => null);
     const engine = await this.voice?.engine.catch(() => null);
     if (!script || this.state.status === "off") return;
-    // On a GPU the next chapter is recorded, which makes its first sentences too.
+    // On a GPU the next chapter is recorded, which makes its first sentences too; the GPU server saves it.
     if (engine?.device === "webgpu") return void this.record(script);
+    if (engine?.device === "server") void this.sendChapters([section], true).catch(() => {});
     for (let k = 0; k < Math.min(2, script.lines.length); k++) void this.clip(script, k).catch(() => {});
   }
 
@@ -805,10 +977,13 @@ export class Narrator {
 
   private loadedVoice: string | null = null;
 
-  /** Learns which chapters are saved in the current voice. If that can't be learned, none are (and it's asked again next time). */
-  private async loadSaved() {
+  /**
+   * Learns which chapters are saved in the current voice (again, with `fresh`). If that can't be
+   * learned, none are, and it's asked again next time.
+   */
+  private async loadSaved(fresh = false) {
     const voice = this.state.voice;
-    if (this.loadedVoice === voice) return;
+    if (this.loadedVoice === voice && !fresh) return;
     const res = await fetch(`/api/books/${this.book.id}/audio?voice=${voice}`).catch(() => null);
     if (!res?.ok) {
       console.warn("Couldn't check for saved chapters; reading aloud without them.");
@@ -821,9 +996,15 @@ export class Narrator {
     this.set({ saved: this.savedCount() });
   }
 
-  /** Learns which chapters are saved, without starting to read (for the player's counts). */
+  /** Learns which chapters are saved, and follows any the GPU server is saving, without starting to read (for the player's menu). */
   refresh() {
     void this.loadSaved().catch(() => {});
+    // Chapters the GPU server is still saving: asked for before a reload, or in another tab.
+    void this.serverUp().then((up) => {
+      if (!up) return;
+      if (!this.state.engine) this.set({ engine: { device: "server" } });
+      void this.watch();
+    });
   }
 
   private savedCount() {

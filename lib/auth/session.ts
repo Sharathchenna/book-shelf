@@ -41,6 +41,19 @@ export function fromScheduler(request: Request): boolean {
 }
 
 /**
+ * Whether a request is the narrator's GPU server (narrator-server/), saving a chapter it has read
+ * aloud. It presents NARRATOR_TOKEN as a bearer token, and may only use the narration routes.
+ */
+export function fromNarrator(request: Request): boolean {
+  const expected = process.env.NARRATOR_TOKEN;
+  const given = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+  if (!expected || !given) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
  * The phone shortcut and other tools that save links authenticate with a capture token: a
  * signed JWT that can only add clippings. It doesn't expire; making a new one (or turning it
  * off) revokes the old, since only the current token's id is kept, hashed, in the database.

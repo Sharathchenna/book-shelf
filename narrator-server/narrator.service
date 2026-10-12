@@ -1,0 +1,15 @@
+# The narrator's GPU voice (server.py). Install as a user service: see the README.
+[Unit]
+Description=book-shelf narrator (Kokoro on the GPU)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/narrator
+Environment=SITE_URL=https://read.sharathchenna.com
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/narrator/.venv/bin/python %h/narrator/server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

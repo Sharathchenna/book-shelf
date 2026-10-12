@@ -1,4 +1,4 @@
-import { requireOwner } from "@/lib/auth/session";
+import { fromNarrator, requireOwner } from "@/lib/auth/session";
 import { getAudio, getFile, keys, putAudio, validVoice } from "@/lib/library";
 import type { AudioLine, LibraryBook } from "@/lib/library-types";
 import { getStorage } from "@/lib/storage";
@@ -8,10 +8,20 @@ const MAX_BYTES = 200 * 1024 * 1024;
 
 type Ctx = RouteContext<"/api/books/[id]/audio/[section]">;
 
-/** The book and section a request is about, and the voice it names, or the error to send back. */
-async function target(ctx: Ctx, voice: unknown): Promise<{ book: LibraryBook; section: number; voice: string } | Response> {
-  const denied = await requireOwner();
-  if (denied) return denied;
+/**
+ * The book and section a request is about, and the voice it names, or the error to send back.
+ * Saving is open to the narrator's GPU server too (`narrator`), which saves the chapters it reads.
+ */
+async function target(
+  request: Request,
+  ctx: Ctx,
+  voice: unknown,
+  { narrator = false } = {},
+): Promise<{ book: LibraryBook; section: number; voice: string } | Response> {
+  if (!(narrator && fromNarrator(request))) {
+    const denied = await requireOwner();
+    if (denied) return denied;
+  }
   const params = await ctx.params;
   if (typeof voice !== "string" || !validVoice(voice)) return Response.json({ error: "Unknown voice." }, { status: 400 });
   const book = await getFile(params.id);
@@ -25,7 +35,7 @@ async function target(ctx: Ctx, voice: unknown): Promise<{ book: LibraryBook; se
 
 /** A narrated chapter: a short-lived URL for its MP3, and its sentences' timings. */
 export async function GET(request: Request, ctx: Ctx) {
-  const found = await target(ctx, new URL(request.url).searchParams.get("voice"));
+  const found = await target(request, ctx, new URL(request.url).searchParams.get("voice"));
   if (found instanceof Response) return found;
   const { book, section, voice } = found;
   const audio = await getAudio(book.id, voice, section);
@@ -37,7 +47,7 @@ export async function GET(request: Request, ctx: Ctx) {
 /** Starts saving a chapter's narration: a URL to PUT exactly `bytes` bytes of MP3 to. */
 export async function POST(request: Request, ctx: Ctx) {
   const body = (await request.json().catch(() => ({}))) as { voice?: unknown; bytes?: unknown };
-  const found = await target(ctx, body.voice);
+  const found = await target(request, ctx, body.voice, { narrator: true });
   if (found instanceof Response) return found;
   const { book, section, voice } = found;
   if (typeof body.bytes !== "number" || !Number.isInteger(body.bytes) || body.bytes <= 0 || body.bytes > MAX_BYTES) {
@@ -55,7 +65,7 @@ const validLine = (l: AudioLine) =>
 /** Finishes saving: once the MP3 is in storage, records the chapter and its sentences' timings. */
 export async function PUT(request: Request, ctx: Ctx) {
   const body = (await request.json().catch(() => ({}))) as { voice?: unknown; bytes?: unknown; duration?: unknown; lines?: unknown };
-  const found = await target(ctx, body.voice);
+  const found = await target(request, ctx, body.voice, { narrator: true });
   if (found instanceof Response) return found;
   const { book, section, voice } = found;
   const lines = body.lines as AudioLine[];

@@ -16,6 +16,7 @@ const mb = (bytes: number) => Math.max(1, Math.round(bytes / 1e6));
 
 /** "about 12 min left", rounded up so it never promises too soon. */
 const timeLeft = (seconds: number) => {
+  if (seconds < 50) return "less than a minute left";
   const minutes = Math.ceil(seconds / 60);
   if (minutes < 2) return "about a minute left";
   if (minutes < 90) return `about ${minutes} min left`;
@@ -103,7 +104,15 @@ export function ListenBar({
         >
           {s.rate}×
         </button>
-        <RoundButton label="Voice and saving" active={menu} onClick={() => setMenu((m) => !m)}>
+        <RoundButton
+          label="Voice and saving"
+          active={menu}
+          onClick={() => {
+            // Saved counts, and any saving the GPU server is doing, as they are now.
+            if (!menu) narrator.refresh();
+            setMenu((m) => !m);
+          }}
+        >
           <Icon d="M4 8h10M18 8h2M4 16h4M12 16h8M14 6v4M8 14v4" />
         </RoundButton>
         <RoundButton
@@ -131,8 +140,10 @@ function ListenMenu({
   chapter: (section: number) => string;
   onClose: () => void;
 }) {
-  const noGpu = s.engine && s.engine.device !== "webgpu";
+  const server = s.engine?.device === "server";
+  const noGpu = s.engine && s.engine.device !== "webgpu" && !server;
   const saving = s.saving;
+  const more = saving?.queued ? ` · ${saving.queued} more ${saving.queued === 1 ? "chapter" : "chapters"} to go` : "";
   return (
     <div role="dialog" aria-label="Voice and saving" className="reader-surface reader-pop mx-auto mb-2 max-w-xl rounded-[28px] p-4">
       <div className="flex items-center justify-between">
@@ -173,8 +184,8 @@ function ListenMenu({
       <p className="mt-1.5 text-sm leading-snug">
         {s.saved} of {s.savable} chapters saved in this voice.{" "}
         <span className="text-muted">
-          Saved chapters play instantly, on your phone too, with the lock-screen controls. Chapters you listen to from their start are saved as
-          they play.
+          Saved chapters play instantly, on your phone too, with the lock-screen controls.{" "}
+          {server ? "Chapters you listen to are saved as you listen." : "Chapters you listen to from their start are saved as they play."}
         </span>
       </p>
       {noGpu ? (
@@ -183,7 +194,9 @@ function ListenMenu({
         <div className="mt-3">
           <div className="flex items-center gap-3">
             <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-fg/20 border-t-accent" aria-hidden />
-            <p className="min-w-0 flex-1 truncate text-sm">{saving.section === null ? "Getting ready…" : `Saving “${chapter(saving.section)}”`}</p>
+            <p className="min-w-0 flex-1 truncate text-sm">
+              {saving.section === null ? (saving.remote ? "Sending the chapters to your GPU server…" : "Getting ready…") : `Saving “${chapter(saving.section)}”`}
+            </p>
             <button onClick={() => narrator.stopSaving()} className="rounded-full px-3 py-1.5 text-sm hover:bg-chip">
               Stop
             </button>
@@ -195,10 +208,14 @@ function ListenMenu({
               </div>
               <p className="mt-1.5 text-[11px] text-muted tabular-nums">
                 Sentence {saving.made ?? 0} of {saving.total}
-                {saving.left !== undefined && ` · ${timeLeft(saving.left)}`} · Keep this tab open; the chapter is stored when it&apos;s done.
+                {saving.left !== undefined && ` · ${timeLeft(saving.left)}`}
+                {more}
+                {saving.remote ? " · On your GPU server: you can close this tab." : " · Keep this tab open; the chapter is stored when it's done."}
               </p>
             </>
-          ) : null}
+          ) : (
+            saving.remote && more && <p className="mt-1.5 text-[11px] text-muted">{more.slice(3)} · On your GPU server: you can close this tab.</p>
+          )}
         </div>
       ) : (
         s.saved < s.savable && (
@@ -207,7 +224,8 @@ function ListenMenu({
           </button>
         )
       )}
-      <p className="mt-4 text-[11px] text-muted">Voice: Kokoro, made in this browser.</p>
+      {s.error && s.status !== "error" && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{s.error}</p>}
+      <p className="mt-4 text-[11px] text-muted">Voice: Kokoro, {server ? "on your GPU server" : "made in this browser"}.</p>
     </div>
   );
 }

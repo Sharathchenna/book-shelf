@@ -21,6 +21,9 @@
   // Vectorize has no local simulation, so development uses the real index (in its own namespace).
   "ai": { "binding": "AI", "remote": true },
   "vectorize": [{ "binding": "VECTORIZE", "index_name": "book-shelf-search", "remote": true }],
+  // The narrator's GPU voice (narrator-server/), reached through a Cloudflare Tunnel by Workers VPC.
+  // Optional: without it, or when it's down, books are read aloud by the voice in the browser.
+  "vpc_services": [{ "binding": "NARRATOR", "service_id": "01a1309d-e7b9-7bd2-836f-3a90e432f10f", "remote": true }],
   // Goodreads sync, nightly at 02:47 IST.
   "triggers": { "crons": ["17 21 * * *"] },
   "observability": { "enabled": true }

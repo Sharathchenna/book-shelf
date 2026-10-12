@@ -8,6 +8,8 @@ interface CloudflareEnv {
   /** Workers AI, for embeddings. Absent where the Worker has no AI binding. */
   AI?: Ai;
   VECTORIZE?: VectorizeIndex;
+  /** The narrator's GPU voice, through a Cloudflare Tunnel (Workers VPC). Absent when not set up. */
+  NARRATOR?: { fetch(input: string, init?: RequestInit): Promise<Response> };
   SESSION_SECRET?: string;
   OWNER_PASSWORD?: string;
   /** The search index namespace; "dev" keeps local runs apart from the live site's vectors. */
