@@ -299,6 +299,16 @@ A search costs a fraction of a cent and returns in under a second. Without Jev, 
   - footnotes, and links between sections.
 
   A **PDF ↗** button opens the original. Other papers, and arXiv papers without an HTML version, open as PDFs, which the server fetches into R2. The first open takes a few seconds, and after that it's instant. The conversion is versioned (`ARXIV_EPUB_BUILD` in `lib/library-types.ts`): ebooks made by an older version are rebuilt the next time they're opened.
+- **X Articles.** An X post that's an Article (a long post with a title) is saved under Articles, with its cover, author and first lines.
+  - **Reading:** signed in, the card opens it in the EPUB reader, with themes, listening, highlights and notes. The browser makes the ebook (`app/components/reader/x-article-epub.ts`):
+    - the cover, title and author on the first page;
+    - a chapter per top-level heading;
+    - bold, italic and links, lists, code and quotes;
+    - pictures, the posts it embeds, and dividers.
+  - **Visibility:** visitors see the card and a link to X; the full text is owner-only.
+  - **Where the text comes from:** X's public embeds only give an article's first lines, so `lib/x-article.ts` reads it whole from X's web API, as a logged-out visitor does (a guest token, then the post's GraphQL query).
+  - **If X changes that API:** the query id in `lib/x-article.ts` stops working. Articles can still be saved, from vxtwitter's summary, but won't open; update the query id.
+  - **Rebuilds:** the conversion is versioned like papers' (`X_ARTICLE_EPUB_BUILD`).
 - **Both readers** have contents, in-book search, highlights with notes, and a scrubber with chapter ticks and minutes left in the chapter. Your position, highlights and notes are saved to D1 and follow you across devices.
 
 ## Listening
@@ -423,6 +433,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `migrations/`, `lib/db.ts`, `lib/data.ts`, `lib/library.ts` | D1: schema, shelf, clippings, files, progress and notes |
 | `lib/sync.ts`, `lib/goodreads.ts`, `lib/categories.ts`, `app/api/sync/` | Goodreads sync (RSS → Open Library → D1) |
 | `lib/clip.ts`, `app/api/clips/`, `app/components/add-clip.tsx` | Adding clippings from the site |
+| `lib/x-article.ts`, `app/api/books/clips/`, `app/reader/clip/`, `app/components/reader/{clip-opener.tsx,x-article-epub.ts}` | X Articles: reading them whole, as ebooks in the reader |
 | `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
 | `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `app/components/search-palette.tsx` | Site search and its vector index |
 | `lib/save.ts`, `lib/enrich.ts`, `app/api/capture/`, `app/components/capture-setup.tsx` | Saving from anywhere: the shared save pipeline, enrichment, the share-sheet endpoint and token, the setup panel |

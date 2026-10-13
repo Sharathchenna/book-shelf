@@ -135,11 +135,11 @@ const normalize = (s: string) =>
  * Goodreads finds it after the next sync.
  */
 export function shelfItemFor(
-  book: Pick<LibraryBook, "shelfItemId" | "paperId" | "title" | "author">,
+  book: Pick<LibraryBook, "shelfItemId" | "paperId" | "clipId" | "title" | "author">,
   items: Item[],
 ): string | undefined {
   if (book.shelfItemId && items.some((i) => i.id === book.shelfItemId)) return book.shelfItemId;
-  return book.paperId ? undefined : matchShelfItem(book.title, book.author, items);
+  return book.paperId || book.clipId ? undefined : matchShelfItem(book.title, book.author, items);
 }
 
 /** The shelf item an uploaded book belongs to: same title (before any subtitle) and author surname. */

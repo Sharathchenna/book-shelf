@@ -40,7 +40,8 @@ const SCHEMA = {
 /** Enrichment for a clipping, or undefined for papers. AI failures leave what could be done without it. */
 export async function enrich(clip: Clip): Promise<Enrichment | undefined> {
   if (clip.kind === "paper") return undefined;
-  const linkUrl = clip.tweet ? linkIn(clip) : clip.url;
+  // An X Article's page on X is a script with no text; its title and first lines describe it.
+  const linkUrl = clip.tweet ? linkIn(clip) : clip.xArticle ? undefined : clip.url;
   const page = linkUrl ? await readPage(linkUrl).catch(() => null) : null;
   const link = page && linkUrl ? { url: linkUrl, ...(page.title ? { title: page.title } : {}), text: page.text.slice(0, KEEP_CHARS) } : undefined;
 

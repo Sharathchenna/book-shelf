@@ -26,7 +26,7 @@ const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip; reada
 /** Every clipping of one kind, each with that kind's card. */
 export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
   const { list, Card } = LAYOUT[kind];
-  // The owner can remove clippings, and open papers with a free PDF in the reader.
+  // The owner can remove clippings, and open papers with a free PDF, and X Articles, in the reader.
   const owner = useOwner();
   const router = useRouter();
   const remove = async (clip: Clip) => {
@@ -41,14 +41,15 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
   return (
     <ul className={list}>
       {items.map((clip) => {
-        // For the owner, a paper with a free PDF opens in the site's reader; the source is a small link.
-        const readable = owner && Boolean(clip.paper?.pdf);
+        // For the owner, a paper with a free PDF or an X Article opens in the site's reader; the source is a small link.
+        const reader = !owner ? null : clip.paper?.pdf ? `/reader/paper/${encodeURIComponent(clip.id)}` : clip.xArticle ? `/reader/clip/${encodeURIComponent(clip.id)}` : null;
+        const readable = Boolean(reader);
         const cardClass =
           "glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1";
         return (
           <li key={clip.id} className="group relative">
-            {readable ? (
-              <Link href={`/reader/paper/${encodeURIComponent(clip.id)}`} className={cardClass}>
+            {reader ? (
+              <Link href={reader} className={cardClass}>
                 <Card clip={clip} readable />
               </Link>
             ) : (
@@ -75,7 +76,7 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
                 rel="noreferrer"
                 className="absolute right-5 bottom-5 rounded-md border border-line px-1.5 py-0.5 text-xs text-muted transition-colors hover:text-fg"
               >
-                {clip.paper?.arxiv ? "arXiv" : new URL(clip.url).host.replace(/^www\./, "")} ↗
+                {clip.paper?.arxiv ? "arXiv" : clip.xArticle ? "X" : new URL(clip.url).host.replace(/^www\./, "")} ↗
               </a>
             )}
           </li>
@@ -91,7 +92,11 @@ function ArticleCard({ clip }: { clip: Clip }) {
       {clip.image && <Picture src={clip.image} className="aspect-[1.91] w-full object-cover" />}
       <div className="p-5">
         <p className="flex items-center gap-2 text-xs text-muted">
-          <Monogram name={clip.source} />
+          {clip.xArticle?.avatar ? (
+            <Picture src={clip.xArticle.avatar} className="size-5 rounded-full bg-chip" fallback={<Monogram name={clip.source} />} />
+          ) : (
+            <Monogram name={clip.source} />
+          )}
           <span className="truncate font-medium text-fg/80">{clip.source}</span>
           {clip.minutes && <span className="shrink-0">· {clip.minutes} min read</span>}
         </p>

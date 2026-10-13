@@ -66,8 +66,8 @@ export async function POST(request: Request) {
         : bm25By(query, docs, (d) => d.text, CANDIDATES);
   // The palette needs none of what the rankers read.
   const strip = (doc: SearchDoc): Shown => {
-    const { id, kind, title, subtitle, image, href, paperId } = doc;
-    return { id, kind, title, subtitle, image, href, paperId };
+    const { id, kind, title, subtitle, image, href, paperId, articleId } = doc;
+    return { id, kind, title, subtitle, image, href, paperId, articleId };
   };
 
   if (!jevEnabled() && near) {

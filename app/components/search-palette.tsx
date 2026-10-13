@@ -117,6 +117,8 @@ function Palette({ onClose }: { onClose: () => void }) {
       else router.push(result.href);
     } else if (owner && result.paperId) {
       router.push(`/reader/paper/${encodeURIComponent(result.paperId)}`);
+    } else if (owner && result.articleId) {
+      router.push(`/reader/clip/${encodeURIComponent(result.articleId)}`);
     } else {
       window.open(result.href, "_blank", "noopener,noreferrer");
     }

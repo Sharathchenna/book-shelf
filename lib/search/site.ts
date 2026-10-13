@@ -15,6 +15,8 @@ export type SearchDoc = {
   href: string;
   /** A paper the owner can read here (the palette opens it in the reader for them). */
   paperId?: string;
+  /** An X Article the owner can read here, likewise. */
+  articleId?: string;
   /** For Jev: what it is and what it's about. */
   card: string;
   /** For BM25. */
@@ -62,6 +64,7 @@ export function clipDoc(clip: Clip): SearchDoc {
     image: clip.image ?? clip.tweet?.avatar,
     href: clip.url,
     paperId: clip.paper?.pdf ? clip.id : undefined,
+    articleId: clip.xArticle ? clip.id : undefined,
     card: [
       `A ${kind}: ${title}${by ? ` by ${by}` : ""} (${clip.source}).`,
       about.slice(0, 500),

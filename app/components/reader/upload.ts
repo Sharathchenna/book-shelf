@@ -14,10 +14,10 @@ export type Upload = {
 export async function uploadBook(
   file: File,
   onProgress: (patch: Partial<Upload>) => void,
-  /** The shelf book, or clipped paper, it belongs to. */
-  owner: { shelfItemId?: string; paperId?: string; build?: number } = {},
+  /** The shelf book, clipped paper or other clipping (an X Article) it belongs to. */
+  owner: { shelfItemId?: string; paperId?: string; clipId?: string; build?: number } = {},
 ): Promise<string> {
-  const { shelfItemId, paperId, build } = owner;
+  const { shelfItemId, paperId, clipId, build } = owner;
   const start = await fetch("/api/books", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -54,7 +54,7 @@ export async function uploadBook(
   const done = await fetch(`/api/books/${started.id}/finalize`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ shelfItemId, paperId, build }),
+    body: JSON.stringify({ shelfItemId, paperId, clipId, build }),
   });
   if (!done.ok) {
     const { error } = (await done.json().catch(() => ({}))) as { error?: string };

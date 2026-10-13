@@ -54,18 +54,21 @@ async function finalizeEpub(id: string, body: Record<string, unknown>, shelfItem
   }
   await putJson(keys.text(id), parsed.sections.map((s) => s.text));
 
-  // An arXiv paper converted to an EPUB in the browser (see arxiv-epub.ts).
+  // An arXiv paper converted to an EPUB in the browser (see arxiv-epub.ts), or an X Article (x-article-epub.ts).
   const clip = typeof body.paperId === "string" ? await getClipping(body.paperId) : null;
   const paper = clip?.kind === "paper" ? clip : undefined;
+  const fromClip = typeof body.clipId === "string" ? await getClipping(body.clipId) : null;
+  const article = fromClip?.xArticle ? fromClip : undefined;
 
   return addToIndex({
     id,
     format: "epub",
-    title: paper?.title ?? parsed.title,
-    author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : parsed.author,
+    title: paper?.title ?? article?.title ?? parsed.title,
+    author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : (article?.author ?? parsed.author),
     paperId: paper?.id,
-    build: paper && typeof body.build === "number" ? body.build : undefined,
-    shelfItemId: paper ? undefined : (shelfItemId ?? matchShelfItem(parsed.title, parsed.author, items)),
+    clipId: article?.id,
+    build: (paper || article) && typeof body.build === "number" ? body.build : undefined,
+    shelfItemId: paper || article ? undefined : (shelfItemId ?? matchShelfItem(parsed.title, parsed.author, items)),
     coverKey,
     sections: parsed.sections.map((s) => ({ title: s.title, chars: s.text.length })),
     totalChars: parsed.sections.reduce((sum, s) => sum + s.text.length, 0),

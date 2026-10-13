@@ -1,12 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { Clip, ClipKind, QuotedPost } from "./types";
+import { fetchXArticle } from "./x-article";
+import { articleMinutes } from "./x-article-types";
 
 /**
  * Clipping a link: articles are described from their Open Graph and JSON-LD metadata, newsletters
  * are recognised by their platform (Substack, Buttondown, beehiiv, ...), tweets come from FxTwitter
  * (falling back to X's public embed endpoints) and are stored as plain data (so the site renders
- * them without X's scripts), and papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that
+ * them without X's scripts), X Articles become articles (read whole in the site's reader), and papers come from the arXiv API, Crossref (for DOIs), or the citation_* tags that
  * journals and proceedings sites publish for Google Scholar.
  */
 
@@ -303,10 +305,50 @@ const fxQuoted = (post: FxPost): QuotedPost => ({
   ...(fxMedia(post).length ? { media: fxMedia(post) } : {}),
 });
 
+/** A post that is an X Article: FxTwitter says so, or the post is nothing but the article's link. */
+const isArticle = (post: FxPost) => Boolean(post.article?.title) || /^https?:\/\/(?:x|twitter)\.com\/i\/article\/\d+\/?$/.test(post.text.trim());
+
+/**
+ * An X Article, clipped as an article: its title, first lines and cover. The text itself is read
+ * when it's opened (lib/x-article.ts). When X won't give the article, vxtwitter's summary of it
+ * (title, preview and picture) will do; failing that, it's kept as a post.
+ */
+async function fetchXArticleClip(post: FxPost, id: string): Promise<Fetched | null> {
+  const url = `https://x.com/${post.author.screen_name}/status/${id}`;
+  const base = {
+    kind: "article" as const,
+    url,
+    author: post.author.name,
+    source: "X",
+    published: new Date(post.created_timestamp * 1000).toISOString().slice(0, 10),
+    xArticle: { handle: post.author.screen_name, avatar: post.author.avatar_url },
+  };
+  const article = await fetchXArticle(id).catch(() => null);
+  if (article) {
+    return {
+      ...base,
+      title: article.title,
+      excerpt: article.preview || undefined,
+      image: article.cover,
+      published: article.published ?? base.published,
+      minutes: articleMinutes(article),
+    };
+  }
+  const res = await fetch(`https://api.vxtwitter.com/${post.author.screen_name}/status/${id}`, { headers: API_HEADERS, signal: AbortSignal.timeout(8000) }).catch(() => null);
+  const vx = res?.ok ? ((await res.json()) as { article?: { title?: string; preview_text?: string; image?: string } }).article : undefined;
+  const title = vx?.title ?? post.article?.title;
+  if (!title) return null;
+  return { ...base, title, excerpt: vx?.preview_text ?? post.article?.preview_text, image: vx?.image };
+}
+
 async function fetchTweet(url: string): Promise<Fetched> {
   const id = tweetId(url)!;
   // FxTwitter has the full text of long posts (X's embed endpoint cuts them off), quotes and replies.
   const post = await fetchFx(id).catch(() => null);
+  if (post && isArticle(post)) {
+    const article = await fetchXArticleClip(post, id);
+    if (article) return article;
+  }
   if (post) {
     const parent = post.replying_to_status ? await fetchFx(post.replying_to_status).catch(() => null) : null;
     return {

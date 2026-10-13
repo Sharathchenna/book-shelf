@@ -81,6 +81,8 @@ export type Clip = {
     /** The post it replies to. */
     replyTo?: QuotedPost;
   };
+  /** An X Article (a long post with a title): the owner reads it in the site's reader (lib/x-article.ts). */
+  xArticle?: { handle: string; avatar?: string };
   /** Added when it's saved (lib/enrich.ts), so search finds it by what it's about. */
   enriched?: Enrichment;
 };

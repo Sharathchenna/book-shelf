@@ -205,7 +205,7 @@ export function ReaderView({ id }: { id: string }) {
         // Up to the end of the visible page: the reader has seen all of it.
         sectionFraction: range ? fractionInSection(range, true) : 0,
       },
-      { kind: "recap", title: book?.paperId ? "Where you left off" : "Previously…" },
+      { kind: "recap", title: book?.paperId || book?.clipId ? "Where you left off" : "Previously…" },
     );
   };
 
@@ -529,7 +529,7 @@ export function ReaderView({ id }: { id: string }) {
           <p className="truncate font-serif text-[15px] leading-tight">{book?.title ?? "Opening…"}</p>
           <p className="truncate text-[11px] text-muted">{book?.author}</p>
         </div>
-        <BarButton label={book?.paperId ? "Where you left off (recap)" : "Previously… (recap)"} onClick={recap} disabled={status !== "ready"}>
+        <BarButton label={book?.paperId || book?.clipId ? "Where you left off (recap)" : "Previously… (recap)"} onClick={recap} disabled={status !== "ready"}>
           <Icon d="M12 8v4l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v4h4" />
         </BarButton>
         <BarButton label="Listen (L)" active={listening} onClick={listen} disabled={status !== "ready"}>
