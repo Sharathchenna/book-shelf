@@ -131,6 +131,7 @@ Each feature switches on when its keys are set. Locally they go in `.env.local` 
 | Signing in as the owner | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters, e.g. `openssl rand -base64 48`) |
 | Book files in R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 | Listening on a GPU server (see [On a GPU server](#on-a-gpu-server)) | `NARRATOR_TOKEN`, shared with the server |
+| Fish Audio's narrator voice (see [Fish Audio](#fish-audio)) | `FISH_API_KEY` (and `~/narrator/fish-key` on a GPU server) |
 
 What happens when keys are missing:
 
@@ -359,10 +360,12 @@ To start somewhere else:
 - **From a selection:** select text and choose **Listen**.
 - **Tap to read:** turn it on with the pointer button in the player, or the switch in the player's menu (phones use the switch). While listening, a tap on any sentence reads from there instead of turning the page. The setting is remembered.
 
-- **The voice** is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), run in the browser with [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js), so it costs nothing and has no usage limit. There are five voices: Heart, Bella, Emma, Michael and George.
-  - **Download:** the model downloads from Hugging Face the first time, 326 MB, then stays in the browser's cache.
+- **The voices.** There are two kinds, and each book keeps the voice you pick for it. A book you haven't picked one for is read in the voice it has chapters saved in, else in your usual voice.
+  - **Adrian** (the default) is a narrator voice from [Fish Audio](https://fish.audio), spoken by its S2.1 Pro model through the site (`lib/fish.ts`). It uses the free developer tier (`s2.1-pro-free`). See [Fish Audio](#fish-audio).
+  - **Heart, Bella, Emma, Michael and George** are [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), run in the browser with [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js), or on a GPU server. They cost nothing and have no usage limit.
+  - **Kokoro's download:** the model downloads from Hugging Face the first time a Kokoro voice is used, 326 MB, then stays in the browser's cache.
   - **Speed:** on a computer's GPU (WebGPU), it speaks several times faster than it reads. Without one, it uses a smaller 92 MB model on the CPU, which is slower than real time, so there are pauses between sentences.
-- **Saved chapters.** On a GPU, a chapter you listen to from its start is recorded as it plays. **Save the whole book**, in the player's menu, records the rest. Keep the tab open while it runs.
+- **Saved chapters.** A chapter you listen to from its start is recorded as it plays (in a Kokoro voice, only on a GPU). **Save the whole book**, in the player's menu, records the rest. Keep the tab open while it runs, or have a GPU server do it with the tab closed.
   - **Where they go:** each chapter is stored as a 64 kbps MP3 in R2 (`audio/<book>/<voice>/<section>.mp3`, about 0.5 MB a minute), with each sentence's timing in D1.
   - **Playback:** saved chapters play straight from storage on any device. A phone needs no model and no GPU, and gets lock-screen and headphone controls: previous and next track change chapter, skip back and forward change sentence.
 - **Playing:** speed changes from 0.8× to 2× without changing pitch. A different voice is a separate recording.
@@ -372,6 +375,19 @@ To start somewhere else:
   - **Read:** figure captions.
   - **Inline maths** is spoken: "1 over the square root of d k".
 - **Books** skip footnote marks and illustration captions.
+
+### Fish Audio
+
+Adrian is Fish Audio's official narrator voice (`fi_adrian` in `lib/voices.ts`; more Fish voices can be added there and in `narrator-server/server.py`).
+
+- **The key:** `FISH_API_KEY`, a Worker secret. The free tier needs no card.
+- **The free tier:** the same model as the paid one, under a fair-use policy with no published caps, and up to five requests at once per account. Fish says the free period is for "an initial period", and that free requests may be used to improve its model, so the book's text goes to Fish. The paid model is $15 per million characters, about $20 for a long book.
+- **Speed:** each sentence takes about 2–6 seconds to make, and audio starts when the first one is ready.
+  - **Listening:** a few sentences are made ahead, so it plays on smoothly.
+  - **Saving from the tab:** 4 sentences at once, about 4–7× real time. A 2-hour chapter takes about half an hour.
+  - **Saving on the GPU server:** 3 at once, about 4× real time, without using the GPU.
+- **Busy or failing:** Fish being busy (too many requests at once) or failing is waited out and retried. No other voice stands in, because a book is read in one voice.
+- **Brackets:** S2 reads words in square brackets as directions ("[sad]"), so a book's own brackets are sent as parentheses.
 
 ### On a GPU server
 
@@ -392,6 +408,7 @@ With a GPU machine of your own, the same Kokoro voices run there (`narrator-serv
 - **Connection.** The server listens on `127.0.0.1:8880`, and a Cloudflare Tunnel connects it to the Worker through [Workers VPC](https://developers.cloudflare.com/workers-vpc/) (the `NARRATOR` binding in `wrangler.jsonc`).
   - **Private:** the tunnel has no public hostname and the machine opens no ports, so only the Worker can reach it.
   - **Saving back:** the server saves chapters through the same routes the browser uses (`/api/books/[id]/audio/[section]`). It signs those requests with `NARRATOR_TOKEN`, which only those routes accept.
+- **Fish voices** are saved here too: the server asks Fish for the sentences (`FISH_AT_ONCE`, default 3) instead of using the GPU, so they need no GPU memory. It needs its own copy of the key in `~/narrator/fish-key` (mode 600); without one, Fish chapters are saved from the tab instead.
 - **Setup** on the machine, which needs Linux, an NVIDIA GPU and Python 3.12 via [uv](https://docs.astral.sh/uv/); no root needed:
   ```sh
   mkdir -p ~/narrator && cd ~/narrator            # copy narrator-server/server.py here
@@ -460,6 +477,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
 | A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
 | Listening pauses between sentences | The voice is running in a browser without WebGPU, on the CPU. Save the book on the GPU server, or from Chrome or Safari on a computer; saved chapters play smoothly anywhere. |
+| Adrian says "Fish Audio isn't set up" | `FISH_API_KEY` isn't set where the site runs. |
+| Adrian stops with a Fish Audio error | Fish refused or kept failing for over a minute (its free tier may have changed). Pick a Kokoro voice for the book meanwhile; chapters already saved in Adrian still play. |
 | The menu says "made in this browser" with a GPU server set up | The server isn't answering. On the machine, check `systemctl --user status narrator narrator-tunnel`, and `bunx wrangler tunnel info <name>` for the tunnel. |
 | A figure is missing from a paper ebook | Check the paper on arxiv.org/html: if arXiv's own page shows no image, its LaTeX conversion dropped it, and **PDF ↗** has it. |
 | Local changes don't show in `bun dev` | Restart the dev server; if it still serves an old page, check with `bun run preview`. |
@@ -486,6 +505,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `app/reader/`, `app/components/reader/` | The readers: EPUB (foliate-js), PDF (pdf.js), arXiv-to-EPUB, panels, chat |
 | `app/api/reader/`, `lib/ai/reader.ts` | Explain, Recap and Chat |
 | `app/components/reader/{narrator,narrator.worker,speech}.ts`, `listen-bar.tsx`, `app/api/books/[id]/audio/` | Listening: the text read aloud, Kokoro in a worker, saved chapters |
+| `lib/voices.ts`, `lib/fish.ts` | The narrator's voices, and Fish Audio's |
 | `narrator-server/`, `lib/narrator.ts`, `app/api/narrate/`, `app/api/books/[id]/narrate/` | Listening on a GPU server: Kokoro on CUDA behind a Cloudflare Tunnel (Workers VPC) |
 | `worker.ts`, `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment: edge cache, nightly sync |
 | `shelf.config.ts` | Your name, bio, links, site URL and Goodreads id |

@@ -81,7 +81,7 @@ async function upsert(table: "progress" | "notes", id: string, value: unknown) {
 
 // ---- narration ---------------------------------------------------------------------------------
 
-/** Voice ids are Kokoro's (af_heart, bm_george): checked before they go into a storage key. */
+/** Voice ids (af_heart, fi_adrian; lib/voices.ts): checked before they go into a storage key. */
 export const validVoice = (voice: string) => /^[a-z]{2}_[a-z]{2,16}$/.test(voice);
 
 /** The chapters read aloud in one voice, without their sentences. */
@@ -90,6 +90,15 @@ export async function listAudio(id: string, voice: string): Promise<{ section: n
     .prepare("SELECT section, duration FROM audio WHERE file_id = ?1 AND voice = ?2 ORDER BY section")
     .bind(id, voice)
     .all<{ section: number; duration: number }>();
+  return results;
+}
+
+/** The voices a book has chapters saved in, and how many in each. */
+export async function audioVoices(id: string): Promise<{ voice: string; sections: number }[]> {
+  const { results } = await (await db())
+    .prepare("SELECT voice, COUNT(*) AS sections FROM audio WHERE file_id = ?1 GROUP BY voice ORDER BY sections DESC")
+    .bind(id)
+    .all<{ voice: string; sections: number }>();
   return results;
 }
 

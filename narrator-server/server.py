@@ -19,6 +19,11 @@ WORKER_IDLE seconds after the last chapter). One sentence at a time leaves an A1
 so several processes are what keep it busy. Each is capped at GPU_MB, and none starts unless
 the GPU has that much free beyond GPU_RESERVE_MB, which is left for whatever else runs there.
 
+Chapters in Fish Audio's voices (fi_*) are saved here too, but spoken by Fish's API rather
+than the GPU: a thread asks Fish for FISH_AT_ONCE sentences at a time (its free tier allows five
+at once per account, and the reader may be using two), with the key in fish-key. They need no
+GPU memory at all.
+
 Jobs waiting are kept in jobs/ and picked up again after a restart. Setup is in the README
 (On a GPU server); narrator.service and narrator-tunnel.service keep it running.
 """
@@ -32,6 +37,7 @@ import re
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,6 +75,14 @@ CHUNK_GAP = round(SAMPLE_RATE * 0.06)
 # sentence at a time leaves the GPU mostly waiting. Each sentence is cut back out of the audio.
 GROUP = 500
 VOICES = {"af_heart", "af_bella", "bf_emma", "am_michael", "bm_george"}
+# Fish Audio's voices (lib/voices.ts), by the reference id its API takes, and the key for it.
+FISH = {"fi_adrian": "bf322df2096a46f18c579d0baa36f41d"}
+FISH_KEY = (HOME / "fish-key").read_text().strip() if (HOME / "fish-key").exists() else ""
+FISH_AT_ONCE = int(os.environ.get("FISH_AT_ONCE", "3"))
+# Sentences asked for ahead of the one being encoded, so a slow one doesn't hold up the rest.
+FISH_AHEAD = 12
+# Waits before asking Fish again when it's busy or failed, in seconds.
+FISH_RETRIES = [2, 4, 8, 15, 30, 60]
 BOOK_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(processName)s %(message)s")
@@ -245,6 +259,86 @@ def make(task: dict, speak_all, progress, cancel):
     site("PUT", base, {"voice": task["voice"], "bytes": len(mp3), "duration": round(t, 3), "lines": timings})
 
 
+# ---- Fish Audio's voices ---------------------------------------------------------------------
+
+
+def fish_say(text: str, voice: str) -> np.ndarray:
+    """A sentence in a Fish voice, at 24 kHz. Busy (too many at once) and failures are waited out a few times."""
+    # S2 takes [square brackets] as directions and <|…|> as speaker turns: a book's own are said as parentheses.
+    text = text.replace("[", "(").replace("]", ")").replace("<|", "<").replace("|>", ">")
+    body = json.dumps({"text": text, "reference_id": FISH[voice], "format": "pcm", "sample_rate": SAMPLE_RATE, "latency": "normal"}).encode()
+    headers = {"authorization": f"Bearer {FISH_KEY}", "content-type": "application/json", "model": "s2.1-pro-free"}
+    for attempt in range(len(FISH_RETRIES) + 1):
+        try:
+            request = urllib.request.Request("https://api.fish.audio/v1/tts", data=body, headers=headers)
+            with urllib.request.urlopen(request, timeout=180) as res:
+                pcm = res.read()
+            return np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32) / 32768
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace")[:200]
+            if (error.code != 429 and error.code < 500) or attempt == len(FISH_RETRIES):
+                raise RuntimeError(f"Fish Audio: {error.code} {detail}") from None
+        except (urllib.error.URLError, TimeoutError) as error:
+            if attempt == len(FISH_RETRIES):
+                raise RuntimeError(f"Fish Audio: {error}") from None
+        time.sleep(FISH_RETRIES[attempt])
+    raise AssertionError("unreachable")
+
+
+def fish_speak_all(says: list[str], voice: str):
+    """Like a voice process's speak_all: each text's speech, in order, with no gap of its own (make() adds the pause)."""
+    nothing = np.zeros(0, dtype=np.float32)
+    pool = ThreadPoolExecutor(FISH_AT_ONCE)
+    try:
+        asked: dict[int, object] = {}
+        for i in range(len(says)):
+            for k in range(i, min(len(says), i + FISH_AHEAD)):
+                if k not in asked:
+                    asked[k] = pool.submit(fish_say, says[k], voice)
+            yield i, asked.pop(i).result(), nothing
+    finally:
+        # Stopped or failed partway: sentences not started yet aren't asked for.
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def fish_saver():
+    """Saves chapters in Fish voices, one at a time, urgent ones first."""
+    while True:
+        with changed:
+            queued = [j for j in jobs.values() if j.state == "queued" and j.voice in FISH]
+            if not queued:
+                changed.wait(5)
+                continue
+            job = next((j for j in reversed(queued) if j.urgent), queued[0])
+            job.state, job.made, job.started = "making", 0, time.time()
+            job.stop.clear()
+
+        def progress(made: int, job=job):
+            with changed:
+                job.made, job.state = (job.made, "saving") if made < 0 else (made, job.state)
+
+        try:
+            make(job.task(), fish_speak_all, progress, job.stop)
+            state, error = "done", ""
+        except Cancelled:
+            state, error = "cancelled", ""
+        except Exception as e:  # noqa: BLE001 - one chapter failing mustn't stop the rest
+            state, error = "failed", str(e)
+        with changed:
+            job.tries += 1
+            if state == "failed" and job.tries <= RETRIES and not job.cancelled:
+                # Fish was down for minutes: the chapter waits its turn again.
+                log.warning("retrying %s: %s", job.key, error)
+                job.state, job.made = "queued", 0
+                changed.notify_all()
+                continue
+            finish(job, state, error)
+            for k, old in list(jobs.items()):
+                if old.state in ("done", "failed", "cancelled") and time.time() - old.started > 3600:
+                    del jobs[k]
+            changed.notify_all()
+
+
 # ---- the voice processes, from here ----------------------------------------------------------
 
 ctx = mp.get_context("spawn")
@@ -286,6 +380,8 @@ class Job:
         self.error = ""
         self.cancelled = False
         self.tries = 0
+        # Stops a Fish chapter partway (a voice process has its own).
+        self.stop = threading.Event()
 
     @property
     def key(self) -> str:
@@ -412,7 +508,8 @@ def schedule():
                         log.warning("retrying %s: the voice process %s", job.key, "stalled" if stuck else "stopped")
                         job.state, job.made = "queued", 0
 
-            queued = [j for j in jobs.values() if j.state == "queued"]
+            # Fish's voices are saved by fish_saver(), without the GPU.
+            queued = [j for j in jobs.values() if j.state == "queued" and j.voice not in FISH]
             savers = [v for v in voices.values() if v.wid != "live"]
             busy = sum(1 for v in savers if v.job)
             # Saving always leaves room for the listening voice, if it isn't running.
@@ -426,7 +523,7 @@ def schedule():
             for v in savers:
                 if not (v.ready and v.job is None and v.alive()):
                     continue
-                queued = [j for j in jobs.values() if j.state == "queued"]
+                queued = [j for j in jobs.values() if j.state == "queued" and j.voice not in FISH]
                 if not queued:
                     break
                 # Chapters someone is waiting to listen to first, then the rest in the order asked for.
@@ -522,11 +619,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
-            # The reader asks when it opens: get the listening voice ready, in case it's wanted.
-            threading.Thread(target=live_voice, daemon=True).start()
+            # The reader asks when it opens: with a Kokoro voice (?warm=1), get the listening voice ready, in case it's wanted.
+            if self.query().get("warm") == "1":
+                threading.Thread(target=live_voice, daemon=True).start()
             with changed:
                 running = {wid: {"ready": v.ready, "job": v.job.key if v.job else None} for wid, v in voices.items()}
-            return self.json(200, {"ok": True, "voices": running})
+            return self.json(200, {"ok": True, "voices": running, "fish": bool(FISH_KEY)})
         if path == "/jobs":
             book = self.query().get("book", "")
             with changed:
@@ -540,9 +638,14 @@ class Handler(BaseHTTPRequestHandler):
             body = self.body()
         except ValueError:
             return self.json(400, {"error": "Invalid JSON."})
-        if body.get("voice") not in VOICES:
-            return self.json(400, {"error": "Unknown voice."})
+        voice = body.get("voice")
+        fish = voice in FISH and bool(FISH_KEY)
+        if voice not in VOICES and not fish:
+            return self.json(400, {"error": "Unknown voice." if voice not in FISH else "Fish Audio isn't set up here (fish-key)."})
         if path == "/speak":
+            # Fish's voices are spoken through the site; only saving them happens here.
+            if fish:
+                return self.json(400, {"error": "Fish voices are spoken by the site."})
             text = body.get("text")
             if not isinstance(text, str) or not text.strip() or len(text) > 5000:
                 return self.json(400, {"error": "Invalid text."})
@@ -568,6 +671,7 @@ class Handler(BaseHTTPRequestHandler):
                 job.cancelled = True
                 if job.state == "queued":
                     finish(job, "cancelled")
+                job.stop.set()
             for v in voices.values():
                 if v.job and v.job.cancelled:
                     v.cancel.set()
@@ -583,7 +687,8 @@ def main():
     resume()
     threading.Thread(target=listen, daemon=True).start()
     threading.Thread(target=schedule, daemon=True).start()
-    log.info("listening on 127.0.0.1:%d, saving to %s, up to %d saving at once", PORT, SITE, WORKERS)
+    threading.Thread(target=fish_saver, daemon=True).start()
+    log.info("listening on 127.0.0.1:%d, saving to %s, up to %d saving at once%s", PORT, SITE, WORKERS, ", and Fish voices" if FISH_KEY else "")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 

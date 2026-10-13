@@ -5,6 +5,9 @@ OWNER_PASSWORD=
 SESSION_SECRET=
 TYPESAFE_API_KEY=
 ANTHROPIC_API_KEY=
+
+# The narrator's Fish Audio voice, Adrian (free developer tier; https://fish.audio/app/api-keys)
+FISH_API_KEY=
 R2_ACCOUNT_ID=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=

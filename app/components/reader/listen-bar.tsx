@@ -145,8 +145,11 @@ function ListenMenu({
   chapter: (section: number) => string;
   onClose: () => void;
 }) {
-  const server = s.engine?.device === "server";
-  const noGpu = s.engine && s.engine.device !== "webgpu" && !server;
+  const fish = s.engine?.device === "fish";
+  // Where chapters are saved: the GPU server (with the tab closed), or here.
+  const server = s.engine?.device === "server" || (fish && Boolean(s.server));
+  const noGpu = s.engine?.device === "wasm";
+  const voice = VOICES.find((v) => v.id === s.voice);
   const saving = s.saving;
   const more = saving?.queued ? ` · ${saving.queued} more ${saving.queued === 1 ? "chapter" : "chapters"} to go` : "";
   return (
@@ -166,7 +169,9 @@ function ListenMenu({
             className="rounded-2xl px-3 py-2 text-left transition-colors hover:bg-chip aria-pressed:bg-ink aria-pressed:text-ink-fg"
           >
             <span className="block text-sm font-medium">{v.name}</span>
-            <span className="block text-[11px] opacity-70">{v.accent}</span>
+            <span className="block text-[11px] opacity-70">
+              {v.accent} · {v.maker}
+            </span>
           </button>
         ))}
       </div>
@@ -245,7 +250,12 @@ function ListenMenu({
         )
       )}
       {s.error && s.status !== "error" && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{s.error}</p>}
-      <p className="mt-4 text-[11px] text-muted">Voice: Kokoro, {server ? "on your GPU server" : "made in this browser"}.</p>
+      <p className="mt-4 text-[11px] text-muted">
+        {fish
+          ? `Voice: ${voice?.name ?? "Fish"}, by Fish Audio (S2.1 Pro). Chapters are saved ${server ? "on your GPU server, without its GPU" : "from this tab"}.`
+          : `Voice: Kokoro, ${s.engine?.device === "server" ? "on your GPU server" : "made in this browser"}.`}{" "}
+        Each book keeps the voice you pick for it.
+      </p>
     </div>
   );
 }

@@ -2,24 +2,22 @@
  * Reads a book aloud, highlighting each sentence on the page as it's spoken.
  *
  * Chapters already saved (as MP3 in storage) stream from there, on any device. Others are spoken
- * sentence by sentence by Kokoro: on the GPU server when there is one (narrator-server/, which
- * also saves chapters itself, so "save the whole book" carries on with the tab closed), else
- * here, in a worker (narrator.worker.ts). Without the server, a browser with a GPU records a
- * chapter heard from its start as it plays and saves it, and "save the whole book" records the
- * rest, so a phone can play the book without making any of it.
+ * sentence by sentence: Fish Audio's voices by Fish, through the site (lib/fish.ts); Kokoro's on
+ * the GPU server when there is one, else here, in a worker (narrator.worker.ts). The GPU server
+ * (narrator-server/) also saves chapters itself, in either kind of voice, so "save the whole
+ * book" carries on with the tab closed. Without it, a chapter heard from its start is recorded
+ * as it plays and saved (in a Kokoro voice, only where the browser has a GPU), and "save the
+ * whole book" records the rest, so a phone can play the book without making any of it.
+ *
+ * A book is read in one voice: the one chosen for it, else the one it has chapters saved in.
  */
 import type { AudioLine, AudioSection } from "@/lib/library-types";
+import { DEFAULT_VOICE, isFishVoice, VOICES } from "@/lib/voices";
 import type { FoliateView } from "./foliate";
 import type { Engine, Reply, Request } from "./narrator.worker";
 import { locate, offsetAt, rangeFor, sayable, speechText, spoken, type SpeechText } from "./speech";
 
-export const VOICES = [
-  { id: "af_heart", name: "Heart", accent: "American" },
-  { id: "af_bella", name: "Bella", accent: "American" },
-  { id: "bf_emma", name: "Emma", accent: "British" },
-  { id: "am_michael", name: "Michael", accent: "American" },
-  { id: "bm_george", name: "George", accent: "British" },
-] as const;
+export { VOICES };
 export const RATES = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
 
 const SAMPLE_RATE = 24_000;
@@ -60,12 +58,14 @@ export type NarratorState = {
    * server is saving them, which carries on with the tab closed.
    */
   saving: { section: number | null; made?: number; total?: number; left?: number; queued?: number; remote?: boolean } | null;
-  /** Where the voice runs, once known. Saving needs the GPU server, or a GPU here. */
+  /** Where the voice runs, once known. Saving a Kokoro voice needs the GPU server, or a GPU here. */
   engine?: Voicing;
+  /** Whether the GPU server is there, which saves chapters with the tab closed, once known. */
+  server?: boolean;
 };
 
-/** Where the voice runs: the GPU server, or this browser (on its GPU, else its CPU). */
-export type Voicing = Engine | { device: "server" };
+/** Where the voice runs: Fish Audio, the GPU server, or this browser (on its GPU, else its CPU). */
+export type Voicing = Engine | { device: "server" } | { device: "fish" };
 
 /** A sentence to read: where it is in its chapter's text, what to say, and the pause after it. */
 type Line = { start: number; end: number; text: string; say: string; pause: number };
@@ -81,14 +81,31 @@ type Ask = Request extends infer R ? (R extends unknown ? Omit<R, "id"> : never)
 
 /** Sentences asked of the GPU server at once: enough to hide the trip there and back. */
 const SERVER_AT_ONCE = 4;
+/**
+ * Sentences asked of Fish at once. Its free tier allows five per account: four when this tab
+ * is saving the chapter, two when the GPU server is saving it with three.
+ */
+const FISH_AT_ONCE = { saving: 4, listening: 2 };
+/** Waits before asking Fish again when it's busy or failed, in seconds. */
+const FISH_RETRIES = [1, 2, 4, 8, 15, 30];
 /** How often to ask the GPU server how its chapters are getting on. */
 const WATCH_MS = 2500;
 
-/** Whether the GPU server is there to read with. */
-async function serverUp(): Promise<boolean> {
-  const res = await fetch("/api/narrate").catch(() => null);
-  return Boolean(res?.ok && ((await res.json()) as { available?: boolean }).available);
+/**
+ * Whether the GPU server is there to read and save with, and whether it can save Fish voices
+ * too. `warm` gets its Kokoro voice ready, in case it's wanted.
+ */
+async function serverUp(warm: boolean): Promise<{ up: boolean; fish: boolean }> {
+  const res = await fetch(`/api/narrate${warm ? "?warm=1" : ""}`).catch(() => null);
+  const found = res?.ok ? ((await res.json()) as { available?: boolean; serverFish?: boolean }) : {};
+  return { up: Boolean(found.available), fish: Boolean(found.available && found.serverFish) };
 }
+
+const toFloat = (pcm: Int16Array) => {
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 0x8000;
+  return out;
+};
 
 /** A sentence spoken by the GPU server, or null when it isn't answering. */
 async function spokenByServer(text: string, voice: string): Promise<Float32Array | null> {
@@ -99,18 +116,44 @@ async function spokenByServer(text: string, voice: string): Promise<Float32Array
   }).catch(() => null);
   if (!res || res.status >= 500) return null;
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "The voice couldn't say that.");
-  const pcm = new Int16Array(await res.arrayBuffer());
-  const out = new Float32Array(pcm.length);
-  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 0x8000;
-  return out;
+  return toFloat(new Int16Array(await res.arrayBuffer()));
+}
+
+/**
+ * A sentence in a Fish voice. Fish being busy (too many at once) or failing is waited out a few
+ * times; another voice never stands in, since a book is heard in one voice.
+ */
+async function spokenByFish(text: string, voice: string): Promise<Float32Array> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch("/api/narrate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, voice }),
+    }).catch(() => null);
+    if (res?.ok) return toFloat(new Int16Array(await res.arrayBuffer()));
+    const error = res && ((await res.json().catch(() => ({}))) as { error?: string }).error;
+    const again = !res || res.status === 429 || res.status >= 502;
+    if (!again || attempt >= FISH_RETRIES.length) throw new Error(error ?? "Fish Audio didn't answer.");
+    await sleep(FISH_RETRIES[attempt] * 1000);
+  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The voice chosen for a book, kept apart from the usual one. */
+const bookVoiceKey = (id: string) => `${PREFS_KEY}:voice:${id}`;
+const knownVoice = (voice: unknown): voice is string => VOICES.some((v) => v.id === voice);
+
+/**
+ * The listener's settings. `voice` is the usual voice, for books without one of their own;
+ * settings from before Fish's voices existed (no `voices: 2`) take the new default.
+ */
 const prefs = (): { voice: string; rate: number; tapToRead: boolean } => {
-  const defaults = { voice: VOICES[0].id, rate: 1, tapToRead: false };
+  const defaults = { voice: DEFAULT_VOICE, rate: 1, tapToRead: false };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+    const stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as { voice?: unknown; voices?: number };
+    const voice = stored.voices === 2 && knownVoice(stored.voice) ? stored.voice : DEFAULT_VOICE;
+    return { ...defaults, ...stored, voice };
   } catch {
     return defaults;
   }
@@ -137,9 +180,9 @@ function caretAt(doc: Document, x: number, y: number): Range | null {
 }
 
 /**
- * The voice: the GPU server when it's there, else Kokoro in the worker, which also splits text
- * into sentences and encodes MP3 either way. Sentences are spoken most urgent first: one at a
- * time here, a few at once on the server.
+ * The voice: Fish Audio for its voices; for Kokoro's, the GPU server when it's there, else
+ * Kokoro in the worker, which also splits text into sentences and encodes MP3 either way.
+ * Sentences are spoken most urgent first: a few at once from Fish or the server, one at a time here.
  */
 class Voice {
   private worker = new Worker(new URL("./narrator.worker.ts", import.meta.url), { type: "module" });
@@ -147,13 +190,18 @@ class Voice {
   private pending = new Map<number, { resolve: (v: never) => void; reject: (e: Error) => void }>();
   private queue: { priority: () => number; wanted: () => boolean; start: () => void; reject: (e: Error) => void }[] = [];
   private speaking = 0;
-  private atOnce = 1;
-  engine: Promise<Voicing>;
+  /** Where Kokoro's voices are spoken, worked out (and the model loaded, here) when one is first wanted. */
+  private kokoro: Promise<Voicing> | null = null;
+  private kokoroAtOnce = 1;
+  /** The voice of the sentences being asked for, which decides how many go at once. */
+  private current = "";
+  /** Fish sentences at once: fewer while the GPU server is saving with Fish too. */
+  fishAtOnce = FISH_AT_ONCE.saving;
 
   constructor(
     onProgress: (loaded: number, total: number) => void,
-    server: Promise<boolean>,
-    /** Told when the voice moves here from the server, which stopped answering. */
+    private server: () => Promise<{ up: boolean }>,
+    /** Told when Kokoro moves here from the server, which stopped answering. */
     private onFallBack: (engine: Promise<Voicing>) => void,
   ) {
     this.worker.addEventListener("message", (event: MessageEvent<Reply>) => {
@@ -168,23 +216,29 @@ class Voice {
       for (const { reject } of this.pending.values()) reject(new Error(event.message || "The voice stopped working."));
       this.pending.clear();
     });
-    this.engine = server.then((up): Promise<Voicing> | Voicing => {
-      if (!up) return this.call<Engine>({ type: "load" });
-      this.atOnce = SERVER_AT_ONCE;
-      return { device: "server" } as const;
-    });
   }
 
-  /** The server stopped answering: the voice here takes over (loading the model, the first time). */
+  /** Where a voice is spoken. */
+  engineFor(voice: string): Promise<Voicing> {
+    if (isFishVoice(voice)) return Promise.resolve({ device: "fish" });
+    return (this.kokoro ??= this.server().then(({ up }): Promise<Voicing> | Voicing => {
+      if (!up) return this.call<Engine>({ type: "load" });
+      this.kokoroAtOnce = SERVER_AT_ONCE;
+      return { device: "server" } as const;
+    }));
+  }
+
+  /** The server stopped answering: Kokoro here takes over (loading the model, the first time). */
   private fallBack() {
-    if (this.atOnce === 1) return;
-    this.atOnce = 1;
-    this.engine = this.call<Engine>({ type: "load" });
-    this.onFallBack(this.engine);
+    if (this.kokoroAtOnce === 1) return;
+    this.kokoroAtOnce = 1;
+    this.kokoro = this.call<Engine>({ type: "load" });
+    this.onFallBack(this.kokoro);
   }
 
   private async say(text: string, voice: string): Promise<Float32Array> {
-    if ((await this.engine).device === "server") {
+    if (isFishVoice(voice)) return spokenByFish(text, voice);
+    if ((await this.engineFor(voice)).device === "server") {
       const pcm = await spokenByServer(text, voice);
       if (pcm) return pcm;
       this.fallBack();
@@ -206,6 +260,7 @@ class Voice {
 
   /** Speaks `text`. Lower `priority` goes first; dropped if no longer `wanted` when its turn comes. */
   speak(text: string, voice: string, priority: () => number, wanted: () => boolean = () => true): Promise<Float32Array> {
+    this.current = voice;
     return new Promise((resolve, reject) => {
       this.queue.push({
         priority,
@@ -227,7 +282,8 @@ class Voice {
 
   private pump() {
     this.queue = this.queue.filter((job) => job.wanted() || void job.reject(new Stopped()));
-    while (this.speaking < this.atOnce && this.queue.length) {
+    const atOnce = isFishVoice(this.current) ? this.fishAtOnce : this.kokoroAtOnce;
+    while (this.speaking < atOnce && this.queue.length) {
       let best = 0;
       for (let i = 1; i < this.queue.length; i++) if (this.queue[i].priority() < this.queue[best].priority()) best = i;
       const [job] = this.queue.splice(best, 1);
@@ -324,8 +380,8 @@ export class Narrator {
   private clips = new Map<string, Promise<Float32Array>>();
   private takes = new Map<string, Take>();
   private job: { cancelled: boolean } | null = null;
-  /** Whether the GPU server is there, asked once. */
-  private server: Promise<boolean> | null = null;
+  /** Whether the GPU server is there (and saves Fish voices), asked once. */
+  private server: Promise<{ up: boolean; fish: boolean }> | null = null;
   /** Chapters given to the GPU server to save, by voice and section. */
   private sent = new Set<string>();
   private watcher: Promise<void> | null = null;
@@ -336,15 +392,22 @@ export class Narrator {
   private range: Range | null = null;
   private frame = 0;
   private savedLines: AudioLine[] | null = null;
+  /** The usual voice, for books without one of their own. */
+  private usual: string;
+  /** Whether this book has a voice chosen for it; if not, it's read in the one it has chapters saved in. */
+  private voicePicked: Promise<void> | null = null;
 
   constructor(
     private view: FoliateView,
     private book: NarratorBook,
   ) {
     const { voice, rate, tapToRead } = prefs();
+    this.usual = voice;
+    const own = localStorage.getItem(bookVoiceKey(book.id));
+    if (knownVoice(own)) this.voicePicked = Promise.resolve();
     this.state = {
       status: "off",
-      voice,
+      voice: knownVoice(own) ? own : voice,
       rate,
       tapToRead,
       section: 0,
@@ -472,8 +535,12 @@ export class Narrator {
     this.savePrefs();
   }
 
+  /** Reads this book in `voice` from now on, and makes it the usual voice for books without one. */
   setVoice(voice: string) {
-    if (voice === this.state.voice) return;
+    localStorage.setItem(bookVoiceKey(this.book.id), voice);
+    this.usual = voice;
+    this.voicePicked = Promise.resolve();
+    if (voice === this.state.voice) return this.savePrefs();
     this.stopSaving();
     for (const take of this.takes.values()) take.cancelled = true;
     this.takes.clear();
@@ -534,7 +601,7 @@ export class Narrator {
 
   /**
    * Saves every chapter not yet saved in this voice, starting with the one on screen: on the GPU
-   * server when there is one, else recorded here, which needs a GPU.
+   * server when there is one, else recorded here, which for a Kokoro voice needs a GPU.
    */
   async saveBook() {
     if (this.job) return;
@@ -542,10 +609,10 @@ export class Narrator {
     this.job = job;
     this.set({ saving: { section: null }, error: undefined });
     try {
-      const engine = await this.ensureVoice().engine;
-      this.set({ engine });
-      if (engine.device === "server") return await this.saveOnServer(job);
-      if (engine.device !== "webgpu") throw new Error("Saving the book needs a browser with WebGPU, such as Chrome or Safari on a computer.");
+      await this.pickVoice();
+      const engine = await this.engine();
+      if (await this.savesOnServer(engine)) return await this.saveOnServer(job);
+      if (engine.device === "wasm") throw new Error("Saving the book needs a browser with WebGPU, such as Chrome or Safari on a computer.");
       await this.loadSaved();
       for (const section of this.saveOrder()) {
         if (job.cancelled) break;
@@ -766,20 +833,20 @@ export class Narrator {
 
   /** Speaks a chapter sentence by sentence, from the first sentence ending after `offset`. */
   private async playSpoken(run: number, section: number, offset: number) {
-    const voice = this.ensureVoice();
     const script = await this.script(section);
     if (run !== this.run) throw new Stopped();
     const lines = script.lines;
     const first = lines.findIndex((l) => l.end > offset);
     if (first < 0) return;
-    const engine = await voice.engine;
-    this.set({ engine, download: undefined });
+    const engine = await this.engine();
+    this.set({ download: undefined });
     // The GPU server saves the chapter being heard before any other, and reading moves to the
     // saved chapter once it's there. Without it, a chapter heard from its start is recorded as
-    // it plays, where the voice runs on a GPU here.
-    const remote = engine.device === "server";
+    // it plays, where the voice is Fish's or runs on a GPU here.
+    const remote = await this.savesOnServer(engine);
+    if (run !== this.run) throw new Stopped();
     if (remote) void this.sendChapters([section], true).catch(() => {});
-    else if (first === 0 && engine.device === "webgpu") this.record(script);
+    else if (first === 0 && engine.device !== "wasm") this.record(script);
 
     for (let i = first; i < lines.length; i++) {
       if (remote && i > first && this.savedSections.has(section)) return this.playSaved(run, section, lines[i].start);
@@ -844,20 +911,40 @@ export class Narrator {
 
   // ---- making speech ------------------------------------------------------------------------
 
-  private serverUp(): Promise<boolean> {
-    return (this.server ??= serverUp());
+  private serverUp(): Promise<{ up: boolean; fish: boolean }> {
+    if (!this.server) {
+      // Kokoro's listening voice on the server is only got ready when a Kokoro voice is in use.
+      this.server = serverUp(!isFishVoice(this.state.voice));
+      void this.server.then(({ up, fish }) => this.set({ server: isFishVoice(this.state.voice) ? fish : up }));
+    }
+    return this.server;
+  }
+
+  /**
+   * Whether chapters in this voice are saved on the GPU server, which carries on with the tab
+   * closed: Kokoro's when it speaks them, Fish's whenever it's there with the key for Fish (it
+   * needs no GPU for them). While it saves with Fish, this tab asks Fish for fewer sentences at once.
+   */
+  private async savesOnServer(engine: Voicing): Promise<boolean> {
+    const server = engine.device === "server" || (engine.device === "fish" && (await this.serverUp()).fish);
+    if (this.voice) this.voice.fishAtOnce = server ? FISH_AT_ONCE.listening : FISH_AT_ONCE.saving;
+    return server;
   }
 
   private ensureVoice(): Voice {
-    if (!this.voice) {
-      this.voice = new Voice(
-        (loaded, total) => this.set({ download: { loaded, total } }),
-        this.serverUp(),
-        (engine) => this.useEngine(engine),
-      );
-      this.useEngine(this.voice.engine);
-    }
+    this.voice ??= new Voice(
+      (loaded, total) => this.set({ download: { loaded, total } }),
+      () => this.serverUp(),
+      (engine) => this.useEngine(engine),
+    );
     return this.voice;
+  }
+
+  /** Where the current voice is spoken (loading Kokoro here, the first time it's needed). */
+  private engine(): Promise<Voicing> {
+    const engine = this.ensureVoice().engineFor(this.state.voice);
+    this.useEngine(engine);
+    return engine;
   }
 
   private useEngine(engine: Promise<Voicing>) {
@@ -933,11 +1020,11 @@ export class Narrator {
       return;
     }
     const script = await this.script(section).catch(() => null);
-    const engine = await this.voice?.engine.catch(() => null);
-    if (!script || this.state.status === "off") return;
-    // On a GPU the next chapter is recorded, which makes its first sentences too; the GPU server saves it.
-    if (engine?.device === "webgpu") return void this.record(script);
-    if (engine?.device === "server") void this.sendChapters([section], true).catch(() => {});
+    const engine = await this.engine().catch(() => null);
+    if (!script || !engine || this.state.status === "off") return;
+    // The GPU server saves the next chapter; here, it's recorded (which makes its first sentences too).
+    if (await this.savesOnServer(engine)) void this.sendChapters([section], true).catch(() => {});
+    else if (engine.device !== "wasm") return void this.record(script);
     for (let k = 0; k < Math.min(2, script.lines.length); k++) void this.clip(script, k).catch(() => {});
   }
 
@@ -1034,6 +1121,7 @@ export class Narrator {
    * learned, none are, and it's asked again next time.
    */
   private async loadSaved(fresh = false) {
+    await this.pickVoice();
     const voice = this.state.voice;
     if (this.loadedVoice === voice && !fresh) return;
     const res = await fetch(`/api/books/${this.book.id}/audio?voice=${voice}`).catch(() => null);
@@ -1048,13 +1136,30 @@ export class Narrator {
     this.set({ saved: this.savedCount() });
   }
 
+  /**
+   * A book without a voice chosen for it is read in the voice it has the most chapters saved
+   * in, when that isn't the usual one; otherwise in the usual one. Asked once.
+   */
+  private pickVoice(): Promise<void> {
+    this.voicePicked ??= (async () => {
+      const res = await fetch(`/api/books/${this.book.id}/audio`).catch(() => null);
+      if (!res?.ok) return;
+      const { voices } = (await res.json()) as { voices: { voice: string; sections: number }[] };
+      const most = voices.find((v) => knownVoice(v.voice));
+      if (!most || voices.some((v) => v.voice === this.state.voice)) return;
+      this.set({ voice: most.voice });
+    })().catch(() => {});
+    return this.voicePicked;
+  }
+
   /** Learns which chapters are saved, and follows any the GPU server is saving, without starting to read (for the player's menu). */
   refresh() {
     void this.loadSaved().catch(() => {});
     // Chapters the GPU server is still saving: asked for before a reload, or in another tab.
-    void this.serverUp().then((up) => {
+    void this.serverUp().then(async ({ up }) => {
       if (!up) return;
-      if (!this.state.engine) this.set({ engine: { device: "server" } });
+      await this.pickVoice();
+      if (!this.state.engine) this.set({ engine: isFishVoice(this.state.voice) ? { device: "fish" } : { device: "server" } });
       void this.watch();
     });
   }
@@ -1222,7 +1327,7 @@ export class Narrator {
   }
 
   private savePrefs() {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.state.voice, rate: this.state.rate, tapToRead: this.state.tapToRead }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.usual, voices: 2, rate: this.state.rate, tapToRead: this.state.tapToRead }));
   }
 }
 
