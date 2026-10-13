@@ -10,8 +10,11 @@
  * whole book" records the rest, so a phone can play the book without making any of it.
  *
  * A book is read in one voice: the one chosen for it, else the one it has chapters saved in.
+ * In a Fish voice, it's read expressively unless that's turned off: Claude Haiku directs how a
+ * few sentences are delivered (lib/directions.ts), a run of sentences at a time, nearest first.
  */
 import type { AudioLine, AudioSection } from "@/lib/library-types";
+import { DIRECTION_CHUNK, directed, plainBrackets, type Direction } from "@/lib/directions";
 import { DEFAULT_VOICE, isFishVoice, VOICES } from "@/lib/voices";
 import type { FoliateView } from "./foliate";
 import type { Engine, Reply, Request } from "./narrator.worker";
@@ -38,6 +41,8 @@ export type NarratorState = {
   rate: number;
   /** Tap to read: while listening, a tap on a sentence reads from there. */
   tapToRead: boolean;
+  /** In a Fish voice: directed delivery (a cue, a stressed word, a pause) where a sentence calls for it. */
+  expressive: boolean;
   section: number;
   /** The sentence being read, and how many the chapter has. */
   line: number;
@@ -88,6 +93,13 @@ const SERVER_AT_ONCE = 4;
 const FISH_AT_ONCE = { saving: 4, listening: 2 };
 /** Waits before asking Fish again when it's busy or failed, in seconds. */
 const FISH_RETRIES = [1, 2, 4, 8, 15, 30];
+/** Runs of sentences being directed at once. */
+const DIRECTING_AT_ONCE = 3;
+/**
+ * How long a sentence about to be heard waits for its direction before it's read as it is; one
+ * further ahead waits this much longer for each sentence it is away.
+ */
+const DIRECTION_WAIT_MS = 4000;
 /** How often to ask the GPU server how its chapters are getting on. */
 const WATCH_MS = 2500;
 
@@ -148,8 +160,8 @@ const knownVoice = (voice: unknown): voice is string => VOICES.some((v) => v.id 
  * The listener's settings. `voice` is the usual voice, for books without one of their own;
  * settings from before Ethan became the default (no `voices: 3`) take the new default.
  */
-const prefs = (): { voice: string; rate: number; tapToRead: boolean } => {
-  const defaults = { voice: DEFAULT_VOICE, rate: 1, tapToRead: false };
+const prefs = (): { voice: string; rate: number; tapToRead: boolean; expressive: boolean } => {
+  const defaults = { voice: DEFAULT_VOICE, rate: 1, tapToRead: false, expressive: true };
   try {
     const stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as { voice?: unknown; voices?: number };
     const voice = stored.voices === 3 && knownVoice(stored.voice) ? stored.voice : DEFAULT_VOICE;
@@ -392,6 +404,10 @@ export class Narrator {
   private range: Range | null = null;
   private frame = 0;
   private savedLines: AudioLine[] | null = null;
+  /** Directions for runs of sentences, by section and run, and those waiting their turn to be asked for. */
+  private directionRuns = new Map<string, Promise<(Direction | null)[]>>();
+  private directing = 0;
+  private directQueue: { priority: () => number; start: () => void }[] = [];
   /** The usual voice, for books without one of their own. */
   private usual: string;
   /** Whether this book has a voice chosen for it; if not, it's read in the one it has chapters saved in. */
@@ -401,7 +417,7 @@ export class Narrator {
     private view: FoliateView,
     private book: NarratorBook,
   ) {
-    const { voice, rate, tapToRead } = prefs();
+    const { voice, rate, tapToRead, expressive } = prefs();
     this.usual = voice;
     const own = localStorage.getItem(bookVoiceKey(book.id));
     if (knownVoice(own)) this.voicePicked = Promise.resolve();
@@ -410,6 +426,7 @@ export class Narrator {
       voice: knownVoice(own) ? own : voice,
       rate,
       tapToRead,
+      expressive,
       section: 0,
       line: 0,
       lines: 0,
@@ -467,6 +484,19 @@ export class Narrator {
     if (!content || !range) return false;
     this.startAt(content.index, range);
     return true;
+  }
+
+  /** Directed delivery in Fish voices, on or off: what's being read is made again, from the sentence being read. */
+  setExpressive(on: boolean) {
+    if (on === this.state.expressive) return;
+    this.stopSaving();
+    for (const take of this.takes.values()) take.cancelled = true;
+    this.takes.clear();
+    this.clips.clear();
+    this.set({ expressive: on });
+    this.savePrefs();
+    const at = this.reading;
+    if (this.state.status !== "off" && this.state.status !== "error" && at) void this.play(at.section, at.start);
   }
 
   setTapToRead(on: boolean) {
@@ -653,8 +683,14 @@ export class Narrator {
   private async sendChapters(sections: number[], urgent: boolean) {
     const voice = this.state.voice;
     const fresh = sections.filter((s) => !this.savedSections.has(s) && (urgent || !this.sent.has(`${voice}:${s}`)));
-    const scripts = await Promise.all(fresh.map((s) => this.script(s)));
-    const chapters = scripts.filter((script) => script.lines.length).map(({ section, lines }) => ({ section, lines }));
+    const scripts = (await Promise.all(fresh.map((s) => this.script(s)))).filter((script) => script.lines.length);
+    // As they'll be said: in a Fish voice, with their directions (the server doesn't direct).
+    const chapters = await Promise.all(
+      scripts.map(async (script) => ({
+        section: script.section,
+        lines: await Promise.all(script.lines.map(async (line, i) => ({ ...line, say: await this.sayFor(script, i, voice) }))),
+      })),
+    );
     if (!chapters.length) return;
     const res = await fetch(`/api/books/${this.book.id}/narrate`, {
       method: "POST",
@@ -999,16 +1035,88 @@ export class Narrator {
     let clip = this.clips.get(key);
     if (!clip) {
       const voice = this.state.voice;
-      clip = this.ensureVoice().speak(
-        script.lines[line].say,
-        voice,
-        () => 0,
-        () => this.clips.has(key),
+      // Heard soon: its direction is waited for only so long, the nearer the less.
+      const ahead = this.state.section === script.section ? Math.max(0, line - this.state.line) : 0;
+      clip = this.sayFor(script, line, voice, DIRECTION_WAIT_MS * (1 + ahead)).then((say) =>
+        this.ensureVoice().speak(
+          say,
+          voice,
+          () => 0,
+          () => this.clips.has(key),
+        ),
       );
       clip.catch(() => this.clips.delete(key));
       this.clips.set(key, clip);
     }
     return clip;
+  }
+
+  /**
+   * What to say for a sentence in `voice`: as it is in a Kokoro voice; in a Fish voice, with the
+   * book's own brackets made parentheses and, reading expressively, its direction. Given `wait`,
+   * a direction that isn't ready by then is left out.
+   */
+  private async sayFor(script: Script, line: number, voice: string, wait?: number): Promise<string> {
+    const say = script.lines[line].say;
+    if (!isFishVoice(voice)) return say;
+    const plain = plainBrackets(say);
+    if (!this.state.expressive) return plain;
+    const run = Math.floor(line / DIRECTION_CHUNK);
+    // Near the end of a run, the next one is asked for.
+    if (line % DIRECTION_CHUNK >= DIRECTION_CHUNK - 15) void this.directions(script, run + 1);
+    const directions = this.directions(script, run);
+    const timeout = wait === undefined ? null : sleep(wait).then(() => null);
+    const found = await (timeout ? Promise.race([directions, timeout]) : directions);
+    return directed(plain, found?.[line % DIRECTION_CHUNK]);
+  }
+
+  /**
+   * Directions for a run of a chapter's sentences (none for each, if they can't be had). A few
+   * runs are asked for at once: those nearest the sentence being read first.
+   */
+  private directions(script: Script, run: number): Promise<(Direction | null)[]> {
+    const key = `${script.section}:${run}`;
+    const known = this.directionRuns.get(key);
+    if (known) return known;
+    const lines = script.lines.slice(run * DIRECTION_CHUNK, (run + 1) * DIRECTION_CHUNK);
+    if (!lines.length) return Promise.resolve([]);
+    const none = lines.map(() => null);
+    const found = new Promise<(Direction | null)[]>((resolve) => {
+      const start = () => {
+        fetch(`/api/books/${this.book.id}/directions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            section: script.section,
+            chunk: run,
+            sentences: lines.map((l) => plainBrackets(l.say)),
+            before: script.lines.slice(Math.max(0, run * DIRECTION_CHUNK - 3), run * DIRECTION_CHUNK).map((l) => l.say),
+          }),
+        })
+          .then(async (res) => (res.ok ? ((await res.json()) as { directions: (Direction | null)[] }).directions : none))
+          .catch(() => none)
+          .then(resolve)
+          .finally(() => {
+            this.directing--;
+            this.pumpDirections();
+          });
+      };
+      const here = () => (this.state.section === script.section ? Math.floor(this.state.line / DIRECTION_CHUNK) : -1);
+      this.directQueue.push({ priority: () => (here() >= 0 ? Math.abs(run - here()) : 1000 + run), start });
+      queueMicrotask(() => this.pumpDirections());
+    });
+    this.directionRuns.set(key, found);
+    return found;
+  }
+
+  private pumpDirections() {
+    while (this.directing < DIRECTING_AT_ONCE && this.directQueue.length) {
+      let best = 0;
+      for (let i = 1; i < this.directQueue.length; i++) if (this.directQueue[i].priority() < this.directQueue[best].priority()) best = i;
+      const [next] = this.directQueue.splice(best, 1);
+      this.directing++;
+      next.start();
+    }
   }
 
   /** Gets the next chapter's first sentences ready, near the end of this one. */
@@ -1036,13 +1144,15 @@ export class Narrator {
     const existing = this.takes.get(key);
     if (existing) return existing;
     const voice = this.ensureVoice();
-    // Urgent while it's the chapter being listened to.
-    const priority = () => (this.state.status !== "off" && this.state.section === section ? 0 : 1);
+    // While it's the chapter being listened to, the sentences about to be heard come first (their
+    // directions can arrive out of order, so the order they're asked in can't be relied on).
+    const priority = (i: number) => () =>
+      this.state.status !== "off" && this.state.section === section && i >= this.state.line ? i - this.state.line : 1_000_000 + i;
     const take: Take = { section, voice: voiceId, cancelled: false, lines: new Map(), done: Promise.resolve(), made: 0, total: script.lines.length, started: Date.now() };
     // Every sentence is asked for now, in order; the queue makes them one at a time. Playback
     // takes them from `take.lines` (and drops them once played); the recording keeps its own list.
-    const pending: (Promise<Float32Array> | null)[] = script.lines.map((line) => {
-      const pcm = voice.speak(line.say, voiceId, priority, () => !take.cancelled);
+    const pending: (Promise<Float32Array> | null)[] = script.lines.map((_, i) => {
+      const pcm = this.sayFor(script, i, voiceId).then((say) => voice.speak(say, voiceId, priority(i), () => !take.cancelled));
       pcm.catch(() => {});
       return pcm;
     });
@@ -1056,9 +1166,9 @@ export class Narrator {
       for (let i = 0; i < script.lines.length; i++) {
         const line = script.lines[i];
         // A sentence the voice fails on is tried once more before the chapter is given up.
-        const pcm = await pending[i]!.catch((error: Error) => {
+        const pcm = await pending[i]!.catch(async (error: Error) => {
           if (error instanceof Stopped || take.cancelled) throw error;
-          return voice.speak(line.say, voiceId, priority, () => !take.cancelled);
+          return voice.speak(await this.sayFor(script, i, voiceId), voiceId, priority(i), () => !take.cancelled);
         });
         pending[i] = null;
         if (take.cancelled) throw new Stopped();
@@ -1327,7 +1437,10 @@ export class Narrator {
   }
 
   private savePrefs() {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.usual, voices: 3, rate: this.state.rate, tapToRead: this.state.tapToRead }));
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ voice: this.usual, voices: 3, rate: this.state.rate, tapToRead: this.state.tapToRead, expressive: this.state.expressive }),
+    );
   }
 }
 

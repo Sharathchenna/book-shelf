@@ -190,20 +190,21 @@ function ListenMenu({
         ))}
       </div>
 
-      <button
-        role="switch"
-        aria-checked={s.tapToRead}
-        onClick={() => narrator.setTapToRead(!s.tapToRead)}
-        className="mt-4 flex w-full items-center gap-3 rounded-2xl text-left"
-      >
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Tap to read from a sentence</span>
-          <span className="block text-[11px] text-muted">While listening, tapping a sentence on the page reads from there.</span>
-        </span>
-        <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${s.tapToRead ? "bg-ink" : "bg-chip"}`} aria-hidden>
-          <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-[left] ${s.tapToRead ? "left-[18px]" : "left-0.5"}`} />
-        </span>
-      </button>
+      <Switch
+        on={s.tapToRead}
+        onChange={(on) => narrator.setTapToRead(on)}
+        label="Tap to read from a sentence"
+        detail="While listening, tapping a sentence on the page reads from there."
+      />
+
+      {voice?.maker === "Fish Audio" && (
+        <Switch
+          on={s.expressive}
+          onChange={(on) => narrator.setExpressive(on)}
+          label="Expressive reading"
+          detail="A stressed word, a pause, a change of tone where a sentence calls for it, directed by Claude. Chapters saved before keep how they were read."
+        />
+      )}
 
       <p className="mt-4 text-xs font-semibold tracking-wide text-muted uppercase">Listen anywhere</p>
       <p className="mt-1.5 text-sm leading-snug">
@@ -257,6 +258,20 @@ function ListenMenu({
         Each book keeps the voice you pick for it.
       </p>
     </div>
+  );
+}
+
+function Switch({ on, onChange, label, detail }: { on: boolean; onChange: (on: boolean) => void; label: string; detail: string }) {
+  return (
+    <button role="switch" aria-checked={on} onClick={() => onChange(!on)} className="mt-4 flex w-full items-center gap-3 rounded-2xl text-left">
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="block text-[11px] text-muted">{detail}</span>
+      </span>
+      <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${on ? "bg-ink" : "bg-chip"}`} aria-hidden>
+        <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-[left] ${on ? "left-[18px]" : "left-0.5"}`} />
+      </span>
+    </button>
   );
 }
 

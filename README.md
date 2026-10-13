@@ -389,6 +389,20 @@ Ethan ("a curious explainer", clear and professional) and Adrian ("a steady and 
 - **Busy or failing:** Fish being busy (too many requests at once) or failing is waited out and retried. No other voice stands in, because a book is read in one voice.
 - **Brackets:** S2 reads words in square brackets as directions ("[sad]"), so a book's own brackets are sent as parentheses.
 
+#### Expressive reading
+
+Fish's S2 model takes directions in square brackets: a delivery cue (`[dry]`, `[eager]`), `[emphasis]` before a word to stress, `[break]` for a pause. With **Expressive reading** on (the default, in the player's menu, for Fish voices), Claude Haiku directs a book the way a narrator would (`lib/ai/director.ts`).
+
+- **What gets directed:**
+  - **Fiction:** cues on dialogue ("[exasperated] … how can you be [emphasis] so tiresome?"), and a stressed word now and then.
+  - **Nonfiction:** almost only emphasis, on the word that carries a claim, and a rare pause.
+  - **How much:** at most one sentence in five gets anything (Haiku is told the limit, and the code keeps to it). In testing, a novel's first chapter got a quarter of its sentences directed and Darwin's introduction a fifth.
+- **The words never change.** Haiku returns only where each direction goes. The code checks each one: the phrase must really be in the sentence, a cue must be a few plain words, and sound effects (laughing, sighing) are never allowed. It then inserts them into what's sent to Fish (`lib/directions.ts`). The page, and its highlighting, show the book as it is.
+- **How it runs:** 40 sentences at a time, about 3 seconds each, nearest the sentence being read first, three at once. A sentence about to be heard waits up to 4 seconds for its direction (longer the further ahead it is), then is read as it is.
+- **Kept:** directions are stored in D1 (`directions`, one row per run of 40 sentences, with a hash of the sentences and `DIRECTOR_VERSION`). Listening, saving from the tab and saving on the GPU server all use the same ones. Changing the instructions means bumping `DIRECTOR_VERSION`, so chapters get directed again.
+- **Cost:** Haiku costs $0.10 per million tokens in and $0.50 per million out, and only returns the directions. That's roughly 5–10 cents for a long book, once.
+- **Without it:** without `ANTHROPIC_API_KEY`, or when Haiku fails, sentences are read as they are. Chapters saved before keep how they were read; save one again to redo it with directions.
+
 ### On a GPU server
 
 With a GPU machine of your own, the same Kokoro voices run there (`narrator-server/`) instead of in the browser. On an A100 it saves about 150–200× faster than real time: a 26-hour book in about 10 minutes.

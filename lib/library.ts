@@ -36,11 +36,11 @@ export async function putFile(book: LibraryBook) {
     .run();
 }
 
-/** Forgets a file, the owner's place and notes in it, and its narration. The caller deletes the bytes. */
+/** Forgets a file, the owner's place and notes in it, and its narration (and its directions). The caller deletes the bytes. */
 export async function removeFile(id: string) {
   const database = await db();
   await database.batch(
-    ["files", "progress", "notes", "audio"].map((table) =>
+    ["files", "progress", "notes", "audio", "directions"].map((table) =>
       database.prepare(`DELETE FROM ${table} WHERE ${table === "files" ? "id" : "file_id"} = ?1`).bind(id),
     ),
   );
@@ -91,6 +91,25 @@ export async function listAudio(id: string, voice: string): Promise<{ section: n
     .bind(id, voice)
     .all<{ section: number; duration: number }>();
   return results;
+}
+
+/** Stored directions for a run of a section's sentences (lib/directions.ts), if they were made for the same sentences. */
+export async function getDirections(id: string, section: number, chunk: number, hash: string): Promise<unknown[] | null> {
+  const row = await (await db())
+    .prepare("SELECT data FROM directions WHERE file_id = ?1 AND section = ?2 AND chunk = ?3 AND hash = ?4")
+    .bind(id, section, chunk, hash)
+    .first<{ data: string }>();
+  return row ? (JSON.parse(row.data) as unknown[]) : null;
+}
+
+export async function putDirections(id: string, section: number, chunk: number, hash: string, data: unknown[]) {
+  await (await db())
+    .prepare(
+      `INSERT INTO directions (file_id, section, chunk, hash, data, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT (file_id, section, chunk) DO UPDATE SET hash = ?4, data = ?5, created_at = ?6`,
+    )
+    .bind(id, section, chunk, hash, JSON.stringify(data), new Date().toISOString())
+    .run();
 }
 
 /** The voices a book has chapters saved in, and how many in each. */

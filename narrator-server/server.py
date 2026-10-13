@@ -264,8 +264,9 @@ def make(task: dict, speak_all, progress, cancel):
 
 def fish_say(text: str, voice: str) -> np.ndarray:
     """A sentence in a Fish voice, at 24 kHz. Busy (too many at once) and failures are waited out a few times."""
-    # S2 takes [square brackets] as directions and <|…|> as speaker turns: a book's own are said as parentheses.
-    text = text.replace("[", "(").replace("]", ")").replace("<|", "<").replace("|>", ">")
+    # The reader sends it ready: the book's own [brackets] as parentheses, and directions in brackets.
+    # Only <|…|>, which S2 takes as speaker turns, is defused here.
+    text = text.replace("<|", "<").replace("|>", ">")
     body = json.dumps({"text": text, "reference_id": FISH[voice], "format": "pcm", "sample_rate": SAMPLE_RATE, "latency": "normal"}).encode()
     headers = {"authorization": f"Bearer {FISH_KEY}", "content-type": "application/json", "model": "s2.1-pro-free"}
     for attempt in range(len(FISH_RETRIES) + 1):

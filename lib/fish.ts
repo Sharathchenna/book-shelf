@@ -13,11 +13,12 @@ const MODEL = "s2.1-pro-free";
 export const fishEnabled = () => Boolean(process.env.FISH_API_KEY);
 
 /**
- * A book's text as Fish should read it. S2 takes words in square brackets as directions
- * ("[sad]") and `<|…|>` as speaker turns, so the book's own brackets are said as parentheses.
+ * Text as Fish should read it. The reader sends it ready: the book's own square brackets made
+ * parentheses, and directions in brackets (lib/directions.ts). Only `<|…|>`, which S2 takes as
+ * speaker turns, is defused here.
  */
 export function fishText(text: string): string {
-  return text.replace(/\[/g, "(").replace(/\]/g, ")").replace(/<\|/g, "<").replace(/\|>/g, ">");
+  return text.replace(/<\|/g, "<").replace(/\|>/g, ">");
 }
 
 /** One sentence in a Fish voice, as Fish answers: 16-bit mono PCM at 24 kHz when it's 200. */
