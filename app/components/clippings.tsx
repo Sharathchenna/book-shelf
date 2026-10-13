@@ -69,15 +69,15 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
                 </svg>
               </button>
             )}
-            {readable && (
-              <a
-                href={clip.url}
-                target="_blank"
-                rel="noreferrer"
-                className="absolute right-5 bottom-5 rounded-md border border-line px-1.5 py-0.5 text-xs text-muted transition-colors hover:text-fg"
-              >
-                {clip.paper?.arxiv ? "arXiv" : clip.xArticle ? "X" : new URL(clip.url).host.replace(/^www\./, "")} ↗
-              </a>
+            {(readable || clip.paper?.pwc?.repo) && (
+              <span className="absolute right-5 bottom-5 flex gap-1.5 text-xs">
+                {clip.paper?.pwc?.repo && <CodeLink repo={clip.paper.pwc.repo} />}
+                {readable && (
+                  <a href={clip.url} target="_blank" rel="noreferrer" className="rounded-md border border-line px-1.5 py-0.5 text-muted transition-colors hover:text-fg">
+                    {clip.paper?.arxiv ? "arXiv" : clip.xArticle ? "X" : new URL(clip.url).host.replace(/^www\./, "")} ↗
+                  </a>
+                )}
+              </span>
             )}
           </li>
         );
@@ -109,12 +109,32 @@ function ArticleCard({ clip }: { clip: Clip }) {
   );
 }
 
-/** Styled like a title page: venue and year, title, authors, then the abstract. */
+/** A paper's code on GitHub, with its stars: beside the card, since the card is a link itself. */
+export function CodeLink({ repo }: { repo: NonNullable<NonNullable<NonNullable<Clip["paper"]>["pwc"]>["repo"]> }) {
+  return (
+    <a
+      href={repo.url}
+      target="_blank"
+      rel="noreferrer"
+      title={`${repo.name}${repo.official ? " (official code)" : ""}`}
+      className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-muted transition-colors hover:text-fg"
+    >
+      <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M8 6l-6 6 6 6M16 6l6 6-6 6" />
+      </svg>
+      Code{repo.stars ? <span className="tabular-nums">★ {compact.format(repo.stars)}</span> : null} ↗
+    </a>
+  );
+}
+
+/** Styled like a title page: venue and year, title, authors, then what it found (or the abstract). */
 /** `readable`: opens in the site's reader (the owner, with a free PDF). */
 function PaperCard({ clip, readable }: { clip: Clip; readable?: boolean }) {
   const paper = clip.paper!;
   const shown = paper.authors.slice(0, 4);
   const more = paper.authors.length - shown.length;
+  const code = paper.pwc;
+  const best = code?.sota?.[0];
   return (
     <div className="flex h-full flex-col p-6">
       <p className="flex items-baseline justify-between gap-3 text-[11px] font-medium tracking-[0.14em] text-muted uppercase">
@@ -128,9 +148,23 @@ function PaperCard({ clip, readable }: { clip: Clip; readable?: boolean }) {
           {more > 0 && <span className="text-muted"> + {more} more</span>}
         </p>
       )}
-      {clip.excerpt && <p className="mt-3 line-clamp-4 text-sm text-muted">{clip.excerpt}</p>}
+      {(code?.tasks.length || best) && (
+        <p className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-muted">
+          {best && (
+            <span className="rounded-full bg-accent/15 px-2 py-0.5 font-medium text-accent" title={`${best.metric} on ${best.benchmark}`}>
+              #{best.rank} on {best.benchmark}
+            </span>
+          )}
+          {code?.tasks.slice(0, 3).map((task) => (
+            <span key={task.slug} className="rounded-full bg-chip px-2 py-0.5">
+              {task.name}
+            </span>
+          ))}
+        </p>
+      )}
+      {(code?.tldr ?? clip.excerpt) && <p className="mt-3 line-clamp-4 text-sm text-muted">{code?.tldr ?? clip.excerpt}</p>}
       <Note text={clip.note} />
-      <p className="mt-auto flex flex-wrap items-center gap-2 pt-4 text-xs text-muted">
+      <p className={`mt-auto flex flex-wrap items-center gap-2 pt-4 text-xs text-muted ${code?.repo ? "pb-8" : ""}`}>
         {paper.arxiv && <span className="rounded-md bg-chip px-1.5 py-0.5 font-mono">arXiv:{paper.arxiv}</span>}
         {!paper.arxiv && paper.doi && <span className="truncate rounded-md bg-chip px-1.5 py-0.5 font-mono">doi:{paper.doi}</span>}
         {readable ? (

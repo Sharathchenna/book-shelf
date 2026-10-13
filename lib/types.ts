@@ -67,6 +67,8 @@ export type Clip = {
     doi?: string;
     /** A PDF anyone can read (arXiv, open proceedings). */
     pdf?: string;
+    /** From Papers with Code (lib/pwc.ts), for arXiv papers it knows. */
+    pwc?: PaperCode;
   };
   tweet?: {
     name: string;
@@ -85,6 +87,21 @@ export type Clip = {
   xArticle?: { handle: string; avatar?: string };
   /** Added when it's saved (lib/enrich.ts), so search finds it by what it's about. */
   enriched?: Enrichment;
+};
+
+/** A paper's code and where it stands in its field, from Papers with Code. */
+export type PaperCode = {
+  /** Two sentences on what it does and what it found. */
+  tldr?: string;
+  /** The official implementation, else the most starred. */
+  repo?: { url: string; name: string; stars?: number; official: boolean };
+  project?: string;
+  tasks: { name: string; slug: string }[];
+  /** Its best leaderboard places (top three only). */
+  sota?: { benchmark: string; rank: number; metric: string }[];
+  citations?: number;
+  /** ISO date it was last looked up; stars and citations change. */
+  checked: string;
 };
 
 export type QuotedPost = { name: string; handle: string; text: string; url: string; media?: string[] };

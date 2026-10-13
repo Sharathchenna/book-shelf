@@ -1,5 +1,5 @@
 import "server-only";
-import { clipId, clipLink, expand, type ClipOptions } from "./clip";
+import { clipId, clipLink, expand, paperCode, type ClipOptions } from "./clip";
 import { getClipping, getClippings, getShelf, saveClipping } from "./data";
 import { enrich } from "./enrich";
 import { bookDoc, clipDoc } from "./search/site";
@@ -27,6 +27,31 @@ export async function saveLink(input: string, options: ClipOptions): Promise<{ c
   await saveClipping(clip);
   await indexDocs([clipDoc(clip)]).catch((error) => console.error("Indexing failed", clip.id, error));
   return { clip, refreshed: Boolean(existing) };
+}
+
+/** arXiv papers whose code and stars are looked up again per run, and how often each is. */
+const PAPERS_PER_RUN = 20;
+const PAPER_STALE_DAYS = 7;
+
+/**
+ * Keeps saved papers' Papers with Code details (code, stars, leaderboard places) current: those
+ * saved before it was used, then the longest unchecked, a few per run.
+ */
+export async function refreshPaperCode(limit = PAPERS_PER_RUN, { missingOnly = false } = {}): Promise<number> {
+  const stale = missingOnly ? "" : new Date(Date.now() - PAPER_STALE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const due = (await getClippings("paper")).items
+    .filter((clip) => clip.paper?.arxiv && (clip.paper.pwc ? clip.paper.pwc.checked < stale : true))
+    .sort((a, b) => (a.paper!.pwc?.checked ?? "").localeCompare(b.paper!.pwc?.checked ?? ""))
+    .slice(0, limit);
+  const found = await Promise.all(due.map((clip) => paperCode(clip.paper!.arxiv!)));
+  let updated = 0;
+  for (const [i, clip] of due.entries()) {
+    // Papers it doesn't know are marked checked too, so they wait a week before the next try.
+    clip.paper!.pwc = found[i] ?? { ...clip.paper!.pwc, tasks: clip.paper!.pwc?.tasks ?? [], checked: new Date().toISOString().slice(0, 10) };
+    await saveClipping(clip);
+    if (found[i]) updated++;
+  }
+  return updated;
 }
 
 /** Clippings saved before enrichment existed get it a few at a time, so one run stays short. */

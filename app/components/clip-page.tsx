@@ -6,6 +6,7 @@ import { getBookCount, getClipKinds, getClippingsPage } from "@/lib/data";
 import type { ClipKind } from "@/lib/types";
 import { shelfConfig } from "@/shelf.config";
 import { ClipGrid } from "./clippings";
+import { DiscoverLink } from "./papers/discover";
 import { Footer } from "./footer";
 import { sectionLinks, TopBar } from "./top-bar";
 
@@ -92,6 +93,11 @@ function ClipPageFrame({
               {count !== undefined && <span className="ml-3 align-middle font-sans text-base text-muted">{count}</span>}
             </h1>
             <p className="mt-3 max-w-xl text-muted">{BLURB[kind]}</p>
+            {kind === "paper" && (
+              <div className="mt-5 empty:hidden">
+                <DiscoverLink />
+              </div>
+            )}
           </div>
           {/* Section switcher; the top bar hides its links on small screens. */}
           {kinds.length > 0 && (

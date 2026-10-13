@@ -50,8 +50,12 @@ export function clipDoc(clip: Clip): SearchDoc {
     post?.replyTo && `In reply to @${post.replyTo.handle}: ${post.replyTo.text}`,
     post?.quote && `Quoting @${post.quote.handle}: ${post.quote.text}`,
   ].filter(Boolean) as string[];
+  const code = clip.paper?.pwc;
   const described = [
     found?.summary && `In short: ${found.summary}`,
+    code?.tldr && `In short: ${code.tldr}`,
+    code?.tasks.length && `Tasks: ${code.tasks.map((t) => t.name).join(", ")}.`,
+    code?.repo && `Code: ${code.repo.name} on GitHub.`,
     found?.topics.length && `Topics: ${found.topics.join(", ")}.`,
     found?.images?.length && `Images: ${found.images.join(" ")}`,
     found?.link && `Links to ${found.link.title ? `"${found.link.title}"` : found.link.url}.`,

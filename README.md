@@ -44,6 +44,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
   - Explain and Recap;
   - a **chat** panel that knows what you're reading.
 - **Papers open in the reader.** arXiv papers become reflowing ebooks, with real equations and figures, built from arXiv's HTML version.
+- **Discover papers** (`/papers/discover`): new research from [Papers with Code](https://paperswithcode.co), with **Read** and **Save** on each paper. See [Discovering papers](#discovering-papers).
 
 ## How it works
 
@@ -210,6 +211,14 @@ Press **Add** and paste a link (or `arxiv:1706.03762`, or a DOI). Optionally pic
   - the `citation_*` tags that journals and proceedings sites publish for Google Scholar (NeurIPS, ACL Anthology, PMLR, most publishers).
 
   Semantic Scholar fills in missing abstracts and finds the free arXiv copy of a published paper. OpenReview blocks scripts, so clip a paper's arXiv link instead.
+
+  [Papers with Code](https://paperswithcode.co) adds, for arXiv papers it knows:
+  - the code, with its GitHub stars;
+  - a two-sentence summary, shown on the card in place of the abstract;
+  - the paper's tasks;
+  - any top-three leaderboard places.
+
+  These are looked up again weekly on Sync, 20 papers a run, since stars and places change.
 - **Tweets** come from [FxTwitter](https://github.com/FxEmbed/FxEmbed)'s API, which has the full text of long posts, the post being quoted and the one being replied to. X's own embed endpoints are the fallback; they cut long posts short. Posts are stored as plain data: text, author, avatar, photos (and video poster frames), likes, quote and reply. The site renders them itself, so no X script loads.
 
 Each clipping (other than papers, which have abstracts) is also **enriched** when it's saved (`lib/enrich.ts`):
@@ -218,6 +227,25 @@ Each clipping (other than papers, which have abstracts) is also **enriched** whe
 - Claude Haiku writes a one-line summary and a few topics, and describes each image, including any text, numbers or code in it, so a chart or screenshot can be found by what it shows.
 
 Older clippings without enrichment get it a few at a time on each Sync. Section pages list 60 clippings at a time, with **Show more**; search covers all of them.
+
+### Discovering papers
+
+**Discover new papers** on the Papers page (signed in) opens `/papers/discover`, a feed from the [Papers with Code](https://paperswithcode.co) public API. Hugging Face relaunched the site in 2026. The feeds are:
+
+- **For you:** papers trending in the tasks of the papers you've saved. Your most common tasks come first.
+- **Trending:** papers ranked by how fast their code is gaining GitHub stars.
+- **Latest:** the newest papers first.
+
+You can filter by search, by task (the chips; a dot marks your own tasks), and by **With code**.
+
+Each paper shows:
+
+- its first page, its two-sentence summary, and **Read the abstract** (with the methods it uses);
+- its code and stars, its leaderboard places, and its models, datasets and demos on Hugging Face.
+
+**Save** clips it to your papers. **Read** saves it and opens it in the reader as an ebook, where Explain, Recap and Chat help with the hard parts.
+
+The browser calls the API directly: it's anonymous and allows any site to call it. It is still in beta, so if it changes, Discover shows an error while your saved papers carry on. Papers that aren't on arXiv (blog posts, model cards) only link out.
 
 ## Saving from X and anywhere else
 
@@ -414,6 +442,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | Shelf is empty after deploying | The production database starts empty: sign in and press **Sync**. Check the Goodreads profile is public and `goodreadsUserId` is set. |
 | Search results say "Keyword matches" | `TYPESAFE_API_KEY` isn't set where the site runs. |
 | AI features say "AI isn't configured" | `ANTHROPIC_API_KEY` isn't set. |
+| Discover says it couldn't reach Papers with Code | Its API is a beta and rate-limited. Try again in a minute; the page itself and your saved papers don't depend on it. |
+| A saved paper has no code link or tasks | Papers with Code doesn't know it (it covers arXiv papers in ML), or it hasn't been looked up yet. Opening Discover, or Sync, fills it in. |
 | A paper opens as a PDF instead of an ebook | It has no HTML version on arXiv (some older or very large papers). |
 | The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
 | A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
@@ -433,6 +463,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `migrations/`, `lib/db.ts`, `lib/data.ts`, `lib/library.ts` | D1: schema, shelf, clippings, files, progress and notes |
 | `lib/sync.ts`, `lib/goodreads.ts`, `lib/categories.ts`, `app/api/sync/` | Goodreads sync (RSS → Open Library → D1) |
 | `lib/clip.ts`, `app/api/clips/`, `app/components/add-clip.tsx` | Adding clippings from the site |
+| `lib/pwc.ts`, `app/papers/discover/`, `app/components/papers/discover.tsx` | Discovering papers, and saved papers' code and tasks, from Papers with Code |
 | `lib/x-article.ts`, `app/api/books/clips/`, `app/reader/clip/`, `app/components/reader/{clip-opener.tsx,x-article-epub.ts}` | X Articles: reading them whole, as ebooks in the reader |
 | `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
 | `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `app/components/search-palette.tsx` | Site search and its vector index |

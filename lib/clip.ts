@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { Clip, ClipKind, QuotedPost } from "./types";
+import { pwcByArxiv } from "./pwc";
+import type { Clip, ClipKind, PaperCode, QuotedPost } from "./types";
 import { fetchXArticle } from "./x-article";
 import { articleMinutes } from "./x-article-types";
 
@@ -52,6 +53,7 @@ export async function clipLink(input: string, options: ClipOptions, existing?: C
         ? await fetchCrossref(doiOf(url)!)
         : await fetchPage(url, options.kind);
   if (fetched.paper) await fillFromSemanticScholar(fetched);
+  if (fetched.paper?.arxiv) fetched.paper.pwc = (await paperCode(fetched.paper.arxiv)) ?? existing?.paper?.pwc;
 
   const clip: Clip = {
     ...fetched,
@@ -220,6 +222,25 @@ async function fillFromSemanticScholar(clip: Fetched) {
   } catch {
     // Offline or rate limited; keep what the source gave.
   }
+}
+
+/**
+ * An arXiv paper's code, tasks and leaderboard places from Papers with Code. Undefined when it
+ * doesn't know the paper or can't be reached; the clipping is fine without them.
+ */
+export async function paperCode(arxiv: string): Promise<PaperCode | undefined> {
+  const found = await pwcByArxiv(arxiv, { headers: API_HEADERS, signal: AbortSignal.timeout(8000) }).catch(() => undefined);
+  if (!found) return undefined;
+  const sota = found.ranks.filter((r) => r.rank <= 3).slice(0, 3);
+  return {
+    ...(found.tldr ? { tldr: found.tldr } : {}),
+    ...(found.repo ? { repo: found.repo } : {}),
+    ...(found.project ? { project: found.project } : {}),
+    tasks: found.tasks.slice(0, 6),
+    ...(sota.length ? { sota } : {}),
+    ...(found.citations !== undefined ? { citations: found.citations } : {}),
+    checked: new Date().toISOString().slice(0, 10),
+  };
 }
 
 function simplify(title: string): string {

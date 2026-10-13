@@ -1,5 +1,5 @@
 import { fromScheduler, requireOwner } from "@/lib/auth/session";
-import { refreshSearch } from "@/lib/save";
+import { refreshPaperCode, refreshSearch } from "@/lib/save";
 import { syncGoodreads } from "@/lib/sync";
 
 /**
@@ -14,12 +14,16 @@ export async function POST(request: Request) {
   }
   try {
     const result = await syncGoodreads();
-    // The shelf is synced either way; search catches up on the next run if this fails.
+    // The shelf is synced either way; papers and search catch up on the next run if these fail.
+    const papers = await refreshPaperCode().catch((error) => {
+      console.error("Papers with Code refresh failed", error);
+      return null;
+    });
     const search = await refreshSearch().catch((error) => {
       console.error("Search index refresh failed", error);
       return null;
     });
-    return Response.json({ ...result, search }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ ...result, papers, search }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Goodreads sync failed", error);
     return Response.json({ error: (error as Error).message || "The sync failed." }, { status: 502 });
