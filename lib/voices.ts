@@ -9,10 +9,12 @@ export type VoiceInfo = { id: string; name: string; accent: string; maker: "Fish
 
 /** Fish's official voices, by the reference id its API takes. */
 export const FISH_VOICES: Record<string, string> = {
+  fi_ethan: "536d3a5e000945adb7038665781a4aca",
   fi_adrian: "bf322df2096a46f18c579d0baa36f41d",
 };
 
 export const VOICES: VoiceInfo[] = [
+  { id: "fi_ethan", name: "Ethan", accent: "American", maker: "Fish Audio" },
   { id: "fi_adrian", name: "Adrian", accent: "American", maker: "Fish Audio" },
   { id: "af_heart", name: "Heart", accent: "American", maker: "Kokoro" },
   { id: "af_bella", name: "Bella", accent: "American", maker: "Kokoro" },
@@ -22,7 +24,7 @@ export const VOICES: VoiceInfo[] = [
 ];
 
 /** The voice a book is read in when nothing else decides. */
-export const DEFAULT_VOICE = "fi_adrian";
+export const DEFAULT_VOICE = "fi_ethan";
 
 export const isFishVoice = (voice: string) => Object.hasOwn(FISH_VOICES, voice);
 

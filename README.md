@@ -131,7 +131,7 @@ Each feature switches on when its keys are set. Locally they go in `.env.local` 
 | Signing in as the owner | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters, e.g. `openssl rand -base64 48`) |
 | Book files in R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 | Listening on a GPU server (see [On a GPU server](#on-a-gpu-server)) | `NARRATOR_TOKEN`, shared with the server |
-| Fish Audio's narrator voice (see [Fish Audio](#fish-audio)) | `FISH_API_KEY` (and `~/narrator/fish-key` on a GPU server) |
+| Fish Audio's narrator voices (see [Fish Audio](#fish-audio)) | `FISH_API_KEY` (and `~/narrator/fish-key` on a GPU server) |
 
 What happens when keys are missing:
 
@@ -361,7 +361,7 @@ To start somewhere else:
 - **Tap to read:** turn it on with the pointer button in the player, or the switch in the player's menu (phones use the switch). While listening, a tap on any sentence reads from there instead of turning the page. The setting is remembered.
 
 - **The voices.** There are two kinds, and each book keeps the voice you pick for it. A book you haven't picked one for is read in the voice it has chapters saved in, else in your usual voice.
-  - **Adrian** (the default) is a narrator voice from [Fish Audio](https://fish.audio), spoken by its S2.1 Pro model through the site (`lib/fish.ts`). It uses the free developer tier (`s2.1-pro-free`). See [Fish Audio](#fish-audio).
+  - **Ethan** (the default) and **Adrian** are narrator voices from [Fish Audio](https://fish.audio), spoken by its S2.1 Pro model through the site (`lib/fish.ts`). They use the free developer tier (`s2.1-pro-free`). See [Fish Audio](#fish-audio).
   - **Heart, Bella, Emma, Michael and George** are [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), run in the browser with [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js), or on a GPU server. They cost nothing and have no usage limit.
   - **Kokoro's download:** the model downloads from Hugging Face the first time a Kokoro voice is used, 326 MB, then stays in the browser's cache.
   - **Speed:** on a computer's GPU (WebGPU), it speaks several times faster than it reads. Without one, it uses a smaller 92 MB model on the CPU, which is slower than real time, so there are pauses between sentences.
@@ -378,7 +378,7 @@ To start somewhere else:
 
 ### Fish Audio
 
-Adrian is Fish Audio's official narrator voice (`fi_adrian` in `lib/voices.ts`; more Fish voices can be added there and in `narrator-server/server.py`).
+Ethan ("a curious explainer", clear and professional) and Adrian ("a steady and reliable narrator") are two of Fish Audio's official voices (`fi_ethan` and `fi_adrian` in `lib/voices.ts`; more can be added there and in `narrator-server/server.py`).
 
 - **The key:** `FISH_API_KEY`, a Worker secret. The free tier needs no card.
 - **The free tier:** the same model as the paid one, under a fair-use policy with no published caps, and up to five requests at once per account. Fish says the free period is for "an initial period", and that free requests may be used to improve its model, so the book's text goes to Fish. The paid model is $15 per million characters, about $20 for a long book.
@@ -477,8 +477,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | The shortcut says "Not saved: the token is missing or out of date" | Make a new token in **Add → Save from your phone** and paste it (with `Bearer `) into the shortcut's header. |
 | A new clipping doesn't show in search for a few seconds | Vectorize makes new vectors searchable a few seconds after they're written. |
 | Listening pauses between sentences | The voice is running in a browser without WebGPU, on the CPU. Save the book on the GPU server, or from Chrome or Safari on a computer; saved chapters play smoothly anywhere. |
-| Adrian says "Fish Audio isn't set up" | `FISH_API_KEY` isn't set where the site runs. |
-| Adrian stops with a Fish Audio error | Fish refused or kept failing for over a minute (its free tier may have changed). Pick a Kokoro voice for the book meanwhile; chapters already saved in Adrian still play. |
+| Ethan or Adrian says "Fish Audio isn't set up" | `FISH_API_KEY` isn't set where the site runs. |
+| Ethan or Adrian stops with a Fish Audio error | Fish refused or kept failing for over a minute (its free tier may have changed). Pick a Kokoro voice for the book meanwhile; chapters already saved in that voice still play. |
 | The menu says "made in this browser" with a GPU server set up | The server isn't answering. On the machine, check `systemctl --user status narrator narrator-tunnel`, and `bunx wrangler tunnel info <name>` for the tunnel. |
 | A figure is missing from a paper ebook | Check the paper on arxiv.org/html: if arXiv's own page shows no image, its LaTeX conversion dropped it, and **PDF ↗** has it. |
 | Local changes don't show in `bun dev` | Restart the dev server; if it still serves an old page, check with `bun run preview`. |

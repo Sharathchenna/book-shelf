@@ -76,7 +76,7 @@ CHUNK_GAP = round(SAMPLE_RATE * 0.06)
 GROUP = 500
 VOICES = {"af_heart", "af_bella", "bf_emma", "am_michael", "bm_george"}
 # Fish Audio's voices (lib/voices.ts), by the reference id its API takes, and the key for it.
-FISH = {"fi_adrian": "bf322df2096a46f18c579d0baa36f41d"}
+FISH = {"fi_ethan": "536d3a5e000945adb7038665781a4aca", "fi_adrian": "bf322df2096a46f18c579d0baa36f41d"}
 FISH_KEY = (HOME / "fish-key").read_text().strip() if (HOME / "fish-key").exists() else ""
 FISH_AT_ONCE = int(os.environ.get("FISH_AT_ONCE", "3"))
 # Sentences asked for ahead of the one being encoded, so a slow one doesn't hold up the rest.

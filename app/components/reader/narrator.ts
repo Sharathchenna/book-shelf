@@ -146,13 +146,13 @@ const knownVoice = (voice: unknown): voice is string => VOICES.some((v) => v.id 
 
 /**
  * The listener's settings. `voice` is the usual voice, for books without one of their own;
- * settings from before Fish's voices existed (no `voices: 2`) take the new default.
+ * settings from before Ethan became the default (no `voices: 3`) take the new default.
  */
 const prefs = (): { voice: string; rate: number; tapToRead: boolean } => {
   const defaults = { voice: DEFAULT_VOICE, rate: 1, tapToRead: false };
   try {
     const stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as { voice?: unknown; voices?: number };
-    const voice = stored.voices === 2 && knownVoice(stored.voice) ? stored.voice : DEFAULT_VOICE;
+    const voice = stored.voices === 3 && knownVoice(stored.voice) ? stored.voice : DEFAULT_VOICE;
     return { ...defaults, ...stored, voice };
   } catch {
     return defaults;
@@ -1327,7 +1327,7 @@ export class Narrator {
   }
 
   private savePrefs() {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.usual, voices: 2, rate: this.state.rate, tapToRead: this.state.tapToRead }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ voice: this.usual, voices: 3, rate: this.state.rate, tapToRead: this.state.tapToRead }));
   }
 }
 
