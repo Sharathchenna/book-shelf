@@ -1,7 +1,8 @@
 import { APIError } from "@typesafe-ai/sdk";
 import { jevEnabled, rankForSearch } from "@/lib/ai/jev";
 import { getClippings, getShelf } from "@/lib/data";
-import { bm25By, bm25Scored } from "@/lib/search/bm25";
+import { bm25Expanded } from "@/lib/search/bm25";
+import { relatedTerms } from "@/lib/search/expand";
 import { bookDoc, clipDoc, type SearchDoc } from "@/lib/search/site";
 import { nearest } from "@/lib/search/vectors";
 
@@ -9,7 +10,7 @@ import { nearest } from "@/lib/search/vectors";
 const RANK_ALL_UP_TO = 150;
 const CANDIDATES = 100;
 /** Keyword matches added to the nearest documents, for exact names and handles embeddings can blur. */
-const KEYWORD_EXTRAS = 20;
+const KEYWORD_EXTRAS = 30;
 const RESULTS = 20;
 /** Jev's probability below which a result isn't shown (unless nothing scores higher). */
 const MIN_MATCH = 0.2;
@@ -24,8 +25,9 @@ type SearchResult = Shown & { match: number };
 /**
  * Searches the whole site (books, papers, articles, newsletter issues, tweets) by meaning. Large
  * collections are first narrowed to the documents nearest the search in the vector index
- * (lib/search/vectors.ts) plus the best keyword matches; then Jev judges each candidate against
- * the search. Without Jev, the vector (or else keyword) ranking is the answer.
+ * (lib/search/vectors.ts) plus the best keyword matches, with the related words Haiku suggests
+ * (lib/search/expand.ts) counted as keywords too; then Jev judges each candidate against the
+ * search. Without Jev, the vector (or else keyword) ranking is the answer.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { query?: unknown };
@@ -46,13 +48,17 @@ export async function POST(request: Request) {
 
   const docs = [...shelf.items.map(bookDoc), ...clips.map(clipDoc)];
   const byDocId = new Map(docs.map((d) => [d.id, d]));
-  const near =
-    docs.length > RANK_ALL_UP_TO || !jevEnabled()
-      ? await nearest(query, CANDIDATES).catch((error) => {
+  const narrow = docs.length > RANK_ALL_UP_TO || !jevEnabled();
+  const [near, related] = narrow
+    ? await Promise.all([
+        nearest(query, CANDIDATES).catch((error) => {
           console.error("Vector search failed; narrowing by keywords", error);
           return null;
-        })
-      : null;
+        }),
+        relatedTerms(query),
+      ])
+    : [null, []];
+  const keywords = (limit: number) => bm25Expanded(query, related, docs, (d) => d.text, limit);
   const pool =
     docs.length <= RANK_ALL_UP_TO
       ? docs
@@ -60,10 +66,10 @@ export async function POST(request: Request) {
         ? [
             ...new Set([
               ...near.map((n) => byDocId.get(n.id)).filter((d): d is SearchDoc => Boolean(d)),
-              ...bm25By(query, docs, (d) => d.text, KEYWORD_EXTRAS),
+              ...keywords(KEYWORD_EXTRAS).map((s) => s.item),
             ]),
           ]
-        : bm25By(query, docs, (d) => d.text, CANDIDATES);
+        : keywords(CANDIDATES).map((s) => s.item);
   // The palette needs none of what the rankers read.
   const strip = (doc: SearchDoc): Shown => {
     const { id, kind, title, subtitle, image, href, paperId, articleId } = doc;
@@ -77,7 +83,7 @@ export async function POST(request: Request) {
   }
   if (!jevEnabled()) {
     // Only what contains a search word, scored against the best match.
-    const scored = bm25Scored(query, docs, (d) => d.text, RESULTS).filter((s) => s.score > 0);
+    const scored = keywords(RESULTS).filter((s) => s.score > 0);
     const best = scored[0]?.score ?? 1;
     const results = scored.map(({ item, score }) => ({ ...strip(item), match: score / best }));
     return Response.json({ results, ranked: false });

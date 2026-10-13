@@ -287,7 +287,7 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
 
 **Ask the shelf** (the box on the home page) ranks books only:
 
-1. **Narrowing:** shelves of up to 240 books are ranked in full. Bigger shelves are first narrowed to 120 candidates by BM25 over title, author, subjects, tags, description and review.
+1. **Narrowing:** shelves of up to 240 books are ranked in full. Bigger shelves are first narrowed to 120 candidates by BM25 over title, author, subjects, tags, description and review, using related words as well as the question's own (see [Related words](#related-words)).
 2. **Ranking:** Jev answers one question per book, "does this book fit what the reader asked for?". Its probability becomes the % match.
 3. **Answer:** Claude Haiku writes a short note on where to start, linking the books it mentions. The results stream first, then the answer.
 
@@ -296,7 +296,9 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
 1. **Index:** each book and clipping becomes a short card. Books contribute title, author, status, rating, subjects, description and review. Clippings contribute title, author or handle, source, excerpt or abstract, tweet text, the quoted and replied-to posts, the enrichment (summary, topics, image descriptions, linked page), tags and your note.
 2. **Narrowing:** up to 150 items are ranked in full. Beyond that, the candidates are:
    - the 100 nearest the search in the vector index (`lib/search/vectors.ts`), which finds things by meaning even when no word matches;
-   - plus the 20 best keyword matches, for exact names and handles.
+   - plus the 30 best keyword matches, for exact names and handles, using [related words](#related-words) as well as the search's own.
+
+   When the vector index can't answer (Workers AI is down or over its daily allowance), the 100 best keyword matches stand in for it.
 
    The index holds an embedding of each item's full text (`@cf/qwen/qwen3-embedding-0.6b`, 1,024 dimensions, in the `book-shelf-search` Vectorize index). Saving a clipping embeds it at once. Sync embeds whatever changed and drops what's gone; a hash of each item's text in D1 (`embeddings`) means unchanged items are never embedded twice.
 3. **Ranking:** Jev judges each card against the search, "is this something the person is looking for?". Results below 20% are hidden, unless nothing scores higher.
@@ -307,6 +309,16 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
    - anything else opens its source.
 
 A search costs a fraction of a cent and returns in under a second. Without Jev, results come from the vector index, ranked by similarity (or from keywords, when there's no index). Both searches cache recent queries, and allow 20 (Ask) or 40 (site search) searches per minute per address.
+
+### Related words
+
+Keyword matching only finds the words it's given. "making LLMs answer faster" matches a book called *The Making of the Atomic Bomb* and misses a paper on speculative decoding.
+
+So before narrowing by keywords, Claude Haiku lists up to 12 words and phrases the wanted items are likely to contain (`lib/search/expand.ts`): synonyms, the field's own terms, well-known titles, people, tools and methods. For that search: "speculative decoding", "inference latency", "kv cache"…
+
+These count half as much as the words you typed, so an exact match still comes first. Haiku gets 4 seconds; without `ANTHROPIC_API_KEY`, or if it's slow or fails, the search uses its own words. Each search's related words are cached, and they cost about $0.0001.
+
+This only runs when there is something to narrow: below the limits above, Jev reads everything already.
 
 ## The readers
 
@@ -466,7 +478,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `lib/pwc.ts`, `app/papers/discover/`, `app/components/papers/discover.tsx` | Discovering papers, and saved papers' code and tasks, from Papers with Code |
 | `lib/x-article.ts`, `app/api/books/clips/`, `app/reader/clip/`, `app/components/reader/{clip-opener.tsx,x-article-epub.ts}` | X Articles: reading them whole, as ebooks in the reader |
 | `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
-| `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `app/components/search-palette.tsx` | Site search and its vector index |
+| `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `lib/search/expand.ts`, `app/components/search-palette.tsx` | Site search, its vector index, and Haiku's related words |
 | `lib/save.ts`, `lib/enrich.ts`, `app/api/capture/`, `app/components/capture-setup.tsx` | Saving from anywhere: the shared save pipeline, enrichment, the share-sheet endpoint and token, the setup panel |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login |
 | `lib/storage.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2), EPUB parsing, PDF finalize, paper import and the arXiv proxies |

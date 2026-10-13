@@ -27,22 +27,24 @@ export function searchText(item: Item): string {
     .join(" ");
 }
 
+/** How much a related word (lib/search/expand.ts) counts, against a word the reader typed. */
+const RELATED_WEIGHT = 0.5;
+
 /**
- * Okapi BM25 over the shelf. Used only to narrow very large shelves before Jev ranks them,
- * so it favours recall: ties and zero scores keep their original (recent-first) order.
+ * Okapi BM25 for the search plus related words: a document that uses the reader's own words
+ * still comes first, but one that only uses the related ones ("transformer" for "attention
+ * models") is found too. Used to narrow large collections before Jev ranks them, so it favours
+ * recall: ties and zero scores keep their original (recent-first) order.
  */
-export function bm25(query: string, items: Item[], limit: number): Item[] {
-  return bm25By(query, items, searchText, limit);
+export function bm25Expanded<T>(query: string, related: string[], items: T[], text: (item: T) => string, limit: number): { item: T; score: number }[] {
+  const weights = new Map<string, number>();
+  for (const t of related.flatMap(tokens)) weights.set(t, RELATED_WEIGHT);
+  for (const t of tokens(query)) weights.set(t, 1);
+  return bm25Weighted(weights, items, text, limit);
 }
 
-/** BM25 over anything, given its searchable text. */
-export function bm25By<T>(query: string, items: T[], text: (item: T) => string, limit: number): T[] {
-  return bm25Scored(query, items, text, limit).map((s) => s.item);
-}
-
-/** As `bm25By`, with each item's score (0 when no search term appears in it). */
-export function bm25Scored<T>(query: string, items: T[], text: (item: T) => string, limit: number): { item: T; score: number }[] {
-  const terms = [...new Set(tokens(query))];
+function bm25Weighted<T>(weights: Map<string, number>, items: T[], text: (item: T) => string, limit: number): { item: T; score: number }[] {
+  const terms = [...weights.keys()];
   if (!terms.length) return items.slice(0, limit).map((item) => ({ item, score: 0 }));
 
   const docs = items.map((item) => tokens(text(item)));
@@ -60,7 +62,7 @@ export function bm25Scored<T>(query: string, items: T[], text: (item: T) => stri
       const f = tf.get(term);
       if (!f) continue;
       const idf = Math.log(1 + (docs.length - (df.get(term) ?? 0) + 0.5) / ((df.get(term) ?? 0) + 0.5));
-      score += idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + (b * doc.length) / avgLength)));
+      score += weights.get(term)! * idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + (b * doc.length) / avgLength)));
     }
     return { item: items[i], score, i };
   });

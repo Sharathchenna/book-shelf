@@ -3,12 +3,13 @@ import { APIError } from "@typesafe-ai/sdk";
 import { haikuEnabled, streamText } from "@/lib/ai/haiku";
 import { jevEnabled, rankWithJev, type Ranked } from "@/lib/ai/jev";
 import { answerPrompt, answerSystem, tasteContext } from "@/lib/ai/prompts";
-import { bm25 } from "@/lib/search/bm25";
+import { bm25Expanded, searchText } from "@/lib/search/bm25";
+import { relatedTerms } from "@/lib/search/expand";
 import { getShelf } from "@/lib/data";
 import type { ShelfData } from "@/lib/types";
 import { shelfConfig } from "@/shelf.config";
 
-/** Shelves up to this size are ranked whole; bigger ones are narrowed by BM25 first. */
+/** Shelves up to this size are ranked whole; bigger ones are narrowed by BM25 first, with Haiku's related words. */
 const RANK_ALL_UP_TO = 240;
 const CANDIDATES = 120;
 /** Books shown, and books Haiku is told about. */
@@ -44,7 +45,10 @@ async function rank(query: string, mode: "ask" | "next", shelf: ShelfData): Prom
         "Given the books the reader loved in `reader_context`, is {book} likely to be a great next read for them?",
     });
   } else {
-    const pool = shelf.items.length <= RANK_ALL_UP_TO ? shelf.items : bm25(query, shelf.items, CANDIDATES);
+    const pool =
+      shelf.items.length <= RANK_ALL_UP_TO
+        ? shelf.items
+        : bm25Expanded(query, await relatedTerms(query), shelf.items, searchText, CANDIDATES).map((s) => s.item);
     ranked = await rankWithJev(pool, { request: query });
   }
 
