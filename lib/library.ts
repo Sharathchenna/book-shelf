@@ -1,6 +1,7 @@
 import "server-only";
 import { db, records } from "./db";
 import type { AudioLine, AudioSection, Highlight, LibraryBook, Progress } from "./library-types";
+import type { Review } from "./review";
 import type { Item } from "./types";
 
 /** Where each book's bytes live in storage (R2). Everything else about it is in D1. */
@@ -37,11 +38,11 @@ export async function putFile(book: LibraryBook) {
     .run();
 }
 
-/** Forgets a file, the owner's place and notes in it, and its narration (and its directions). The caller deletes the bytes. */
+/** Forgets a file, the owner's place and notes in it (and their place in the review), and its narration (and its directions). The caller deletes the bytes. */
 export async function removeFile(id: string) {
   const database = await db();
   await database.batch(
-    ["files", "progress", "notes", "audio", "directions"].map((table) =>
+    ["files", "progress", "notes", "audio", "directions", "reviews"].map((table) =>
       database.prepare(`DELETE FROM ${table} WHERE ${table === "files" ? "id" : "file_id"} = ?1`).bind(id),
     ),
   );
@@ -73,6 +74,30 @@ export async function getNotes(id: string): Promise<Highlight[]> {
 export async function highlightCounts(): Promise<Map<string, number>> {
   const { results } = await (await db()).prepare("SELECT file_id, json_array_length(data) AS n FROM notes").all<{ file_id: string; n: number }>();
   return new Map(results.map((row) => [row.file_id, row.n]));
+}
+
+/** Every file's highlights, for the daily review and the Markdown export. */
+export async function allNotes(): Promise<Map<string, Highlight[]>> {
+  const { results } = await (await db()).prepare("SELECT file_id, data FROM notes").all<{ file_id: string; data: string }>();
+  return new Map(results.map((row) => [row.file_id, JSON.parse(row.data) as Highlight[]]));
+}
+
+/** Where each highlight stands in the daily review (lib/review.ts), keyed by highlight id. */
+export async function allReviews(): Promise<Map<string, Review>> {
+  const { results } = await (await db())
+    .prepare("SELECT highlight_id, step, due, last, off FROM reviews")
+    .all<{ highlight_id: string; step: number; due: number; last: number; off: number }>();
+  return new Map(results.map((r) => [r.highlight_id, { step: r.step, due: r.due, last: r.last, ...(r.off ? { off: true } : {}) }]));
+}
+
+export async function putReview(highlightId: string, fileId: string, review: Review) {
+  await (await db())
+    .prepare(
+      `INSERT INTO reviews (highlight_id, file_id, step, due, last, off) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT (highlight_id) DO UPDATE SET step = ?3, due = ?4, last = ?5, off = ?6`,
+    )
+    .bind(highlightId, fileId, review.step, review.due, review.last, review.off ? 1 : 0)
+    .run();
 }
 
 export async function putNotes(id: string, notes: Highlight[]) {

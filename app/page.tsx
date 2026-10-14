@@ -4,6 +4,7 @@ import { getClipKinds } from "@/lib/data";
 import { db } from "@/lib/db";
 import { shelfBooks, shelveMissing } from "@/lib/shelving";
 import { shelfConfig } from "@/shelf.config";
+import { DailyReview } from "./components/bookcase/daily-review";
 import { Library } from "./components/bookcase/library";
 import { Footer } from "./components/footer";
 import { TopBar } from "./components/top-bar";
@@ -29,7 +30,7 @@ async function Bookcase() {
     <>
       <TopBar owner={shelfConfig.owner} current="library" kinds={kinds} />
       <main>
-        <Library owner={shelfConfig.owner} books={books} />
+        <Library owner={shelfConfig.owner} books={books} aside={<DailyReview />} />
       </main>
       <Footer owner={shelfConfig.owner} count={books.filter((b) => b.kind === "book").length} kinds={kinds} />
     </>

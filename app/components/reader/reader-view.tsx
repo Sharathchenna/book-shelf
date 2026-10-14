@@ -401,7 +401,9 @@ export function ReaderView({ id }: { id: string }) {
       await view.open(new File([file], "book.epub", { type: "application/epub+zip" }));
       sanitizeBook(view.book.transformTarget);
       applySettings(view, stored);
-      await view.init({ lastLocation: data.progress?.cfi ?? null, showTextStart: !data.progress });
+      // ?at=<cfi> opens at a highlight (the library's daily review); otherwise where they left off.
+      const at = new URLSearchParams(window.location.search).get("at");
+      await view.init({ lastLocation: at ?? data.progress?.cfi ?? null, showTextStart: !at && !data.progress });
       if (cancelled) return;
 
       setSettings(stored);

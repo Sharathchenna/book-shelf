@@ -200,6 +200,7 @@ The home page is a bookcase, from [Gloss](https://usegloss.io)'s library: its 24
   - a book without one opens its card on `/books`;
   - papers and articles open in the reader for you, and at their source for visitors;
   - posts open on X.
+- **Today, from your highlights:** signed in, five of your highlights come back each day, one at a time, above the shelf (`lib/review.ts`, from Gloss). **Next** keeps one coming back, after 3 days, then 7, 16, 35, 75 and 160; **Done with it** keeps it a highlight but takes it out of the review. Each links to its place in the book (`/reader/<id>?at=<cfi>`). Where each highlight stands is kept apart from the highlights themselves (the `reviews` table), since the reader replaces those whole.
 - **Signed in,** the page adds your reading over it (`/api/me`): your place in each file, your highlights, the star (favourites; books start with their five-star ratings), and removing a clipping.
 
 The old home page (Ask the shelf, the Shelf Engine, stats, reading by year and every cover) is now **Books**, at `/books`.
@@ -531,6 +532,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | Path | What it is |
 | --- | --- |
 | `app/page.tsx`, `app/components/bookcase/`, `lib/bookcase.ts`, `lib/shelving.ts`, `lib/ai/shelver.ts`, `app/api/shelving/`, `public/library/` | The library: the bookcase, topics, the book in your hands, and shelving by Haiku |
+| `lib/review.ts`, `app/api/review/`, `app/components/bookcase/daily-review.tsx` | Today, from your highlights: the daily review |
 | `app/books/page.tsx` | The books: spine marquee, Ask, Shelf Engine, profile, stats, insights, every cover |
 | `app/components/engine/` | The Shelf Engine animation |
 | `app/{articles,papers,newsletters,tweets}/`, `app/components/clippings.tsx`, `clip-page.tsx` | The clipping pages |

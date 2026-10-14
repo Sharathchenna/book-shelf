@@ -445,7 +445,9 @@ export function PdfReaderView({ id }: { id: string }) {
       setToc(contents);
       setSizes(all);
       setDoc(pdf);
-      anchor.current = data.progress?.fraction ?? 0;
+      // ?at=page:N opens at a highlight (the library's daily review); otherwise where they left off.
+      const at = new URLSearchParams(window.location.search).get("at");
+      anchor.current = at?.startsWith("page:") ? (pageOf(at) - 1) / Math.max(1, pdf.numPages) : (data.progress?.fraction ?? 0);
       setStatus("ready");
       const away = data.progress ? (Date.now() - Date.parse(data.progress.updatedAt)) / 86_400_000 : 0;
       if (data.progress && data.progress.fraction > 0.02 && away >= RECAP_AFTER_DAYS) setOfferRecap(true);
