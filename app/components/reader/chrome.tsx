@@ -1,6 +1,7 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { moreActions, READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
 import type { Highlight, HighlightColor } from "@/lib/library-types";
 import { HIGHLIGHT_HEX } from "./foliate";
 
@@ -40,7 +41,8 @@ export function SelectionPopover({
   onDraft: (text: string | null) => void;
   onHighlight: (color: HighlightColor) => void;
   onSaveNote: (text: string) => void;
-  onExplain: () => void;
+  /** Explain, or another of Haiku's actions on the passage. */
+  onExplain: (action?: ReaderAction) => void;
   /** Opens the chat with this passage quoted. */
   onAsk?: () => void;
   /** Reads aloud from here. */
@@ -48,6 +50,8 @@ export function SelectionPopover({
   onCopy: () => void;
   onRemove?: () => void;
 }) {
+  // The rest of Haiku's actions, shown on a second row.
+  const [more, setMore] = useState(false);
   // Keep the popover on screen; flip below the selection when it's near the top.
   const below = selected.y < 150;
   // Centred on the selection, but at least 12px from either edge of the screen.
@@ -102,23 +106,52 @@ export function SelectionPopover({
           ))}
           <span className="mx-0.5 h-6 w-px bg-line sm:mx-1" />
           <PopButton onClick={() => onDraft(note?.note ?? "")}>{note?.note ? "Edit note" : "Note"}</PopButton>
-          <PopButton onClick={onExplain} accent>
+          <PopButton onClick={() => onExplain()} accent>
             Explain
+          </PopButton>
+          <PopButton onClick={() => setMore((m) => !m)} pressed={more} label="More ways to read this passage">
+            More
           </PopButton>
           {onAsk && <PopButton onClick={onAsk}>Ask</PopButton>}
           {onListen && <PopButton onClick={onListen}>Listen</PopButton>}
           {onRemove ? <PopButton onClick={onRemove}>Remove</PopButton> : !onAsk && <PopButton onClick={onCopy}>Copy</PopButton>}
+          {more && (
+            <div className="flex w-full flex-wrap items-center justify-center gap-0.5 border-t border-line pt-1">
+              {moreActions(selected.text).map((action) => (
+                <PopButton key={action} onClick={() => onExplain(action)} title={READER_ACTIONS[action].hint}>
+                  {READER_ACTIONS[action].label}
+                </PopButton>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function PopButton({ onClick, accent, children }: { onClick: () => void; accent?: boolean; children: React.ReactNode }) {
+function PopButton({
+  onClick,
+  accent,
+  pressed,
+  label,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  accent?: boolean;
+  pressed?: boolean;
+  label?: string;
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors sm:px-3 ${accent ? "text-accent hover:bg-accent/10" : "hover:bg-chip"}`}
+      aria-pressed={pressed}
+      aria-label={label}
+      title={title}
+      className={`rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors aria-pressed:bg-chip sm:px-3 ${accent ? "text-accent hover:bg-accent/10" : "hover:bg-chip"}`}
     >
       {accent && <span aria-hidden>✦ </span>}
       {children}

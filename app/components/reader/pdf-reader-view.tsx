@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
+import { READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
 import { AiCard, useAiStream } from "./ai-card";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
@@ -267,7 +268,7 @@ export function PdfReaderView({ id }: { id: string }) {
 
   // ---- AI -------------------------------------------------------------------------------
 
-  const explain = (sel: PdfSelected) => {
+  const explain = (sel: PdfSelected, action: ReaderAction = "explain") => {
     setExplained(sel);
     setSelected(null);
     void runAi(
@@ -278,8 +279,9 @@ export function PdfReaderView({ id }: { id: string }) {
         sectionFraction: sel.sectionFraction,
         selection: sel.text,
         image: cropSelection(sel.page, sel.rects),
+        action,
       },
-      { kind: "explain", title: "Explain", quote: sel.text },
+      { kind: "explain", title: READER_ACTIONS[action].label, quote: sel.text },
     );
   };
 
@@ -701,7 +703,7 @@ export function PdfReaderView({ id }: { id: string }) {
               setNoteDraft(null);
               setSelected(null);
             }}
-            onExplain={() => explain(selected)}
+            onExplain={(action) => explain(selected, action)}
             onAsk={() => {
               setChatQuote({ text: selected.text, image: cropSelection(selected.page, selected.rects) });
               setChat(true);

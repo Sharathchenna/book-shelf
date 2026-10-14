@@ -462,6 +462,13 @@ With a GPU machine of your own, the same Kokoro voices run there (`narrator-serv
 All of these are owner-only, apart from the answer under Ask the shelf. They run on Claude Haiku 5.5 and stream as they're written.
 
 - **Explain:** select a passage and choose **Explain**. In a PDF, an image of the selection goes along, so equations that text extraction garbles are still explained.
+- **More:** beside Explain, **More** offers the rest of Gloss's set (`lib/reader-actions.ts`, prompts in `lib/ai/reader.ts`):
+  - **Define** (for a few words): the word as this author uses it; **Simplify** (for longer passages): the same idea in plain words.
+  - **Fact-check:** does it still hold up? Haiku searches the web (Anthropic's web search, at most two searches, $0.01 each) and lists the pages it cited. A passage that's opinion or fiction gets one line saying so instead.
+  - **Related:** where else the text takes this up, as a few pointers with quoted words: the whole of a paper, or a book up to where you are.
+  - **Counterpoint:** the strongest objection a sharp critic would raise, and how the author might answer.
+
+  Each answer can be saved as a note on the passage, like Explain's.
 - **Recap:** **Previously…** in a book, or **Where you left off** in a paper. It's offered automatically when you return after a few days.
 - **Chat:** `C`, or the speech-bubble button, opens a panel beside the page.
   - **What it reads:** a paper's whole text, but a book's only up to your page, plus your highlights.

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
+import { READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
 import { AiCard, useAiStream } from "./ai-card";
 import {
   bookCss,
@@ -184,13 +185,13 @@ export function ReaderView({ id }: { id: string }) {
 
   // ---- AI -------------------------------------------------------------------------------
 
-  const explain = (sel: Selected) => {
+  const explain = (sel: Selected, action: ReaderAction = "explain") => {
     setExplained(sel);
     setSelected(null);
     void runAi(
       "/api/reader/explain",
-      { bookId: id, sectionIndex: sel.sectionIndex, sectionFraction: sel.sectionFraction, selection: sel.text },
-      { kind: "explain", title: "Explain", quote: sel.text },
+      { bookId: id, sectionIndex: sel.sectionIndex, sectionFraction: sel.sectionFraction, selection: sel.text, action },
+      { kind: "explain", title: READER_ACTIONS[action].label, quote: sel.text },
     );
   };
 
@@ -657,7 +658,7 @@ export function ReaderView({ id }: { id: string }) {
             setNoteDraft(null);
             setSelected(null);
           }}
-          onExplain={() => explain(selected)}
+          onExplain={(action) => explain(selected, action)}
           onListen={selected.noteId ? undefined : () => listenFrom(selected)}
           onAsk={() => {
             setChatQuote({ text: selected.text });

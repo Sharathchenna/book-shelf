@@ -1,6 +1,7 @@
 import "server-only";
 import { getFile, keys } from "../library";
 import type { LibraryBook } from "../library-types";
+import type { ReaderAction } from "../reader-actions";
 import { getJson } from "../storage";
 
 /**
@@ -42,6 +43,30 @@ Explain it briefly (under 120 words): what is happening or being said, plus anyt
 export const EXPLAIN_PAPER_SYSTEM = `You help someone reading a research paper. They selected a passage and asked what it means.
 
 Explain it briefly (under 150 words) for a smart reader outside the subfield: what the passage claims or does, what its notation and terms mean, and why it matters to the paper's argument. Text extracted from a PDF often garbles equations, so when an image of the selection is attached, read the math and symbols from the image. Ground the explanation in the paper text you are given; use general knowledge of the field for background. Write math in plain text or simple Unicode (x², Σ, ∂), not LaTeX. Plain prose, no headings; at most one short list if it truly helps.`;
+
+/**
+ * The other things a selected passage can be asked (lib/reader-actions.ts), each a short task on
+ * top of the same rules as Explain: brief, plain prose, only the text given, and for books
+ * nothing past where the reader is.
+ */
+export function actionSystem(action: Exclude<ReaderAction, "explain">, paper: boolean): string {
+  const what = paper ? "a research paper" : "a book";
+  const scope = paper
+    ? "Ground what you say in the paper text you are given."
+    : "Use only the book's text you are given, which ends where they are reading. Never reveal or hint at anything that happens later in the book, even if you know it well.";
+  const tasks: Record<Exclude<ReaderAction, "explain">, string> = {
+    define: `Define the word or phrase they selected as this author uses it here, in one or two sentences (under 60 words). Only if it is archaic, technical or used in an unusual sense, say so and give the plain modern equivalent. Never remark that a word is standard or common.`,
+    simplify: `Rewrite the passage they selected in plain, modern English that keeps its full meaning. Then add one short line on the point it makes. Under 120 words in all.`,
+    check: `Does the passage still hold up? Search the web for what is known now, then say in 3 to 5 sentences (under 130 words) what has held up, what has changed, and how confident you are. This is mostly outside the text, so say so. Name your sources in the sentences that use them. If the passage is opinion, fiction or a definition rather than a factual claim, say that in one line instead of searching.`,
+    connect: `Where else in the text you are given does the author take this up: develop it, support it, or complicate it? Give 2 to 4 pointers, one per line, each starting with "- " and naming the chapter or section, then one line on what happens there with a few quoted words. If the text you have never takes it up elsewhere, say so in one line.`,
+    counter: `Give the strongest objection or alternative reading a sharp critic would raise against the passage, in 2 or 3 sentences. Then one line on how the author might answer. Under 110 words in all.`,
+  };
+  return `You help someone reading ${what}. They selected a passage and asked for something about it.
+
+${tasks[action]}
+
+${scope} Plain prose, no headings or preamble. Write math in plain text or simple Unicode, not LaTeX.`;
+}
 
 export const RECAP_SYSTEM = `You write the "Previously…" recap a reader sees when they return to a book they are partway through.
 

@@ -77,7 +77,14 @@ export function AiCard({
   /** Distance from the right edge, to sit clear of the open chat. */
   right?: string;
 }) {
-  const lines = ai.kind === "recap" ? ai.text.split("\n").filter((l) => l.trim()) : null;
+  // Fact-check ends with the pages it cited; Related answers as a list.
+  const [body, sourceText] = ai.text.split("\n\nSources:\n");
+  const sources = (sourceText ?? "")
+    .split("\n")
+    .map((line) => line.replace(/^-\s*/, "").match(/^(.*)\s(https?:\/\/\S+)$/))
+    .filter((m): m is RegExpMatchArray => Boolean(m));
+  const listed = ai.kind === "recap" || /^\s*- /.test(body);
+  const lines = listed ? body.split("\n").filter((l) => l.trim()) : null;
 
   return (
     <aside
@@ -120,7 +127,19 @@ export function AiCard({
             ))}
           </ul>
         ) : (
-          <p className="text-[15px] leading-relaxed whitespace-pre-line">{ai.text}</p>
+          <p className="text-[15px] leading-relaxed whitespace-pre-line">{body}</p>
+        )}
+        {sources.length > 0 && (
+          <ul className="mt-3 space-y-1 border-t border-line pt-3 text-xs">
+            {sources.map(([, title, url]) => (
+              <li key={url} className="truncate">
+                <a href={url} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
+                  {title}
+                </a>{" "}
+                <span className="text-muted">{new URL(url).hostname.replace(/^www\./, "")}</span>
+              </li>
+            ))}
+          </ul>
         )}
 
         {ai.status === "done" && onSaveNote && (
@@ -129,7 +148,9 @@ export function AiCard({
           </button>
         )}
         <p className="mt-4 text-[11px] text-muted">
-          Claude Haiku, using only the pages you&apos;ve read. Check anything important.
+          {sources.length
+            ? "Claude Haiku, with a web search. Check anything important."
+            : "Claude Haiku, using only the pages you've read. Check anything important."}
         </p>
       </div>
     </aside>
