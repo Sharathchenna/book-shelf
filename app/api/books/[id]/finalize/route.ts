@@ -1,4 +1,5 @@
 import { requireOwner } from "@/lib/auth/session";
+import { readableClip } from "@/lib/clippings";
 import { getClipping, getShelf } from "@/lib/data";
 import { parseEpub } from "@/lib/epub/parse";
 import { keys, matchShelfItem, putFile, validId } from "@/lib/library";
@@ -54,17 +55,17 @@ async function finalizeEpub(id: string, body: Record<string, unknown>, shelfItem
   }
   await putJson(keys.text(id), parsed.sections.map((s) => s.text));
 
-  // An arXiv paper converted to an EPUB in the browser (see arxiv-epub.ts), or an X Article (x-article-epub.ts).
+  // An arXiv paper converted to an EPUB in the browser (see arxiv-epub.ts), or an article (x-article-epub.ts).
   const clip = typeof body.paperId === "string" ? await getClipping(body.paperId) : null;
   const paper = clip?.kind === "paper" ? clip : undefined;
   const fromClip = typeof body.clipId === "string" ? await getClipping(body.clipId) : null;
-  const article = fromClip?.xArticle ? fromClip : undefined;
+  const article = fromClip && readableClip(fromClip) ? fromClip : undefined;
 
   return addToIndex({
     id,
     format: "epub",
     title: paper?.title ?? article?.title ?? parsed.title,
-    author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : (article?.author ?? parsed.author),
+    author: paper?.paper?.authors.length ? authorLine(paper.paper.authors) : (article?.author ?? (parsed.author || article?.source) ?? ""),
     paperId: paper?.id,
     clipId: article?.id,
     build: (paper || article) && typeof body.build === "number" ? body.build : undefined,

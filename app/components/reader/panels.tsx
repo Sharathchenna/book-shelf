@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Brief, BriefPoint, StoredBrief } from "@/lib/brief-types";
 import type { Highlight } from "@/lib/library-types";
 import {
   FONTS,
@@ -264,5 +265,81 @@ function Toggle({ on, onClick, className = "", children }: { on: boolean; onClic
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The brief on a paper or article (lib/ai/brief.ts): the gist, its load-bearing claims and its
+ * caveats, each with the section that shows it. Written the first time it's opened, then kept.
+ */
+export function BriefPanel({ bookId, sectionLabel, onGo }: { bookId: string; sectionLabel: (section: number) => string; onGo: (section: number) => void }) {
+  const [state, setState] = useState<{ status: "loading" | "writing" | "ready" | "error"; brief?: Brief; error?: string }>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    const set = (next: typeof state) => current && setState(next);
+    void (async () => {
+      const stored = await fetch(`/api/books/${bookId}/brief`).catch(() => null);
+      if (stored?.ok) return set({ status: "ready", brief: ((await stored.json()) as StoredBrief).brief });
+      set({ status: "writing" });
+      const res = await fetch(`/api/books/${bookId}/brief`, { method: "POST" }).catch(() => null);
+      const data = (await res?.json().catch(() => ({}))) as Partial<StoredBrief> & { error?: string };
+      if (res?.ok && data.brief) set({ status: "ready", brief: data.brief });
+      else set({ status: "error", error: data?.error ?? "Couldn't reach the server." });
+    })();
+    return () => {
+      current = false;
+    };
+  }, [bookId, attempt]);
+
+  if (state.status !== "ready" || !state.brief) {
+    return (
+      <div className="px-2 pt-2">
+        {state.status === "error" ? (
+          <>
+            <p className="text-sm text-muted">{state.error}</p>
+            <button onClick={() => setAttempt((a) => a + 1)} className="pill mt-3 text-sm">
+              Try again
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted">{state.status === "writing" ? "Reading the whole text and checking its numbers… about half a minute." : "Opening…"}</p>
+            <div className="mt-4 space-y-2" aria-hidden>
+              <div className="h-3 w-11/12 animate-pulse rounded bg-chip" />
+              <div className="h-3 w-9/12 animate-pulse rounded bg-chip" />
+              <div className="h-3 w-10/12 animate-pulse rounded bg-chip" />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const { brief } = state;
+  const point = (p: BriefPoint, i: number) => (
+    <li key={i} className="rounded-2xl px-2 py-2">
+      <p className="text-[15px] leading-relaxed">{p.text}</p>
+      {p.section !== undefined && (
+        <button onClick={() => onGo(p.section!)} className="mt-1 max-w-full truncate text-xs text-accent hover:underline">
+          {sectionLabel(p.section)} →
+        </button>
+      )}
+    </li>
+  );
+  return (
+    <div className="px-2">
+      <p className="px-2 font-serif text-lg leading-snug text-balance">{brief.gist}</p>
+      <h3 className="mt-5 px-2 text-xs font-medium tracking-[0.14em] text-muted uppercase">Claims</h3>
+      <ol className="mt-1">{brief.claims.map(point)}</ol>
+      {brief.caveats.length > 0 && (
+        <>
+          <h3 className="mt-4 px-2 text-xs font-medium tracking-[0.14em] text-muted uppercase">Keep in mind</h3>
+          <ul className="mt-1">{brief.caveats.map(point)}</ul>
+        </>
+      )}
+      <p className="mt-5 px-2 text-[11px] text-muted">Claude Haiku, from the whole text, with numbers taken from its tables. Check anything important.</p>
+    </div>
   );
 }

@@ -60,7 +60,7 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/books/[i
   await removeFile(id);
   const storage = getStorage();
   await Promise.all(
-    [keys.file(book), keys.text(id), book.coverKey, ...narration]
+    [keys.file(book), keys.text(id), keys.brief(id), book.coverKey, ...narration]
       .filter((key): key is string => Boolean(key))
       .map((key) => storage.delete(key)),
   );

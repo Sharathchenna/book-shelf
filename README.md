@@ -299,7 +299,7 @@ Open a book's card and choose **Add EPUB or PDF**. The file uploads straight to 
 | Anywhere | `⌘K` / `Ctrl+K` site search |
 | Library | `/` searches the shelf, `←`/`→` walk it, `Esc` puts a book back |
 | Books | `/` focuses Ask, `R` opens a random unread book |
-| Reader | `←`/`→` turn pages, `T` contents, `N` notes, `/` search, `A` settings, `C` chat, `L` listen, `F` fullscreen, `Esc` closes things |
+| Reader | `←`/`→` turn pages, `T` contents, `N` notes, `B` brief (papers and articles), `/` search, `A` settings, `C` chat, `L` listen, `F` fullscreen, `Esc` closes things |
 | PDFs | `+` / `-` / `0` zoom in, out and fit |
 
 ## Search
@@ -469,6 +469,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
   - **Counterpoint:** the strongest objection a sharp critic would raise, and how the author might answer.
 
   Each answer can be saved as a note on the passage, like Explain's.
+- **Brief:** `B`, or the bookmark-list button, in a paper or article: the gist in two sentences, three to five load-bearing claims and up to three caveats (scope, standing, what it concedes, where its headline outruns its evidence), each linked to the section that shows it (`lib/ai/brief.ts`, Gloss's rules). Haiku reads the whole text with some thinking, takes numbers from the tables rather than the abstract, and makes comparisons only as strong as the evidence. Written the first time it's opened (about 20 seconds, under a cent) and kept in storage (`brief/<id>.json`). Books don't get one: it would give the ending away.
 - **Recap:** **Previously…** in a book, or **Where you left off** in a paper. It's offered automatically when you return after a few days.
 - **Chat:** `C`, or the speech-bubble button, opens a panel beside the page.
   - **What it reads:** a paper's whole text, but a book's only up to your page, plus your highlights.
@@ -546,7 +547,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `lib/storage.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2), EPUB parsing, PDF finalize, paper import and the arXiv proxies |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
 | `app/reader/`, `app/components/reader/` | The readers: EPUB (foliate-js), PDF (pdf.js), arXiv-to-EPUB, panels, chat |
-| `app/api/reader/`, `lib/ai/reader.ts` | Explain, Recap and Chat |
+| `app/api/reader/`, `lib/ai/reader.ts`, `lib/reader-actions.ts` | Explain and the rest of the selection actions, Recap and Chat |
+| `lib/ai/brief.ts`, `lib/brief-types.ts`, `app/api/books/[id]/brief/` | The brief on a paper or article |
 | `app/components/reader/{narrator,narrator.worker,speech}.ts`, `listen-bar.tsx`, `app/api/books/[id]/audio/` | Listening: the text read aloud, Kokoro in a worker, saved chapters |
 | `lib/voices.ts`, `lib/fish.ts` | The narrator's voices, and Fish Audio's |
 | `narrator-server/`, `lib/narrator.ts`, `app/api/narrate/`, `app/api/books/[id]/narrate/` | Listening on a GPU server: Kokoro on CUDA behind a Cloudflare Tunnel (Workers VPC) |

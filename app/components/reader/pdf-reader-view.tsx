@@ -8,7 +8,7 @@ import { AiCard, useAiStream } from "./ai-card";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
-import { Drawer, NotesPanel, TocPanel } from "./panels";
+import { BriefPanel, Drawer, NotesPanel, TocPanel } from "./panels";
 import { flatOutline, loadPdfjs, openPdf, outline, pageText, sectionAt, toBase64Jpeg, type PDFDocumentProxy } from "./pdf";
 import "./pdf.css";
 
@@ -33,7 +33,7 @@ const PAGE_LOOK: Record<ThemeName, { filter: string; blank: string; ink: "multip
   night: { filter: "invert(0.88) hue-rotate(180deg)", blank: "#1f1f1f", ink: "screen" },
 };
 
-type Panel = "toc" | "notes" | "search" | "settings" | null;
+type Panel = "toc" | "notes" | "search" | "settings" | "brief" | null;
 type Rect = [number, number, number, number];
 type PdfSelected = Selected & { page: number; rects: Rect[] };
 type Size = { w: number; h: number };
@@ -109,6 +109,8 @@ export function PdfReaderView({ id }: { id: string }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [book, setBook] = useState<LibraryBook | null>(null);
+  /** Papers and articles get a brief; a book's would give its ending away. */
+  const briefable = Boolean(book?.paperId || book?.clipId);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [sizes, setSizes] = useState<Size[]>([]);
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -319,6 +321,7 @@ export function PdfReaderView({ id }: { id: string }) {
       t: () => setPanel((p) => (p === "toc" ? null : "toc")),
       c: () => setChat((c) => !c),
       n: () => setPanel((p) => (p === "notes" ? null : "notes")),
+      b: () => briefable && setPanel((p) => (p === "brief" ? null : "brief")),
       "/": () => setPanel("search"),
       a: () => setPanel((p) => (p === "settings" ? null : "settings")),
       "+": () => zoomBy(1),
@@ -581,6 +584,11 @@ export function PdfReaderView({ id }: { id: string }) {
         <BarButton label="Search (/)" active={panel === "search"} onClick={() => setPanel(panel === "search" ? null : "search")}>
           <Icon d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM16 16l4 4" />
         </BarButton>
+        {briefable && (
+          <BarButton label="Brief (B)" active={panel === "brief"} onClick={() => setPanel(panel === "brief" ? null : "brief")}>
+            <Icon d="M7 4h10a1 1 0 0 1 1 1v15l-6-3-6 3V5a1 1 0 0 1 1-1zM9 9h6M9 12h4" />
+          </BarButton>
+        )}
         <BarButton label="Notes (N)" active={panel === "notes"} onClick={() => setPanel(panel === "notes" ? null : "notes")}>
           <Icon d="M6 4h12v16l-6-4-6 4z" />
         </BarButton>
@@ -660,6 +668,18 @@ export function PdfReaderView({ id }: { id: string }) {
             )}
           </Drawer>
         </div>
+      )}
+      {panel === "brief" && book && (
+        <Drawer title="Brief" onClose={() => setPanel(null)}>
+          <BriefPanel
+            bookId={book.id}
+            sectionLabel={(i) => book.sections[i]?.title || `Page ${i + 1}`}
+            onGo={(i) => {
+                setPanel(null);
+                goToPage(i + 1);
+              }}
+          />
+        </Drawer>
       )}
       {panel === "notes" && (
         <div data-reader-ui>

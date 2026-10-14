@@ -7,6 +7,7 @@ import type { Item } from "./types";
 export const keys = {
   file: (book: Pick<LibraryBook, "id" | "format">) => `books/${book.id}.${book.format ?? "epub"}`,
   text: (id: string) => `text/${id}.json`,
+  brief: (id: string) => `brief/${id}.json`,
   cover: (id: string, ext: string) => `covers/${id}.${ext}`,
   audio: (id: string, voice: string, section: number) => `audio/${id}/${voice}/${section}.mp3`,
 };
