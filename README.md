@@ -367,7 +367,8 @@ This only runs when there is something to narrow: below the limits above, Jev re
   - the same four themes (Night inverts the page but keeps figures' colours);
   - contents from the PDF's bookmarks, and selectable text.
 
-  The browser extracts the text when you add a PDF, so search and the AI work on PDFs too. Scanned PDFs without a text layer can only be viewed.
+  The browser extracts the text when you add a PDF, so search and the AI work on PDFs too.
+- **Scanned PDFs.** Pages without a text layer (scans, or garbled glyphs) can't be read by the AI from the PDF itself. When a PDF has some, the reader offers to read them: each page is rendered in the browser and Claude Haiku transcribes the picture (`lib/ai/ocr.ts`, `app/components/reader/scanned.ts`), three at a time, about $0.0004 a page (the offer says what the whole book would cost). Their text is saved with the book's, so Recap, Chat, the brief and Explain's context can read them. You still can't select or highlight text on a scanned page, and in-book search only finds the PDF's own text.
 - **Papers.** On `/papers`, signed in, a paper with a free PDF opens in the reader, and a small link keeps the source. arXiv papers become ebooks: the browser converts arXiv's HTML version into an EPUB (`app/components/reader/arxiv-epub.ts`). The EPUB has:
   - sections as chapters, and a nested table of contents;
   - real MathML equations;
@@ -565,6 +566,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login |
 | `lib/storage.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2), EPUB parsing, PDF finalize, paper import and the arXiv proxies |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |
+| `lib/ai/ocr.ts`, `app/api/books/[id]/{ocr,text}/`, `app/components/reader/scanned.ts` | Reading scanned PDF pages with Haiku |
 | `app/reader/`, `app/components/reader/` | The readers: EPUB (foliate-js), PDF (pdf.js), arXiv-to-EPUB, panels, chat |
 | `app/api/reader/`, `lib/ai/reader.ts`, `lib/reader-actions.ts` | Explain and the rest of the selection actions, Recap and Chat |
 | `lib/ai/brief.ts`, `lib/brief-types.ts`, `app/api/books/[id]/brief/` | The brief on a paper or article |

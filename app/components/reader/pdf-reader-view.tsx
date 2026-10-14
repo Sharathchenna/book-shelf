@@ -10,6 +10,7 @@ import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
 import { BriefPanel, Drawer, NotesPanel, TocPanel } from "./panels";
+import { COST_PER_PAGE, readScannedPages, scannedPages } from "./scanned";
 import { flatOutline, loadPdfjs, openPdf, outline, pageText, sectionAt, toBase64Jpeg, type PDFDocumentProxy } from "./pdf";
 import "./pdf.css";
 
@@ -126,6 +127,10 @@ export function PdfReaderView({ id }: { id: string }) {
   const [selected, setSelected] = useState<PdfSelected | null>(null);
   const [noteDraft, setNoteDraft] = useState<string | null>(null);
   const [offerRecap, setOfferRecap] = useState(false);
+  // Scanned pages (no text layer), and reading them with Haiku: offered once per visit.
+  const [scan, setScan] = useState<{ state: "reading" | "done" | "dismissed"; done: number; total: number } | null>(null);
+  const scanAbort = useRef<AbortController | null>(null);
+  const scanned = useMemo(() => (book ? scannedPages(book.sections) : []), [book]);
   const [scrub, setScrub] = useState<number | null>(null);
   const { ai, run: runAi, close: closeAi } = useAiStream();
   const [explained, setExplained] = useState<PdfSelected | null>(null);
@@ -286,6 +291,20 @@ export function PdfReaderView({ id }: { id: string }) {
       },
       { kind: "explain", title: READER_ACTIONS[action].label, quote: sel.text },
     );
+  };
+
+  const readScans = () => {
+    if (!doc || !book) return;
+    const abort = new AbortController();
+    scanAbort.current = abort;
+    setScan({ state: "reading", done: 0, total: scanned.length });
+    void readScannedPages(doc, book.id, scanned, (done) => setScan((s) => (s?.state === "reading" ? { ...s, done } : s)), abort.signal).then(async (done) => {
+      if (abort.signal.aborted) return;
+      // The book's pages now say how much text each has, so the offer doesn't come back.
+      const fresh = await fetch(`/api/books/${book.id}`).then((r) => (r.ok ? (r.json() as Promise<{ book?: LibraryBook }>) : null)).catch(() => null);
+      if (fresh?.book) setBook(fresh.book);
+      setScan({ state: "done", done, total: scanned.length });
+    });
   };
 
   const recap = () => {
@@ -750,6 +769,33 @@ export function PdfReaderView({ id }: { id: string }) {
             }}
             onRemove={selected.noteId ? () => removeHighlight(selected.noteId!) : undefined}
           />
+        </div>
+      )}
+
+      {(scanned.length > 0 || scan?.state === "done") && scan?.state !== "dismissed" && !offerRecap && !ai && status === "ready" && (
+        <div data-reader-ui className="reader-surface reader-pop fixed bottom-24 left-1/2 z-50 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-[28px] py-2 pr-2 pl-5">
+          <p className="min-w-0 text-sm leading-snug">
+            {scan?.state === "reading"
+              ? `Reading scanned pages… ${scan.done} of ${scan.total}`
+              : scan?.state === "done"
+                ? `Read ${scan.done} scanned ${scan.done === 1 ? "page" : "pages"}. The AI can read ${scan.done === 1 ? "it" : "them"} now.`
+                : `${scanned.length === book?.sections.length ? "This PDF is scanned, so the AI can't read it" : `${scanned.length} ${scanned.length === 1 ? "page is" : "pages are"} scanned, so the AI can't read ${scanned.length === 1 ? "it" : "them"}`}. Read with Haiku? (about $${Math.max(0.01, scanned.length * COST_PER_PAGE).toFixed(2)})`}
+          </p>
+          {!scan && (
+            <button onClick={readScans} className="rounded-full bg-ink px-4 py-1.5 text-sm font-medium whitespace-nowrap text-ink-fg">
+              Read {scanned.length === 1 ? "it" : "them"}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              scanAbort.current?.abort();
+              setScan((s) => ({ state: "dismissed", done: s?.done ?? 0, total: s?.total ?? 0 }));
+            }}
+            aria-label={scan?.state === "reading" ? "Stop" : "Close"}
+            className="grid size-8 place-items-center rounded-full hover:bg-chip"
+          >
+            ×
+          </button>
         </div>
       )}
 
