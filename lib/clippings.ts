@@ -1,4 +1,4 @@
-import type { ClipKind } from "./types";
+import type { Clip, ClipKind } from "./types";
 
 // Labels and paths for the kinds of clipping; the clippings themselves come from lib/data.ts (D1).
 
@@ -16,3 +16,6 @@ export const CLIP_LABEL: Record<ClipKind, string> = {
 export const inPageOrder = (present: ClipKind[]) => CLIP_KINDS.filter((kind) => present.includes(kind));
 
 export const clipPath = (kind: ClipKind) => `/${CLIP_LABEL[kind].toLowerCase()}`;
+
+/** Clippings the owner reads in the site's reader as an ebook: X Articles, and articles and newsletter issues from anywhere. */
+export const readableClip = (clip: Pick<Clip, "kind" | "xArticle">) => Boolean(clip.xArticle) || clip.kind === "article" || clip.kind === "newsletter";

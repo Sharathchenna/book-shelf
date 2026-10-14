@@ -1,10 +1,12 @@
 /**
- * Turns a clipped X Article into an EPUB, so it reads in the EPUB reader like a book: themes,
- * fonts, highlights and notes, and read aloud. X's editor content (lib/x-article-types.ts) maps
- * onto plain XHTML: a chapter per top-level heading, the title, author and cover on the first
- * page, and the pictures fetched through the site (the reader's pages can't load them from X).
+ * Turns a clipped article (an X Article, or any other, read whole by lib/web-article.ts) into an
+ * EPUB, so it reads in the EPUB reader like a book: themes, fonts, highlights and notes, and read
+ * aloud. Its blocks (lib/x-article-types.ts) map onto plain XHTML: a chapter per top-level
+ * heading, the title, author and cover on the first page, and the pictures fetched through the
+ * site (the reader's pages can't load them from other sites).
  */
 import type { XArticle, XArticleBlock } from "@/lib/x-article-types";
+import { webArticle, type WebPage } from "./web-article";
 
 type Chapter = { file: string; title: string; html: string[]; headings: { id: string; label: string }[] };
 type Image = { path: string; data: Blob; cover?: boolean };
@@ -13,11 +15,16 @@ const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_IMAGES = 150;
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
 
-export async function buildXArticleEpub(clipId: string, onProgress: (label: string) => void): Promise<Blob> {
+export async function buildArticleEpub(clipId: string, onProgress: (label: string) => void): Promise<Blob> {
   onProgress("Fetching the article…");
   const res = await fetch(`/api/books/clips/source?clipId=${encodeURIComponent(clipId)}`);
-  const article = (await res.json().catch(() => ({}))) as XArticle & { error?: string };
-  if (!res.ok || !article.blocks) throw new Error(article.error ?? "Couldn't fetch the article.");
+  const source = (await res.json().catch(() => ({}))) as (XArticle | WebPage) & { error?: string };
+  if (!res.ok) throw new Error(source.error ?? "Couldn't fetch the article.");
+  // A web page is read here; an X Article arrives as blocks.
+  if ("html" in source) onProgress("Reading the page…");
+  const article = "html" in source ? webArticle(source) : source;
+  if ("error" in article) throw new Error(article.error);
+  if (!article.blocks) throw new Error("Couldn't fetch the article.");
 
   // ---- pictures, fetched first so the pages can point at them ----
   const sources = [article.cover, ...article.blocks.flatMap((b) => (b.media ?? []).map((m) => m.src))].filter((s): s is string => Boolean(s));
@@ -99,7 +106,9 @@ function titlePage(article: XArticle, pathOf: Map<string, string>): string {
     `<header class="title-page">`,
     cover ? `<div class="cover"><img src="${cover}" alt=""/></div>` : "",
     `<h1>${esc(article.title)}</h1>`,
-    `<p class="byline">${esc(article.author.name)} <a href="https://x.com/${esc(article.author.handle)}">@${esc(article.author.handle)}</a>${date ? ` · ${esc(date)}` : ""}</p>`,
+    article.author.handle
+      ? `<p class="byline">${esc(article.author.name)} <a href="https://x.com/${esc(article.author.handle)}">@${esc(article.author.handle)}</a>${date ? ` · ${esc(date)}` : ""}</p>`
+      : `<p class="byline">${esc([article.author.name, article.site !== article.author.name ? article.site : "", date].filter(Boolean).join(" · "))} <a href="${esc(article.url)}">↗</a></p>`,
     `</header>`,
   ].join("");
 }
@@ -110,7 +119,8 @@ function blockHtml(block: XArticleBlock, chapter: Chapter, pathOf: Map<string, s
     case "header-two":
     case "header-three": {
       const level = { "header-one": 2, "header-two": 3, "header-three": 4 }[block.type];
-      const id = `h${chapter.file.replace(/\D/g, "")}-${chapter.headings.length + 1}`;
+      // Unique in the chapter: its place among the chapter's blocks.
+      const id = `h${chapter.file.replace(/\D/g, "")}-${chapter.html.length}`;
       // The heading a chapter starts with is the chapter's own title; the others go in the contents under it.
       if (block.text.trim() && block.text.trim() !== chapter.title) chapter.headings.push({ id, label: block.text.trim() });
       return `<h${level} id="${id}">${inline(block)}</h${level}>`;
@@ -132,6 +142,11 @@ function blockHtml(block: XArticleBlock, chapter: Chapter, pathOf: Map<string, s
       }
       if (block.code !== undefined) return `<pre><code>${esc(block.code.replace(/^```[^\n]*\n?/, "").replace(/\n?```\s*$/, ""))}</code></pre>`;
       if (block.divider) return `<hr/>`;
+      if (block.table) {
+        const [head, ...rows] = block.table;
+        const row = (cells: string[], tag: string) => `<tr>${cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join("")}</tr>`;
+        return `<table><thead>${row(head, "th")}</thead><tbody>${rows.map((r) => row(r, "td")).join("")}</tbody></table>`;
+      }
       return "";
     default:
       return block.text.trim() ? `<p>${inline(block)}</p>` : "";
@@ -211,7 +226,7 @@ function opf(article: XArticle, chapters: Chapter[], images: Image[]): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" xml:lang="en">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-<dc:identifier id="id">urn:x-article:${esc(article.tweetId)}</dc:identifier>
+<dc:identifier id="id">urn:article:${esc(article.id)}</dc:identifier>
 <dc:title>${esc(article.title)}</dc:title>
 <dc:creator id="a0">${esc(article.author.name)}</dc:creator>
 <dc:language>en</dc:language>
@@ -257,5 +272,7 @@ const STYLE = `
 .xarticle code { font-size: .9em; }
 .xarticle ul, .xarticle ol { padding-left: 1.4em; }
 .xarticle li { margin: .25em 0; }
+.xarticle table { border-collapse: collapse; font-size: .85em; margin: 1.2em 0; width: 100%; }
+.xarticle th, .xarticle td { border: 1px solid rgba(127,127,127,.35); padding: .3em .5em; text-align: left; vertical-align: top; }
 .xarticle hr { border: 0; border-top: 1px solid currentColor; opacity: .3; margin: 2em 0; }
 `;

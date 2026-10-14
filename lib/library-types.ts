@@ -8,8 +8,8 @@ export type LibrarySection = { title: string; chars: number };
  */
 export const ARXIV_EPUB_BUILD = 2;
 
-/** The version of the X-Article-to-EPUB conversion (x-article-epub.ts); older ones are rebuilt when opened. */
-export const X_ARTICLE_EPUB_BUILD = 1;
+/** The version of the article-to-EPUB conversion (x-article-epub.ts: X Articles and web articles); older ones are rebuilt when opened. */
+export const ARTICLE_EPUB_BUILD = 1;
 
 export type BookFormat = "epub" | "pdf";
 
@@ -21,9 +21,9 @@ export type LibraryBook = {
   author: string;
   /** For a PDF of a clipped paper: the clipping's id. */
   paperId?: string;
-  /** For an ebook made from another clipping (an X Article): the clipping's id. */
+  /** For an ebook made from another clipping (an article): the clipping's id. */
   clipId?: string;
-  /** For an ebook made from a clipping: the ARXIV_EPUB_BUILD or X_ARTICLE_EPUB_BUILD that made it (absent: 1). */
+  /** For an ebook made from a clipping: the ARXIV_EPUB_BUILD or ARTICLE_EPUB_BUILD that made it (absent: 1). */
   build?: number;
   /** The Goodreads shelf item this EPUB belongs to, when one matched. */
   shelfItemId?: string;

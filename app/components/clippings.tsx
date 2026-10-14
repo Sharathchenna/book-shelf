@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { readableClip } from "@/lib/clippings";
 import { fallbackColor, textOn } from "@/lib/color";
 import type { Clip, ClipKind } from "@/lib/types";
 import { useOwner } from "./use-owner";
@@ -42,7 +43,7 @@ export function ClipGrid({ kind, items }: { kind: ClipKind; items: Clip[] }) {
     <ul className={list}>
       {items.map((clip) => {
         // For the owner, a paper with a free PDF or an X Article opens in the site's reader; the source is a small link.
-        const reader = !owner ? null : clip.paper?.pdf ? `/reader/paper/${encodeURIComponent(clip.id)}` : clip.xArticle ? `/reader/clip/${encodeURIComponent(clip.id)}` : null;
+        const reader = !owner ? null : clip.paper?.pdf ? `/reader/paper/${encodeURIComponent(clip.id)}` : readableClip(clip) ? `/reader/clip/${encodeURIComponent(clip.id)}` : null;
         const readable = Boolean(reader);
         const cardClass =
           "glass block overflow-hidden rounded-3xl transition-transform duration-300 hover:-translate-y-1 focus-visible:-translate-y-1";

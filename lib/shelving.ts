@@ -2,6 +2,7 @@ import "server-only";
 import { shelve, SHELVE_BATCH, type Shelvable } from "./ai/shelver";
 import { haikuEnabled } from "./ai/haiku";
 import { topicOf, type ShelfBook, type Shelving, type TopicKey } from "./bookcase";
+import { readableClip } from "./clippings";
 import { getClippings, getShelf } from "./data";
 import { batched, db, records } from "./db";
 import { listFiles, shelfItemFor } from "./library";
@@ -192,10 +193,10 @@ export async function shelfBooks(): Promise<{ books: ShelfBook[]; unsorted: numb
         measured: false,
         highlights: 0,
         added: Date.parse(clip.saved) || 0,
-        image: image && !/\/blank\.(jpe?g|png|gif)/i.test(image) ? image : undefined,
+        image: image && !/\/blank\.(jpe?g|png|gif)\b/i.test(image) ? image : undefined,
         agent: Boolean(clip.via),
         fileId: file?.id,
-        readable: clip.kind === "paper" ? Boolean(clip.paper?.pdf || clip.paper?.arxiv) : clip.kind !== "tweet" || Boolean(clip.xArticle),
+        readable: clip.kind === "paper" ? Boolean(clip.paper?.pdf) : readableClip(clip),
       };
     }),
   ];

@@ -157,7 +157,7 @@ export async function fetchXArticle(tweetId: string): Promise<XArticle | null> {
       ? new Date(tweet.legacy.created_at)
       : undefined;
   return {
-    tweetId,
+    id: tweetId,
     url: `https://x.com/${handle}/status/${tweetId}`,
     title: raw.title,
     preview: raw.preview_text ?? "",

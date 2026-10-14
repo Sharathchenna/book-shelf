@@ -1,8 +1,9 @@
 /**
- * An X Article (a long post with a title, headings and pictures), as the site keeps it: X's
- * editor content (Draft.js blocks) with its pictures and the posts it embeds resolved. Shared by
- * the server, which fetches it (lib/x-article.ts), and the reader, which makes an ebook of it
- * (app/components/reader/x-article-epub.ts).
+ * An article to make an ebook of: an X Article (a long post with a title, headings and
+ * pictures) as X's editor content (Draft.js blocks) with its pictures and the posts it embeds
+ * resolved, or any other clipped article in the same blocks (lib/web-article.ts). Shared by the
+ * server, which fetches it (lib/x-article.ts, lib/web-article.ts), and the reader, which makes
+ * an ebook of it (app/components/reader/x-article-epub.ts).
  */
 
 export type XArticleBlock = {
@@ -19,21 +20,28 @@ export type XArticleBlock = {
   post?: XArticlePost;
   code?: string;
   divider?: boolean;
+  /** A data table's cells, row by row (web articles). */
+  table?: string[][];
 };
+
+export type ArticleBlock = XArticleBlock;
 
 /** A post the article embeds. */
 export type XArticlePost = { url: string; name?: string; handle?: string; text?: string };
 
 export type XArticle = {
-  /** The post the article was published as. */
-  tweetId: string;
+  /** The post an X Article was published as, or a web article's clipping id. */
+  id: string;
   url: string;
   title: string;
   preview: string;
   cover?: string;
   /** ISO date. */
   published?: string;
-  author: { name: string; handle: string; avatar?: string };
+  /** `handle` on X. */
+  author: { name: string; handle?: string; avatar?: string };
+  /** A web article's site or publication. */
+  site?: string;
   blocks: XArticleBlock[];
 };
 

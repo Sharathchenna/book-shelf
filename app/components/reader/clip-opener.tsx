@@ -3,14 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { X_ARTICLE_EPUB_BUILD } from "@/lib/library-types";
+import { ARTICLE_EPUB_BUILD } from "@/lib/library-types";
 import { OpeningBook } from "./chrome";
 
 type Opened = { id?: string; ready?: boolean; build?: "epub"; replaces?: string[]; error?: string };
 
 /**
- * Gets a clipped X Article into the library and opens it: the first time, the article is fetched
- * and made into an ebook here (x-article-epub.ts) and saved like an upload. After that it opens at once.
+ * Gets a clipped article (an X Article, or any other) into the library and opens it: the first
+ * time, the article is fetched and made into an ebook here (x-article-epub.ts) and saved like an
+ * upload. After that it opens at once.
  */
 export function ClipOpener({ clipId }: { clipId: string }) {
   const router = useRouter();
@@ -32,13 +33,13 @@ export function ClipOpener({ clipId }: { clipId: string }) {
         if (!cancelled) router.replace(`/reader/${data.id}`);
         return;
       }
-      const { buildXArticleEpub } = await import("./x-article-epub");
-      const epub = await buildXArticleEpub(clipId, show);
+      const { buildArticleEpub } = await import("./x-article-epub");
+      const epub = await buildArticleEpub(clipId, show);
       const { uploadBook } = await import("./upload");
       const id = await uploadBook(
         new File([epub], `${clipId}.epub`, { type: "application/epub+zip" }),
         (patch) => show(patch.stage === "uploading" ? `Saving to your library… ${Math.round((patch.progress ?? 0) * 100)}%` : "Reading it…"),
-        { clipId, build: X_ARTICLE_EPUB_BUILD },
+        { clipId, build: ARTICLE_EPUB_BUILD },
       );
       // A copy made by an older conversion is no longer needed.
       await Promise.all((data.replaces ?? []).map((old) => fetch(`/api/books/${old}`, { method: "DELETE" }).catch(() => {})));

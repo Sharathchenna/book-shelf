@@ -3,8 +3,9 @@ import { requireOwner } from "@/lib/auth/session";
 const MAX_BYTES = 20 * 1024 * 1024;
 
 /**
- * One picture from an X Article, for the ebook the browser makes of it (the reader's pages can't
- * load images from other sites). Only X's image host is fetched.
+ * One picture from a clipped article, for the ebook the browser makes of it (the reader's pages
+ * can't load images from other sites). Only https, only images, and only public addresses (the
+ * Worker's `global_fetch_strictly_public` flag keeps it off private networks).
  */
 export async function GET(request: Request) {
   const denied = await requireOwner();
@@ -15,9 +16,9 @@ export async function GET(request: Request) {
   } catch {
     return Response.json({ error: "Bad URL." }, { status: 400 });
   }
-  if (url.protocol !== "https:" || url.host !== "pbs.twimg.com") return Response.json({ error: "Not an X picture." }, { status: 403 });
+  if (url.protocol !== "https:") return Response.json({ error: "Only https pictures." }, { status: 403 });
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+  const res = await fetch(url, { headers: { Accept: "image/*" }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
   if (!res?.ok) return new Response(null, { status: res?.status === 404 ? 404 : 502 });
   const type = res.headers.get("content-type") ?? "application/octet-stream";
   if (!type.startsWith("image/")) return new Response(null, { status: 415 });
