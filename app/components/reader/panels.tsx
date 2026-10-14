@@ -56,12 +56,16 @@ export function NotesPanel({
   sectionTitle,
   onGo,
   onDelete,
+  markdown,
 }: {
   notes: Highlight[];
   sectionTitle: (index: number) => string;
   onGo: (cfi: string) => void;
   onDelete: (id: string) => void;
+  /** The highlights and notes as Markdown (lib/export.ts), for Copy. */
+  markdown?: () => string;
 }) {
+  const [copied, setCopied] = useState(false);
   if (!notes.length) {
     return (
       <p className="px-3 text-sm leading-relaxed text-muted">
@@ -70,23 +74,37 @@ export function NotesPanel({
     );
   }
   const sorted = notes.toSorted((a, b) => a.sectionIndex - b.sectionIndex || a.createdAt.localeCompare(b.createdAt));
+  const copy = () =>
+    void navigator.clipboard.writeText(markdown!()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    });
   return (
-    <ul className="space-y-2">
-      {sorted.map((n) => (
-        <li key={n.id} className="group rounded-2xl p-3 transition-colors hover:bg-chip">
-          <p className="text-[11px] tracking-[0.12em] text-muted uppercase">{sectionTitle(n.sectionIndex)}</p>
-          <button onClick={() => onGo(n.cfi)} className="mt-1.5 block w-full text-left">
-            <span className="font-serif text-[15px] leading-snug" style={{ boxShadow: `inset 0 -0.55em 0 ${HIGHLIGHT_HEX[n.color]}88` }}>
-              {n.text}
-            </span>
+    <>
+      {markdown && (
+        <div className="flex justify-end px-2 pb-2">
+          <button onClick={copy} className="pill text-xs" title="Highlights and notes in reading order, with front matter for Obsidian">
+            {copied ? "Copied" : "Copy as Markdown"}
           </button>
-          {n.note && <p className="mt-2 border-l-2 border-line pl-3 text-sm text-muted">{n.note}</p>}
-          <button onClick={() => onDelete(n.id)} className="mt-2 text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg focus:opacity-100">
-            Remove
-          </button>
-        </li>
-      ))}
-    </ul>
+        </div>
+      )}
+      <ul className="space-y-2">
+        {sorted.map((n) => (
+          <li key={n.id} className="group rounded-2xl p-3 transition-colors hover:bg-chip">
+            <p className="text-[11px] tracking-[0.12em] text-muted uppercase">{sectionTitle(n.sectionIndex)}</p>
+            <button onClick={() => onGo(n.cfi)} className="mt-1.5 block w-full text-left">
+              <span className="font-serif text-[15px] leading-snug" style={{ boxShadow: `inset 0 -0.55em 0 ${HIGHLIGHT_HEX[n.color]}88` }}>
+                {n.text}
+              </span>
+            </button>
+            {n.note && <p className="mt-2 border-l-2 border-line pl-3 text-sm text-muted">{n.note}</p>}
+            <button onClick={() => onDelete(n.id)} className="mt-2 text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg focus:opacity-100">
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

@@ -6,6 +6,7 @@ import { hostOf, SORTS, sortBooks, TAGS, TOPIC, TOPICS, type ShelfBook as Book, 
 import { Glyph } from "./book";
 import { BookOpen, type BookActions, type Origin } from "./book-open";
 import { ChevronLeft, ChevronRight, LayoutGrid, LibraryIcon, Search, X } from "./icons";
+import { ExportNotes } from "./export-notes";
 import { Shelf } from "./shelf";
 import { TopicGrid, TopicPage } from "./topics";
 
@@ -227,6 +228,7 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
                   )}
                 </p>
               </div>
+              {isOwner && <ExportNotes />}
             </div>
             {isOwner && aside}
           </section>

@@ -372,6 +372,7 @@ This only runs when there is something to narrow: below the limits above, Jev re
   - **Where the text comes from:** X's public embeds only give an article's first lines, so `lib/x-article.ts` reads it whole from X's web API, as a logged-out visitor does (a guest token, then the post's GraphQL query).
   - **If X changes that API:** the query id in `lib/x-article.ts` stops working. Articles can still be saved, from vxtwitter's summary, but won't open; update the query id.
   - **Rebuilds:** the conversion is versioned like papers' (`ARTICLE_EPUB_BUILD`).
+- **Highlights as Markdown:** **Copy as Markdown** in a book's notes panel, or **Export highlights** on the library page for every book at once (a zip of one file per book, `lib/export.ts`): in reading order, under their chapter headings, with your notes and saved answers, and YAML front matter (title, author, type, source, tags) ready for an Obsidian vault. The browser writes the files; the site only reads the highlights.
 - **Both readers** have contents, in-book search, highlights with notes, and a scrubber with chapter ticks and minutes left in the chapter. Your position, highlights and notes are saved to D1 and follow you across devices.
 
 ## Listening
@@ -533,6 +534,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | --- | --- |
 | `app/page.tsx`, `app/components/bookcase/`, `lib/bookcase.ts`, `lib/shelving.ts`, `lib/ai/shelver.ts`, `app/api/shelving/`, `public/library/` | The library: the bookcase, topics, the book in your hands, and shelving by Haiku |
 | `lib/review.ts`, `app/api/review/`, `app/components/bookcase/daily-review.tsx` | Today, from your highlights: the daily review |
+| `lib/export.ts`, `app/api/export/`, `app/components/bookcase/export-notes.tsx` | Highlights and notes as Markdown, for Obsidian |
 | `app/books/page.tsx` | The books: spine marquee, Ask, Shelf Engine, profile, stats, insights, every cover |
 | `app/components/engine/` | The Shelf Engine animation |
 | `app/{articles,papers,newsletters,tweets}/`, `app/components/clippings.tsx`, `clip-page.tsx` | The clipping pages |

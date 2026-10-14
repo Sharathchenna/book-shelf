@@ -4,6 +4,7 @@ import Link from "next/link";
 import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
+import { notesMarkdown } from "@/lib/export";
 import { AiCard, useAiStream } from "./ai-card";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
@@ -694,6 +695,17 @@ export function PdfReaderView({ id }: { id: string }) {
                 setPanel(null);
               }}
               onDelete={removeHighlight}
+              markdown={() =>
+                notesMarkdown(
+                  {
+                    title: book?.title ?? "",
+                    author: book?.author,
+                    kind: book?.paperId ? "paper" : book?.clipId ? "article" : "book",
+                    sections: book?.sections.map((s, i) => s.title || `Page ${i + 1}`) ?? [],
+                  },
+                  notes,
+                )
+              }
             />
           </Drawer>
         </div>

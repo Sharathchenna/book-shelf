@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
+import { notesMarkdown } from "@/lib/export";
 import { AiCard, useAiStream } from "./ai-card";
 import {
   bookCss,
@@ -648,6 +649,17 @@ export function ReaderView({ id }: { id: string }) {
             sectionTitle={(i) => book?.sections[i]?.title ?? ""}
             onGo={go}
             onDelete={removeHighlight}
+            markdown={() =>
+              notesMarkdown(
+                {
+                  title: book?.title ?? "",
+                  author: book?.author,
+                  kind: book?.paperId ? "paper" : book?.clipId ? "article" : "book",
+                  sections: book?.sections.map((s) => s.title) ?? [],
+                },
+                notes,
+              )
+            }
           />
         </Drawer>
       )}
