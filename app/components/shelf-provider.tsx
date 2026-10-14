@@ -1,21 +1,14 @@
 "use client";
 
 import { createContext, use, useCallback, useEffect, useMemo, useState } from "react";
-import type { ColourFamily } from "@/lib/color";
 import type { Item } from "@/lib/types";
 import { BookDialog } from "./book-dialog";
 
 type ShelfContextValue = {
   items: Item[];
-  /** Text filter shared by the hero search box and the library filter. */
+  /** The bookcase's search text. */
   query: string;
   setQuery: (query: string) => void;
-  /** Library category filter; the catalog suggestions can set it too. */
-  category: string | null;
-  setCategory: (category: string | null) => void;
-  /** Library cover-colour filter, set from "Browse by colour". */
-  colour: ColourFamily | null;
-  setColour: (colour: ColourFamily | null) => void;
   /**
    * Opens a book (or closes the dialog with null). Pass the list it was opened from
    * (e.g. the filtered library) to let the dialog step through it with previous/next.
@@ -46,8 +39,6 @@ export function useShelf() {
 
 export function ShelfProvider({ items, children }: { items: Item[]; children: React.ReactNode }) {
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<string | null>(null);
-  const [colour, setColour] = useState<ColourFamily | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [sequence, setSequence] = useState<string[]>([]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -91,8 +82,8 @@ export function ShelfProvider({ items, children }: { items: Item[]; children: Re
   }, []);
 
   const value = useMemo(
-    () => ({ items, query, setQuery, category, setCategory, colour, setColour, openBook, library }),
-    [items, query, category, colour, openBook, library],
+    () => ({ items, query, setQuery, openBook, library }),
+    [items, query, openBook, library],
   );
 
   const item = openId ? (byId.get(openId) ?? null) : null;

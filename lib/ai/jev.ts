@@ -34,36 +34,6 @@ export function bookCard(item: Item): string {
 
 export type Ranked = { id: string; match: number };
 
-type RankOptions = {
-  /** What the reader asked, in their words. */
-  request: string;
-  /** Extra context Jev can cite, e.g. the reader's favourite books. */
-  context?: string;
-  /** Overrides the default "does this book fit the request" question. */
-  instructions?: string;
-};
-
-/**
- * Ranks books against a request with one Jev "noul" (yes/no probability) per book,
- * the pattern TypeSafe documents for re-ranking. The probability is the % match.
- */
-export function rankWithJev(items: Item[], options: RankOptions): Promise<Ranked[]> {
-  return rankCards(
-    items.map((item) => ({ id: item.id, card: bookCard(item) })),
-    (key) => ({
-      type: "noul",
-      instructions:
-        options.instructions?.replace("{book}", `\`books.${key}\``) ??
-        `Does the book \`books.${key}\` fit what the reader is asking for in \`request\`?`,
-      criteria: {
-        true: "The book clearly fits: its subject, mood, genre, plot or the reader's own notes match the request.",
-        false: "The book does not fit, or only shares a word or surface topic with the request.",
-      },
-    }),
-    options,
-  );
-}
-
 /**
  * Ranks anything on the site (books, papers, articles, newsletter issues, tweets) against a
  * search, each described by a short card.
@@ -86,7 +56,7 @@ export function rankForSearch(cards: { id: string; card: string }[], query: stri
 async function rankCards(
   items: { id: string; card: string }[],
   question: (key: string) => NoulQuestion,
-  options: Pick<RankOptions, "request" | "context">,
+  options: { request: string },
 ): Promise<Ranked[]> {
   const batches: { id: string; card: string }[][] = [];
   for (let i = 0; i < items.length; i += BATCH) batches.push(items.slice(i, i + BATCH));
@@ -102,7 +72,6 @@ async function rankCards(
         const response = await jev().systemOne({
           state: {
             request: options.request,
-            ...(options.context ? { reader_context: options.context } : {}),
             books: Object.fromEntries(batch.map((item, i) => [keys[i], item.card])),
           },
           questions: Object.fromEntries(keys.map((key) => [key, question(key)])),

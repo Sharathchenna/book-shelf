@@ -24,13 +24,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 
 **For visitors**
 
-- **The library** (`/`): every book and clipping on one bookcase, shelved by topic. Arrange it by topic, recency, colour or length, or see each topic as a display of covers. Any spine comes off the shelf as a book in your hands. See [The library](#the-library).
-- **The books** (`/books`) include:
-  - a drifting marquee of book spines in each cover's colour;
-  - the Shelf Engine (an isometric machine that animates your reading);
-  - stats, reading by year, insights;
-  - a filterable library of covers, where each book opens a card with its details, rating and review.
-- **Ask the shelf:** a question in plain words ("a slow-burn horror in a small town") ranks the books by how well they fit. A short answer explains where to start.
+- **The library** (`/`, the home page): every book and clipping on one bookcase, shelved by topic. Arrange it by topic, recency, colour or length, or see each topic as a display of covers. Any spine comes off the shelf as a book in your hands, and a Goodreads book opens its card with its details, rating and review. See [The library](#the-library).
 - **Clippings:** `/articles`, `/papers`, `/newsletters` and `/tweets`. Each kind of page appears in the top bar once it has something in it.
 - **Site search** (**Search** in the top bar, or `⌘K` / `Ctrl+K` anywhere) covers books, papers, articles, newsletter issues and tweets together, ranked by meaning.
 - **Locked books:** cards for books that have a file show **Read · locked**. Visitors can see that a book is readable, but not read it.
@@ -129,7 +123,7 @@ Each feature switches on when its keys are set. Locally they go in `.env.local` 
 
 | Feature | Keys |
 | --- | --- |
-| Ask the shelf and site search by meaning (Jev) | `TYPESAFE_API_KEY` |
+| Site search by meaning (Jev) | `TYPESAFE_API_KEY` |
 | Answers under search, Explain, Recap and Chat, and enriching clippings (Claude Haiku 5.5) | `ANTHROPIC_API_KEY` |
 | Signing in as the owner | `OWNER_PASSWORD`, `SESSION_SECRET` (32+ random characters, e.g. `openssl rand -base64 48`) |
 | Book files in R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
@@ -197,13 +191,15 @@ The home page is a bookcase, from [Gloss](https://usegloss.io)'s library: its 24
 - **Arranging:** by topic (a label under each run opens that topic's page), by month added, by colour (a rainbow), or by length. Filters for each topic, Reading now, Favourites, Finished, Under 10 min, saved from your phone or agent, and each kind of thing. `/` searches the shelf; arrow keys walk it.
 - **A book in your hands:** click a spine. It comes off the shelf, turns, and opens: a bookplate inside the cover, and on the first page what it is, its tags, how far you are, and the way in:
   - a book with a file opens in the reader (**Continue reading**), or asks visitors to sign in;
-  - a book without one opens its card on `/books`;
+  - a book without one opens its card (details, rating, review, more by the author);
   - papers and articles open in the reader for you, and at their source for visitors;
   - posts open on X.
 - **Today, from your highlights:** signed in, five of your highlights come back each day, one at a time, above the shelf (`lib/review.ts`, from Gloss). **Next** keeps one coming back, after 3 days, then 7, 16, 35, 75 and 160; **Done with it** keeps it a highlight but takes it out of the review. Each links to its place in the book (`/reader/<id>?at=<cfi>`). Where each highlight stands is kept apart from the highlights themselves (the `reviews` table), since the reader replaces those whole.
 - **Signed in,** the page adds your reading over it (`/api/me`): your place in each file, your highlights, the star (favourites; books start with their five-star ratings), and removing a clipping.
 
-The old home page (Ask the shelf, the Shelf Engine, stats, reading by year and every cover) is now **Books**, at `/books`.
+- **The page** is drawn as Gloss draws its library: paper with a little grain instead of the site's glow, and a quiet bar that frosts over the shelf once the page scrolls.
+
+The books used to have a page of their own, `/books` (with Ask the shelf, the Shelf Engine, stats and a grid of covers); it redirects here now.
 
 ## Using the site
 
@@ -313,21 +309,12 @@ Open a book's card and choose **Add EPUB or PDF**. The file uploads straight to 
 | --- | --- |
 | Anywhere | `⌘K` / `Ctrl+K` site search |
 | Library | `/` searches the shelf, `←`/`→` walk it, `Esc` puts a book back |
-| Books | `/` focuses Ask, `R` opens a random unread book |
 | Reader | `←`/`→` turn pages, `T` contents, `N` notes, `B` brief (papers and articles), `/` search, `A` settings, `C` chat, `L` listen, `F` fullscreen, `Esc` closes things |
 | PDFs | `+` / `-` / `0` zoom in, out and fit |
 
 ## Search
 
-The site has two searches. Both use Jev, TypeSafe's model for judging true or false questions, which returns a probability for each question.
-
-**Ask the shelf** (the box on the home page) ranks books only:
-
-1. **Narrowing:** shelves of up to 240 books are ranked in full. Bigger shelves are first narrowed to 120 candidates by BM25 over title, author, subjects, tags, description and review, using related words as well as the question's own (see [Related words](#related-words)).
-2. **Ranking:** Jev answers one question per book, "does this book fit what the reader asked for?". Its probability becomes the % match.
-3. **Answer:** Claude Haiku writes a short note on where to start, linking the books it mentions. The results stream first, then the answer.
-
-**Site search** (`⌘K`) covers everything:
+Site search uses Jev, TypeSafe's model for judging true or false questions, which returns a probability for each question. **Search** in the top bar (`⌘K`) covers everything:
 
 1. **Index:** each book and clipping becomes a short card. Books contribute title, author, status, rating, subjects, description and review. Clippings contribute title, author or handle, source, excerpt or abstract, tweet text, the quoted and replied-to posts, the enrichment (summary, topics, image descriptions, linked page), tags and your note.
 2. **Narrowing:** up to 150 items are ranked in full. Beyond that, the candidates are:
@@ -344,7 +331,7 @@ The site has two searches. Both use Jev, TypeSafe's model for judging true or fa
    - a paper, when you're signed in, opens in the reader;
    - anything else opens its source.
 
-A search costs a fraction of a cent and returns in under a second. Without Jev, results come from the vector index, ranked by similarity (or from keywords, when there's no index). Both searches cache recent queries, and allow 20 (Ask) or 40 (site search) searches per minute per address.
+A search costs a fraction of a cent and returns in under a second. Without Jev, results come from the vector index, ranked by similarity (or from keywords, when there's no index). Recent searches are cached, and each address can search 40 times a minute.
 
 ### Related words
 
@@ -476,7 +463,7 @@ With a GPU machine of your own, the same Kokoro voices run there (`narrator-serv
 
 ## AI features and cost
 
-All of these are owner-only, apart from the answer under Ask the shelf. They run on Claude Haiku 5.5 and stream as they're written.
+All of these are owner-only. They run on Claude Haiku 5.5 and stream as they're written.
 
 - **Explain:** select a passage and choose **Explain**. In a PDF, an image of the selection goes along, so equations that text extraction garbles are still explained.
 - **More:** beside Explain, **More** offers the rest of Gloss's set (`lib/reader-actions.ts`, prompts in `lib/ai/reader.ts`):
@@ -550,8 +537,6 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `app/page.tsx`, `app/components/bookcase/`, `lib/bookcase.ts`, `lib/shelving.ts`, `lib/ai/shelver.ts`, `app/api/shelving/`, `public/library/` | The library: the bookcase, topics, the book in your hands, and shelving by Haiku |
 | `lib/review.ts`, `app/api/review/`, `app/components/bookcase/daily-review.tsx` | Today, from your highlights: the daily review |
 | `lib/export.ts`, `app/api/export/`, `app/components/bookcase/export-notes.tsx` | Highlights and notes as Markdown, for Obsidian |
-| `app/books/page.tsx` | The books: spine marquee, Ask, Shelf Engine, profile, stats, insights, every cover |
-| `app/components/engine/` | The Shelf Engine animation |
 | `app/{articles,papers,newsletters,tweets}/`, `app/components/clippings.tsx`, `clip-page.tsx` | The clipping pages |
 | `app/components/top-bar.tsx`, `footer.tsx`, `logo.tsx`, `app/icon.svg`, `favicon.ico`, `apple-icon.png` | Site chrome and the logo |
 | `migrations/`, `lib/db.ts`, `lib/data.ts`, `lib/library.ts` | D1: schema, shelf, clippings, files, progress and notes |
@@ -559,8 +544,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `lib/clip.ts`, `app/api/clips/`, `app/components/add-clip.tsx` | Adding clippings from the site |
 | `lib/pwc.ts`, `app/papers/discover/`, `app/components/papers/discover.tsx` | Discovering papers, and saved papers' code and tasks, from Papers with Code |
 | `lib/x-article.ts`, `app/api/books/clips/`, `app/reader/clip/`, `app/components/reader/{clip-opener.tsx,x-article-epub.ts,web-article.ts}` | Articles and X Articles: reading them whole, as ebooks in the reader |
-| `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
-| `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `lib/search/expand.ts`, `app/components/search-palette.tsx` | Site search, its vector index, and Haiku's related words |
+| `app/api/search/`, `lib/search/`, `lib/ai/jev.ts`, `app/components/search-palette.tsx` | Site search, its vector index, and Haiku's related words |
 | `lib/save.ts`, `lib/enrich.ts`, `app/api/capture/`, `app/components/capture-setup.tsx` | Saving from anywhere: the shared save pipeline, enrichment, the share-sheet endpoint and token, the setup panel |
 | `lib/mcp.ts`, `app/mcp/` | The MCP server for agents |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login |

@@ -279,107 +279,6 @@ h3 {
   }
 }
 
-/* ---- Spine marquee ---- */
-
-.spine-row {
-  --spine-scale: 1;
-  position: relative;
-  overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
-}
-
-@media (max-width: 640px) {
-  .spine-row {
-    --spine-scale: 0.8;
-  }
-}
-
-.spine-track {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  width: max-content;
-  padding-top: 14px;
-  animation: spine-drift var(--duration, 140s) linear infinite;
-}
-
-.spine-row[data-reverse] .spine-track {
-  animation-direction: reverse;
-}
-
-.spine-row:hover .spine-track,
-.spine-row:focus-within .spine-track {
-  animation-play-state: paused;
-}
-
-@keyframes spine-drift {
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-/* The shelf the books stand on. */
-.spine-ledge {
-  height: 10px;
-  background: var(--ledge);
-  box-shadow:
-    0 1px 0 rgb(255 255 255 / 0.35) inset,
-    0 10px 18px -8px rgb(25 40 30 / 0.35);
-}
-
-.spine {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  flex: none;
-  padding: 16px 0 36px;
-  border-radius: 3px 3px 1px 1px;
-  /* Light from the left edge, shadow on the right: reads as a rounded spine. */
-  background-image: linear-gradient(
-    90deg,
-    rgb(0 0 0 / 0.28),
-    rgb(255 255 255 / 0.18) 16%,
-    rgb(255 255 255 / 0) 42%,
-    rgb(0 0 0 / 0.08) 80%,
-    rgb(0 0 0 / 0.32)
-  );
-  box-shadow:
-    0 1px 0 rgb(255 255 255 / 0.25) inset,
-    0 -6px 14px -10px rgb(0 0 0 / 0.5);
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-/* Foil bands near the foot; some spines also get one near the head. */
-.spine::after,
-.spine[data-band]::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 14px;
-  height: 7px;
-  border-block: 1px solid currentColor;
-  opacity: 0.35;
-}
-
-.spine[data-band]::before {
-  inset: 8px 0 auto;
-  height: 4px;
-}
-
-.spine:hover,
-.spine:focus-visible {
-  transform: translateY(-12px);
-}
-
-.spine-title {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  max-height: 100%;
-  line-height: 1;
-}
-
 /* ---- Book dialog ---- */
 
 .book-dialog::backdrop {
@@ -509,7 +408,6 @@ h3 {
   html {
     scroll-behavior: auto;
   }
-  .spine-track,
   .aurora i,
   .rise,
   .book-dialog[open],
@@ -519,7 +417,6 @@ h3 {
   .star-pop > span {
     animation: none;
   }
-  .spine,
   .tilt {
     transition: none;
   }

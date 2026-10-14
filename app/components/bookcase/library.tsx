@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import { hostOf, SORTS, sortBooks, TAGS, TOPIC, TOPICS, type ShelfBook as Book, type Sort, type TagKey, type Topic, type TopicKey } from "@/lib/bookcase";
+import { useOptionalShelf } from "../shelf-provider";
 import { Glyph } from "./book";
 import { BookOpen, type BookActions, type Origin } from "./book-open";
 import { ChevronLeft, ChevronRight, LayoutGrid, LibraryIcon, Search, X } from "./icons";
@@ -31,10 +32,14 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
   const [only, setOnly] = useState<TopicKey | null>(null);
   const [tag, setTag] = useState<TagKey | null>(null);
   const [sort, setSort] = useState<Sort>("topic");
-  const [q, setQ] = useState("");
+  // Inside the shelf's provider, the search text is kept there.
+  const shelf = useOptionalShelf();
+  const [localQ, setLocalQ] = useState("");
+  const q = shelf ? shelf.query : localQ;
+  const setQ = shelf ? shelf.setQuery : setLocalQ;
   const [open, setOpen] = useState<{ id: string; origin: Origin } | null>(null);
-  const [leaving, setLeaving] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -110,15 +115,21 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
     };
   }, [books, topics]);
 
-  const go = useCallback((to: { view: View; topic?: TopicKey | null }) => {
-    startTransition(() => {
-      setView(to.view);
-      setTopic(to.topic ?? null);
-      setQ("");
-      if (to.view === "shelf") setTag(null);
-    });
-    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
-  }, []);
+  const top = useRef<HTMLDivElement>(null);
+  const go = useCallback(
+    (to: { view: View; topic?: TopicKey | null }) => {
+      startTransition(() => {
+        setView(to.view);
+        setTopic(to.topic ?? null);
+        setQ("");
+        if (to.view === "shelf") setTag(null);
+      });
+      // Back to the top of the bookcase, which isn't the top of the page.
+      const y = (top.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 90;
+      if (window.scrollY > y) window.scrollTo({ top: Math.max(0, y), behavior: "instant" as ScrollBehavior });
+    },
+    [setQ],
+  );
 
   // "/" to search, wherever you are; Esc steps back out of a topic.
   useEffect(() => {
@@ -192,7 +203,7 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
     });
 
   return (
-    <div className={`library relative z-[1] transition-[opacity,filter] duration-300 ${leaving ? "opacity-0 blur-[2px]" : ""}`}>
+    <div ref={top} id="library" className={`library relative z-[1] scroll-mt-24 transition-[opacity,filter] duration-300 ${leaving ? "opacity-0 blur-[2px]" : ""}`}>
       <div className="mx-auto w-full max-w-[1180px] px-4 pb-16 sm:px-8">
         {!T && (
           <section className="lib-hero">
@@ -316,8 +327,9 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
           origin={open.origin}
           owner={owner}
           editable={isOwner}
-          actions={actionsFor(openBook, isOwner)}
+          actions={actionsFor(openBook, isOwner, Boolean(shelf))}
           onRead={read}
+          onDetails={(b) => shelf?.openBook(b.id)}
           onShelve={shelve}
           onRemove={remove}
           onClose={() => {
@@ -333,14 +345,17 @@ export function Library({ owner, books: initial, aside }: { owner: string; books
 
 const NONE = new Set<string>();
 
-/** Where "Read" takes each kind of thing, for the owner and for visitors, and where it came from. */
-function actionsFor(b: Book, owner: boolean): BookActions {
+/**
+ * Where "Read" takes each kind of thing, for the owner and for visitors, and where it came from.
+ * A book without a file opens its card (rating, review, more by the author) when there is one.
+ */
+function actionsFor(b: Book, owner: boolean, cards: boolean): BookActions {
   const started = b.pct >= 1 ? "Read again" : b.pct > 0 && b.measured ? "Continue reading" : "Start reading";
   const host = hostOf(b.url);
   const source = b.url ? { label: b.kind === "book" ? "Goodreads" : b.kind === "tweet" ? "X" : (host ?? "Source"), href: b.url } : undefined;
   if (b.kind === "book") {
     if (b.fileId) return { primary: { label: owner ? started : "Sign in to read", href: `/reader/${b.fileId}` }, source };
-    return { primary: { label: "About this book", href: `/books?book=${encodeURIComponent(b.id)}` }, source };
+    return { primary: cards ? { label: "About this book", href: `/?book=${encodeURIComponent(b.id)}`, details: true } : undefined, source };
   }
   if (b.kind === "tweet" && !b.readable) return { primary: { label: "Open on X", href: b.url!, external: true } };
   if (owner && b.readable) {

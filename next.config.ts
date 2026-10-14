@@ -31,6 +31,10 @@ const readerCsp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // The books had a page of their own before they joined the library on the home page.
+  async redirects() {
+    return [{ source: "/books", destination: "/", permanent: true }];
+  },
   async headers() {
     return [
       {

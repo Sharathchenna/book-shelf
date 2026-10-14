@@ -20,17 +20,6 @@ export function getStats(items: Item[]) {
   };
 }
 
-/** Books read per year, oldest year first. */
-export function readsByYear(items: Item[]): [number, Item[]][] {
-  const years = new Map<number, Item[]>();
-  for (const item of items) {
-    if (item.status !== "read" || !item.dateRead) continue;
-    const year = Number(item.dateRead.slice(0, 4));
-    years.set(year, [...(years.get(year) ?? []), item]);
-  }
-  return [...years].sort((a, b) => a[0] - b[0]);
-}
-
 export function goodreadsUrl(item: Item): string {
   return item.goodreadsId
     ? `https://www.goodreads.com/book/show/${item.goodreadsId}`

@@ -32,7 +32,7 @@ export function bookDoc(item: Item): SearchDoc {
     title: item.title,
     subtitle: [item.author, STATUS_LABEL[item.status], item.rating ? "★".repeat(item.rating) : ""].filter(Boolean).join(" · "),
     image: item.cover,
-    href: `/books?book=${encodeURIComponent(item.id)}`,
+    href: `/?book=${encodeURIComponent(item.id)}`,
     card: `A book. ${bookCard(item)}`,
     text: searchText(item),
     passage: `A book. ${bookCard(item)}`,

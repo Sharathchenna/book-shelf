@@ -4,18 +4,15 @@ import { Logo } from "./logo";
 import type { ClipKind } from "@/lib/types";
 import { sectionLinks } from "./top-bar";
 
-/** `shortcuts`: mention the home page's keyboard shortcuts (search, random book). */
 export function Footer({
   owner,
   count,
   kinds,
-  shortcuts = false,
 }: {
   owner: string;
   count: number;
   /** Kinds of clipping that have any, for the section links. */
   kinds: ClipKind[];
-  shortcuts?: boolean;
 }) {
   return (
     <footer className="mx-auto mt-24 max-w-6xl px-4 pb-10">
@@ -34,13 +31,6 @@ export function Footer({
           >
             Open Library
           </a>
-          {shortcuts && (
-            <span className="hidden md:inline">
-              {" "}
-              · Press <kbd className="rounded border border-line px-1">/</kbd> to search,{" "}
-              <kbd className="rounded border border-line px-1">R</kbd> for a random book
-            </span>
-          )}
         </p>
         <a href="#top" className="pill">
           Back to top ↑

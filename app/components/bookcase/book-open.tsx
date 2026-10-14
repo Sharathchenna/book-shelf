@@ -8,7 +8,8 @@ import { ArrowRight, ArrowUpRight, ChevronDown, Star, Trash2 } from "./icons";
 
 /** Where "Read" takes a book, and where its source is. */
 export type BookActions = {
-  primary?: { label: string; href: string; external?: boolean };
+  /** `details`: the book's card (BookDialog) rather than a page. */
+  primary?: { label: string; href: string; external?: boolean; details?: boolean };
   source?: { label: string; href: string };
 };
 
@@ -76,6 +77,7 @@ export function BookOpen({
   actions,
   onClose,
   onRead,
+  onDetails,
   onShelve,
   onRemove,
 }: {
@@ -88,6 +90,8 @@ export function BookOpen({
   actions: BookActions;
   onClose: () => void;
   onRead: (b: Book, href: string) => void;
+  /** Opens the book's card, once it's back on the shelf. */
+  onDetails?: (b: Book) => void;
   onShelve: (b: Book, patch: { topic?: TopicKey; favorite?: boolean }) => void;
   onRemove: (b: Book) => void;
 }) {
@@ -178,6 +182,7 @@ export function BookOpen({
     const to = actions.primary;
     if (!to) return;
     if (to.external) return void window.open(to.href, "_blank", "noopener,noreferrer");
+    if (to.details && onDetails) return void close().then(() => onDetails(book));
     setPhase("leaving");
     setTimeout(() => onRead(book, to.href), reduce ? 0 : 360);
   };
