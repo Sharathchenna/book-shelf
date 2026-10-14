@@ -35,7 +35,7 @@ const NEWSLETTER_HOSTS = [
 /** Substack and beehiiv on custom domains still load their own assets. (Not signup forms: blogs embed those too.) */
 const NEWSLETTER_MARKERS = /substackcdn\.com|media\.beehiiv\.com/;
 
-export type ClipOptions = { kind?: ClipKind; note?: string; tags?: string[] };
+export type ClipOptions = { kind?: ClipKind; note?: string; tags?: string[]; via?: Clip["via"] };
 
 /**
  * Fetches and describes a link (or "arxiv:<id>", or a bare DOI). Clipping one that's already
@@ -62,8 +62,10 @@ export async function clipLink(input: string, options: ClipOptions, existing?: C
     saved: existing?.saved ?? new Date().toISOString().slice(0, 10),
     note: options.note?.trim() || existing?.note,
     tags: options.tags ?? existing?.tags ?? [],
+    via: existing?.via ?? options.via,
   };
   if (!clip.note) delete clip.note;
+  if (!clip.via) delete clip.via;
   return clip;
 }
 

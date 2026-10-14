@@ -17,7 +17,7 @@ import {
   type TocItem,
 } from "./foliate";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
-import { backHref, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
+import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { ListenBar } from "./listen-bar";
 import { Narrator } from "./narrator";
 import { Drawer, NotesPanel, SearchPanel, SettingsPanel, TocPanel } from "./panels";
@@ -519,7 +519,7 @@ export function ReaderView({ id }: { id: string }) {
         style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
-        <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
+        <Link href={BACK_HREF} aria-label="Back to the library" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
           <Icon d="M15 6l-6 6 6 6" />
         </Link>
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>

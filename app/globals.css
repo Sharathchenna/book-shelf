@@ -22,6 +22,19 @@
   --shadow-lifted: 0 1px 0 rgb(255 255 255 / 0.75) inset, 0 18px 40px -16px rgb(25 40 30 / 0.32);
   --ledge: linear-gradient(#ddd8c8, #c7c0ad);
   --aurora-opacity: 0.5;
+  /* Paper and ink in steps, for the bookcase (app/components/bookcase/), as Gloss names them. */
+  --ink-2: #3c4640;
+  --ink-3: #66706a;
+  --ink-4: #9ba39d;
+  --bg-raised: #fbfaf5;
+  --bg-sunk: #e8e5da;
+  --rule: #e2ded1;
+  --rule-strong: #cfc9b8;
+  --good: #2f7d55;
+  --rubric: var(--accent);
+  --rubric-text: #17664a;
+  --shadow-pop: 0 1px 1px rgb(25 40 30 / 0.04), 0 14px 36px -14px rgb(25 40 30 / 0.3), 0 3px 8px -3px rgb(25 40 30 / 0.1);
+  --shadow-card: 0 1px 1px rgb(25 40 30 / 0.03), 0 10px 26px -16px rgb(25 40 30 / 0.24);
 }
 
 [data-theme="dark"] {
@@ -42,6 +55,18 @@
   --shadow-lifted: 0 1px 0 rgb(255 255 255 / 0.07) inset, 0 18px 40px -16px rgb(0 0 0 / 0.75);
   --ledge: linear-gradient(#262b27, #191d1a);
   --aurora-opacity: 0.15;
+  --ink-2: #c3cbc5;
+  --ink-3: #95a099;
+  --ink-4: #5d6862;
+  --bg-raised: #171b18;
+  --bg-sunk: #1e231f;
+  --rule: #262c28;
+  --rule-strong: #363e38;
+  --good: #6cc495;
+  --rubric: var(--accent);
+  --rubric-text: #6fd3a8;
+  --shadow-pop: 0 1px 1px rgb(0 0 0 / 0.3), 0 18px 44px -14px rgb(0 0 0 / 0.65), 0 3px 8px -3px rgb(0 0 0 / 0.4);
+  --shadow-card: 0 1px 1px rgb(0 0 0 / 0.25), 0 12px 30px -16px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
@@ -55,12 +80,35 @@
   --color-ink-fg: var(--ink-fg);
   --color-accent: var(--accent);
   --color-star: var(--star);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-sunk: var(--bg-sunk);
+  --color-rule-strong: var(--rule-strong);
+  --color-good: var(--good);
+  --color-rubric-text: var(--rubric-text);
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
 }
 
 body {

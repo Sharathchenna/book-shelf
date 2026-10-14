@@ -20,6 +20,8 @@ const eslintConfig = defineConfig([
     "public/pdfjs/**",
     // ONNX Runtime for the narrator's voice (scripts/copy-ort.ts).
     "public/ort/**",
+    // Gloss, another reading app kept beside this one for reference; it isn't part of the site.
+    "gloss/**",
   ]),
 ]);
 

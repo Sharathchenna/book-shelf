@@ -5,7 +5,7 @@ import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from "reac
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { AiCard, useAiStream } from "./ai-card";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
-import { backHref, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
+import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
 import { Drawer, NotesPanel, TocPanel } from "./panels";
 import { flatOutline, loadPdfjs, openPdf, outline, pageText, sectionAt, toBase64Jpeg, type PDFDocumentProxy } from "./pdf";
@@ -563,7 +563,7 @@ export function PdfReaderView({ id }: { id: string }) {
         style={{ right: besideChat }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
-        <Link href={backHref(book)} aria-label="Back to the shelf" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
+        <Link href={BACK_HREF} aria-label="Back to the library" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
           <Icon d="M15 6l-6 6 6 6" />
         </Link>
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>

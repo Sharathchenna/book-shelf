@@ -68,6 +68,12 @@ export async function getNotes(id: string): Promise<Highlight[]> {
   return row ? (JSON.parse(row.data) as Highlight[]) : [];
 }
 
+/** How many highlights each file holds, keyed by file id. */
+export async function highlightCounts(): Promise<Map<string, number>> {
+  const { results } = await (await db()).prepare("SELECT file_id, json_array_length(data) AS n FROM notes").all<{ file_id: string; n: number }>();
+  return new Map(results.map((row) => [row.file_id, row.n]));
+}
+
 export async function putNotes(id: string, notes: Highlight[]) {
   await upsert("notes", id, notes);
 }

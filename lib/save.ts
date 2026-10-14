@@ -2,6 +2,7 @@ import "server-only";
 import { clipId, clipLink, expand, paperCode, type ClipOptions } from "./clip";
 import { getClipping, getClippings, getShelf, saveClipping } from "./data";
 import { enrich } from "./enrich";
+import { shelveMissing } from "./shelving";
 import { bookDoc, clipDoc } from "./search/site";
 import { indexDocs } from "./search/vectors";
 import type { Clip } from "./types";
@@ -26,6 +27,8 @@ export async function saveLink(input: string, options: ClipOptions): Promise<{ c
   if (enriched ?? existing?.enriched) clip.enriched = enriched ?? existing?.enriched;
   await saveClipping(clip);
   await indexDocs([clipDoc(clip)]).catch((error) => console.error("Indexing failed", clip.id, error));
+  // Onto the bookcase's topics; a failure leaves it in Unsorted until the next sync.
+  if (!existing) await shelveMissing().catch((error) => console.error("Shelving failed", clip.id, error));
   return { clip, refreshed: Boolean(existing) };
 }
 

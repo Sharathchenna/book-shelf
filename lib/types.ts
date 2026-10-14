@@ -58,6 +58,8 @@ export type Clip = {
   minutes?: number;
   /** The reader's own note on it. */
   note?: string;
+  /** How it was saved, when not with Add on the site: the phone shortcut, or an agent (/mcp). */
+  via?: "phone" | "agent";
   tags: string[];
   paper?: {
     authors: string[];

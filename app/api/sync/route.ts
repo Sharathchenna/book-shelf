@@ -1,5 +1,6 @@
 import { fromScheduler, requireOwner } from "@/lib/auth/session";
 import { refreshPaperCode, refreshSearch } from "@/lib/save";
+import { shelveMissing } from "@/lib/shelving";
 import { syncGoodreads } from "@/lib/sync";
 
 /**
@@ -23,7 +24,11 @@ export async function POST(request: Request) {
       console.error("Search index refresh failed", error);
       return null;
     });
-    return Response.json({ ...result, papers, search }, { headers: { "cache-control": "no-store" } });
+    const shelved = await shelveMissing().catch((error) => {
+      console.error("Shelving failed", error);
+      return null;
+    });
+    return Response.json({ ...result, papers, search, shelved }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Goodreads sync failed", error);
     return Response.json({ error: (error as Error).message || "The sync failed." }, { status: 502 });

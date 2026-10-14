@@ -7,7 +7,8 @@ import { saveLink } from "@/lib/save";
  * link in it is saved), with an optional note, and answers in a sentence fit for a notification.
  */
 export async function POST(request: Request) {
-  if (!(await fromCaptureToken(request)) && !(await isOwner())) {
+  const token = await fromCaptureToken(request);
+  if (!token && !(await isOwner())) {
     return reply("Not saved: the token is missing or out of date. Make a new one on the site.", 401);
   }
   const body = (await request.json().catch(() => ({}))) as { url?: unknown; text?: unknown; note?: unknown };
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
   const note = typeof body.note === "string" && body.note.trim() ? body.note.slice(0, 2000) : undefined;
 
   try {
-    const { clip, refreshed } = await saveLink(url, { note });
+    const { clip, refreshed } = await saveLink(url, { note, ...(token ? { via: "phone" as const } : {}) });
     const what = clip.tweet ? `@${clip.tweet.handle}: ${clip.tweet.text}` : (clip.title ?? clip.url);
     return reply(`${refreshed ? "Already saved, refreshed" : "Saved"}. ${what.replace(/\s+/g, " ").slice(0, 120)}`);
   } catch (error) {

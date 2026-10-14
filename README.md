@@ -9,6 +9,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 - [Get started](#get-started)
 - [Configure](#configure)
 - [Deploy to Cloudflare](#deploy-to-cloudflare)
+- [The library](#the-library)
 - [Using the site](#using-the-site)
 - [Saving from X and anywhere else](#saving-from-x-and-anywhere-else)
 - [Search](#search)
@@ -23,7 +24,8 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 
 **For visitors**
 
-- **The shelf** (`/`) includes:
+- **The library** (`/`): every book and clipping on one bookcase, shelved by topic. Arrange it by topic, recency, colour or length, or see each topic as a display of covers. Any spine comes off the shelf as a book in your hands. See [The library](#the-library).
+- **The books** (`/books`) include:
   - a drifting marquee of book spines in each cover's colour;
   - the Shelf Engine (an isometric machine that animates your reading);
   - stats, reading by year, insights;
@@ -73,7 +75,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 | --- | --- |
 | Next.js 16 (App Router), React 19, Tailwind CSS 4 | The site |
 | `@opennextjs/cloudflare` | Running Next.js on Cloudflare Workers |
-| Cloudflare D1 | Shelf, clippings, library index, reading progress, highlights and notes (`migrations/`) |
+| Cloudflare D1 | Shelf, clippings, library index, reading progress, highlights and notes, the bookcase's topics (`migrations/`) |
 | Cloudflare R2 (S3 API, presigned URLs) | Book files, covers, extracted text for the AI, narrated chapters |
 | Cloudflare Vectorize + Workers AI (`qwen3-embedding-0.6b`) | The search index: an embedding of every book and clipping |
 | foliate-js | The EPUB reader |
@@ -185,6 +187,22 @@ What happens when keys are missing:
 
 The nightly sync is a Cron Trigger (`triggers.crons` in `wrangler.jsonc`, `17 21 * * *` UTC = 02:47 IST). Deploying registers it.
 
+## The library
+
+The home page is a bookcase, from [Gloss](https://usegloss.io)'s library: its 24 topics, their painted plates and clay icons (`public/library/`), and the shelf itself.
+
+- **What's on it:** every Goodreads book and every clipping. Books wear their own cover's colour and show their own cover; clippings get a cloth in their topic's colours and a cover with the page's picture printed in the topic's ink. A spine's width is how long it takes to read: from the file's length when there is one, else the page count, or the clipping's reading time.
+- **Topics:** Claude Haiku shelves each item onto one of the 24 topics with up to three tags (`lib/ai/shelver.ts`, the `shelving` table): up to 30 items in one call, about $0.001. It runs after a sync, after a save, and once the home page has been served while anything is still unsorted. Signed in, the topic chip on an open book moves it, and a topic you pick is never changed by Haiku again.
+- **Arranging:** by topic (a label under each run opens that topic's page), by month added, by colour (a rainbow), or by length. Filters for each topic, Reading now, Favourites, Finished, Under 10 min, saved from your phone or agent, and each kind of thing. `/` searches the shelf; arrow keys walk it.
+- **A book in your hands:** click a spine. It comes off the shelf, turns, and opens: a bookplate inside the cover, and on the first page what it is, its tags, how far you are, and the way in:
+  - a book with a file opens in the reader (**Continue reading**), or asks visitors to sign in;
+  - a book without one opens its card on `/books`;
+  - papers and articles open in the reader for you, and at their source for visitors;
+  - posts open on X.
+- **Signed in,** the page adds your reading over it (`/api/me`): your place in each file, your highlights, the star (favourites; books start with their five-star ratings), and removing a clipping.
+
+The old home page (Ask the shelf, the Shelf Engine, stats, reading by year and every cover) is now **Books**, at `/books`.
+
 ## Using the site
 
 ### Sign in
@@ -278,7 +296,8 @@ Open a book's card and choose **Add EPUB or PDF**. The file uploads straight to 
 | Where | Keys |
 | --- | --- |
 | Anywhere | `⌘K` / `Ctrl+K` site search |
-| Shelf | `/` focuses Ask, `R` opens a random unread book |
+| Library | `/` searches the shelf, `←`/`→` walk it, `Esc` puts a book back |
+| Books | `/` focuses Ask, `R` opens a random unread book |
 | Reader | `←`/`→` turn pages, `T` contents, `N` notes, `/` search, `A` settings, `C` chat, `L` listen, `F` fullscreen, `Esc` closes things |
 | PDFs | `+` / `-` / `0` zoom in, out and fit |
 
@@ -501,7 +520,8 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 
 | Path | What it is |
 | --- | --- |
-| `app/page.tsx` | The shelf: spine marquee, Ask, Shelf Engine, profile, stats, insights, library |
+| `app/page.tsx`, `app/components/bookcase/`, `lib/bookcase.ts`, `lib/shelving.ts`, `lib/ai/shelver.ts`, `app/api/shelving/`, `public/library/` | The library: the bookcase, topics, the book in your hands, and shelving by Haiku |
+| `app/books/page.tsx` | The books: spine marquee, Ask, Shelf Engine, profile, stats, insights, every cover |
 | `app/components/engine/` | The Shelf Engine animation |
 | `app/{articles,papers,newsletters,tweets}/`, `app/components/clippings.tsx`, `clip-page.tsx` | The clipping pages |
 | `app/components/top-bar.tsx`, `footer.tsx`, `logo.tsx`, `app/icon.svg`, `favicon.ico`, `apple-icon.png` | Site chrome and the logo |

@@ -7,15 +7,16 @@ import { SearchPalette } from "./search-palette";
 import { SyncButton } from "./sync-button";
 import { ThemeToggle } from "./theme-toggle";
 
-export type Section = "books" | ClipKind;
+export type Section = "library" | "books" | ClipKind;
 
 /**
- * The site's sections as links: books on the home page, then each kind of clipping (`kinds`:
- * the kinds that have any) on its own page.
+ * The site's sections as links: the library (everything, on the home page), the books, then
+ * each kind of clipping (`kinds`: the kinds that have any) on its own page.
  */
 export function sectionLinks(kinds: ClipKind[]): { section: Section; href: string; label: string }[] {
   return [
-    { section: "books", href: "/", label: "Books" },
+    { section: "library", href: "/", label: "Library" },
+    { section: "books", href: "/books", label: "Books" },
     ...inPageOrder(kinds).map((kind) => ({ section: kind, href: clipPath(kind), label: CLIP_LABEL[kind] })),
   ];
 }

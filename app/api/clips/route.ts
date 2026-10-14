@@ -3,6 +3,7 @@ import { CLIP_KINDS } from "@/lib/clippings";
 import { deleteClipping } from "@/lib/data";
 import { saveLink } from "@/lib/save";
 import { removeDocs } from "@/lib/search/vectors";
+import { removeShelving } from "@/lib/shelving";
 import type { ClipKind } from "@/lib/types";
 
 /**
@@ -37,6 +38,7 @@ export async function DELETE(request: Request) {
   if (typeof id !== "string" || !(await deleteClipping(id))) {
     return Response.json({ error: "Unknown clipping." }, { status: 404 });
   }
+  await removeShelving(id).catch(() => {});
   await removeDocs([`clip:${id}`]).catch((error) => console.error("Removing from the search index failed", id, error));
   return new Response(null, { status: 204 });
 }

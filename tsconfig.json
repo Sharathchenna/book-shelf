@@ -32,6 +32,8 @@
   ],
   "exclude": [
     "node_modules",
+    // Gloss, another reading app kept beside this one for reference; it isn't part of the site.
+    "gloss",
     // Wrangler's generated types include the whole Workers runtime, which clashes with the DOM
     // types the client code uses. types/cloudflare.d.ts declares the bindings this app reads.
     "cloudflare-env.d.ts",
