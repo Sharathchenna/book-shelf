@@ -280,9 +280,23 @@ Open **Add → Save from your phone →** while signed in.
 
 Then, in X: **Share → Share via… → Save to Shelf**. The post is saved, enriched and indexed, and the notification says what was saved, in about five seconds.
 
-- **The token** can only add clippings. It's shown once, stored only as a hash, and never expires.
+- **The token** can only add clippings (from the shortcut or an agent). It's shown once, stored only as a hash, and never expires.
 - **Revoking:** **Make a new token** replaces it, and **Turn off** revokes it.
 - **What the shortcut sends:** `/api/capture` saves the first link in whatever was shared, so text with a link in it works too.
+
+**Agents (MCP).** Claude, Claude Code or any MCP client can save links to the shelf and search it, through the MCP server at `/mcp` (`lib/mcp.ts`, from Gloss's): Streamable HTTP, stateless, three tools.
+
+- `save_links`: up to 10 links a call (articles, newsletter issues, arXiv and DOI links, posts on X), each saved like Add, marked as saved by an agent, and shelved onto a topic at once.
+- `search_shelf`: books and clippings by words, topic, kind or reading status.
+- `list_topics`: the shelf's topics and how many are on each.
+
+It uses the same token as the shortcut, so it can only add; what it reads is what any visitor sees. Send it as `Authorization: Bearer <token>`, or as the last part of the URL (`/mcp/<token>`) for clients that only take a URL. In Claude Code:
+
+```sh
+claude mcp add --transport http shelf https://<your site>/mcp --header "Authorization: Bearer <token>"
+```
+
+The panel under **Add → Save from your phone** shows both.
 
 **Computers (bookmarklet).** Drag **+ Save to Shelf** from the same panel to your bookmarks bar. On any page, click it: a small window opens with Add filled in and the cursor in the note, and it closes itself after saving. (It opens `/?add=<link>`; signed out, you're asked to sign in first.)
 
@@ -547,6 +561,7 @@ All of these are owner-only, apart from the answer under Ask the shelf. They run
 | `app/api/ask/`, `lib/ai/jev.ts`, `lib/ai/haiku.ts`, `lib/search/bm25.ts` | Ask the shelf |
 | `app/api/search/`, `lib/search/site.ts`, `lib/search/vectors.ts`, `lib/search/expand.ts`, `app/components/search-palette.tsx` | Site search, its vector index, and Haiku's related words |
 | `lib/save.ts`, `lib/enrich.ts`, `app/api/capture/`, `app/components/capture-setup.tsx` | Saving from anywhere: the shared save pipeline, enrichment, the share-sheet endpoint and token, the setup panel |
+| `lib/mcp.ts`, `app/mcp/` | The MCP server for agents |
 | `lib/auth/session.ts`, `proxy.ts`, `app/login/` | Owner login |
 | `lib/storage.ts`, `lib/epub/parse.ts`, `app/api/books/` | Book files (R2), EPUB parsing, PDF finalize, paper import and the arXiv proxies |
 | `app/components/book-file.tsx` | A book card's Add / Read / Read · locked / Remove file |

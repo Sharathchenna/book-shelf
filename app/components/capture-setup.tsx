@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 /**
  * Saving from elsewhere, set up from the Add dialog: an iPhone share-sheet shortcut (which posts
- * to /api/capture with a capture token) and a bookmarklet for computers (which opens Add here
- * with the page's link filled in).
+ * to /api/capture with a capture token), an agent over MCP (/mcp, the same token), and a
+ * bookmarklet for computers (which opens Add here with the page's link filled in).
  */
 export function CaptureSetup({ onBack }: { onBack: () => void }) {
   const [created, setCreated] = useState<string | null | undefined>(undefined);
@@ -34,7 +34,7 @@ export function CaptureSetup({ onBack }: { onBack: () => void }) {
   }, [origin]);
 
   const makeToken = async () => {
-    if (created && !confirm("Make a new token? The shortcut stops working until you paste the new one into it.")) return;
+    if (created && !confirm("Make a new token? The shortcut, and any agent using it, stop working until you give them the new one.")) return;
     setBusy(true);
     setError("");
     const res = await fetch("/api/capture/token", { method: "POST" }).catch(() => null);
@@ -46,7 +46,7 @@ export function CaptureSetup({ onBack }: { onBack: () => void }) {
   };
 
   const turnOff = async () => {
-    if (!confirm("Turn off saving from the shortcut? It stops working until you make a new token.")) return;
+    if (!confirm("Turn off saving from the shortcut and agents? They stop working until you make a new token.")) return;
     await fetch("/api/capture/token", { method: "DELETE" }).catch(() => null);
     setToken("");
     setCreated(null);
@@ -59,6 +59,7 @@ export function CaptureSetup({ onBack }: { onBack: () => void }) {
   };
 
   const endpoint = `${origin}/api/capture`;
+  const mcp = `${origin}/mcp`;
 
   return (
     <div className="flex max-h-[80vh] flex-col gap-5 overflow-y-auto">
@@ -136,6 +137,33 @@ export function CaptureSetup({ onBack }: { onBack: () => void }) {
             Turn off the shortcut&apos;s access
           </button>
         )}
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-[11px] font-medium tracking-[0.14em] text-muted uppercase">An agent: MCP</h3>
+        <p className="text-sm text-muted">
+          Claude, Claude Code or any MCP client can save links here and search the shelf, with the same token. It can only add, like the shortcut.
+        </p>
+        <ul className="space-y-1.5 text-sm text-muted">
+          <li className="flex flex-wrap items-center gap-1.5">
+            Server <code className="rounded bg-chip px-1.5 py-0.5 font-mono text-xs text-fg">{mcp}</code>
+            <button type="button" onClick={() => copy("mcp", mcp)} className="text-xs text-accent hover:underline">
+              {copied === "mcp" ? "copied" : "copy"}
+            </button>
+            , with the header <code className="rounded bg-chip px-1.5 py-0.5 font-mono text-xs text-fg">Authorization</code> = the token.
+          </li>
+          <li>
+            Claude Code: <code className="rounded bg-chip px-1.5 py-0.5 font-mono text-xs text-fg break-all">{`claude mcp add --transport http shelf ${mcp} --header "Authorization: Bearer <token>"`}</code>
+          </li>
+          <li>
+            Clients that only take a URL (a custom connector in Claude): <code className="rounded bg-chip px-1.5 py-0.5 font-mono text-xs text-fg">{`${mcp}/<token>`}</code>
+            {token && (
+              <button type="button" onClick={() => copy("mcp-url", `${mcp}/${token}`)} className="ml-1.5 text-xs text-accent hover:underline">
+                {copied === "mcp-url" ? "copied" : "copy with your token"}
+              </button>
+            )}
+          </li>
+        </ul>
       </section>
 
       <section className="space-y-2">

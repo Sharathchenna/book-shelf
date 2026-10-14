@@ -13,7 +13,7 @@ let site: Promise<Handler> | undefined;
 const loadSite = () => (site ??= import("./.open-next/worker.js").then((m) => m.default as Handler));
 
 /** Pages that look the same to every visitor (the owner's controls load in the browser). */
-const SHARED_PAGES = new Set(["/", "/articles", "/papers", "/newsletters", "/tweets"]);
+const SHARED_PAGES = new Set(["/", "/books", "/articles", "/papers", "/newsletters", "/tweets"]);
 /** Long enough to absorb bursts and cold starts; short enough that a sync shows up soon. */
 const VISITOR_TTL_SECONDS = 60;
 
