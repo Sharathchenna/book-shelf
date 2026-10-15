@@ -71,6 +71,15 @@ export function ReaderView({ id }: { id: string }) {
   const [book, setBook] = useState<LibraryBook | null>(null);
   /** Papers and articles get a brief; a book's would give its ending away. */
   const briefable = Boolean(book?.paperId || book?.clipId);
+  /** An article reads like a page in Gloss: scrolled top to bottom under a bar that tucks away. */
+  const article = Boolean(book?.clipId);
+  const articleRef = useRef(false);
+  /** Scrolled away from the top of an article; then down past its head; the bar tucked away. */
+  const [scrolled, setScrolled] = useState(false);
+  const [pastTitle, setPastTitle] = useState(false);
+  const [tucked, setTucked] = useState(false);
+  const hairline = useRef<HTMLSpanElement>(null);
+  const lastScroll = useRef(0);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [ticks, setTicks] = useState<number[]>([]);
   const [loc, setLoc] = useState<Location | null>(null);
@@ -135,6 +144,23 @@ export function ReaderView({ id }: { id: string }) {
     setChrome(true);
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setChrome(false), CHROME_HIDE_MS);
+  });
+
+  /**
+   * An article's bar, as in Gloss: frosted once the page has moved, tucked away while reading
+   * down, back the moment the reader scrolls up, with how far they are as a hairline under it.
+   */
+  const onScroll = useEffectEvent(() => {
+    const r = viewRef.current?.renderer as (FoliateView["renderer"] & { start: number; size: number; viewSize: number }) | undefined;
+    if (!articleRef.current || !r) return;
+    const y = r.start;
+    const max = r.viewSize - r.size;
+    if (hairline.current) hairline.current.style.transform = `scaleX(${max > 0 ? Math.min(1, y / max) : 0})`;
+    setScrolled(y > 8);
+    setPastTitle(y > 280);
+    if (Math.abs(y - lastScroll.current) < 6) return;
+    setTucked(y > lastScroll.current && y > 240);
+    lastScroll.current = y;
   });
 
   // ---- notes ----------------------------------------------------------------------------
@@ -260,6 +286,8 @@ export function ReaderView({ id }: { id: string }) {
     const keys: Record<string, () => void> = {
       ArrowLeft: () => void view.goLeft(),
       ArrowRight: () => void view.goRight(),
+      // In the page itself the arrows scroll it; from outside it (the bar), they scroll it too.
+      ...(articleRef.current ? { ArrowUp: () => void view.prev(80), ArrowDown: () => void view.next(80) } : {}),
       PageUp: () => void view.prev(),
       PageDown: () => void view.next(),
       " ": () => void (e.shiftKey ? view.prev() : view.next()),
@@ -320,7 +348,8 @@ export function ReaderView({ id }: { id: string }) {
     const frame = doc.defaultView?.frameElement?.getBoundingClientRect();
     const x = (frame?.left ?? 0) + e.clientX;
     const zone = x / window.innerWidth;
-    if (settings.flow === "paginated" && zone < 0.22) void view.goLeft();
+    if (articleRef.current) setTucked((t) => !t);
+    else if (settings.flow === "paginated" && zone < 0.22) void view.goLeft();
     else if (settings.flow === "paginated" && zone > 0.78) void view.goRight();
     else {
       clearTimeout(hideTimer.current);
@@ -369,6 +398,7 @@ export function ReaderView({ id }: { id: string }) {
       if (cancelled || !host.current) return;
 
       const stored = readSettings();
+      articleRef.current = Boolean(data.book.clipId);
       view = create();
       viewRef.current = view;
       highlightDraw.current = highlight;
@@ -401,7 +431,8 @@ export function ReaderView({ id }: { id: string }) {
 
       await view.open(new File([file], "book.epub", { type: "application/epub+zip" }));
       sanitizeBook(view.book.transformTarget);
-      applySettings(view, stored);
+      applySettings(view, stored, articleRef.current);
+      view.renderer.addEventListener("scroll", () => onScroll());
       // ?at=<cfi> opens at a highlight (the library's daily review); otherwise where they left off.
       const at = new URLSearchParams(window.location.search).get("at");
       await view.init({ lastLocation: at ?? data.progress?.cfi ?? null, showTextStart: !at && !data.progress });
@@ -470,12 +501,12 @@ export function ReaderView({ id }: { id: string }) {
     const target = walk(toc);
     if (target) void viewRef.current?.goTo(target.href);
   };
-  const showChrome = chrome || pinned;
+  const showChrome = article ? !tucked || pinned : chrome || pinned;
 
   const changeSettings = (next: ReaderSettings) => {
     setSettings(next);
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    if (viewRef.current) applySettings(viewRef.current, next);
+    if (viewRef.current) applySettings(viewRef.current, next, articleRef.current);
   };
 
   const theme = THEMES[settings.theme];
@@ -500,7 +531,7 @@ export function ReaderView({ id }: { id: string }) {
       <div
         ref={host}
         className={`absolute inset-x-0 transition-[top,bottom] duration-300 [&>foliate-view]:block [&>foliate-view]:size-full ${
-          settings.flow === "scrolled" ? "top-16 bottom-16" : "top-14 bottom-14"
+          article ? "inset-y-0" : settings.flow === "scrolled" ? "top-16 bottom-16" : "top-14 bottom-14"
         }`}
         style={{ opacity: status === "ready" ? 1 : 0, transition: "opacity .5s ease", right: besideChat }}
       />
@@ -520,10 +551,16 @@ export function ReaderView({ id }: { id: string }) {
 
       {/* Top bar */}
       <header
-        className={`reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
-          showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
-        }`}
-        style={{ right: besideChat }}
+        className={
+          article
+            ? `fixed inset-x-0 top-0 z-40 flex h-14 items-center gap-0.5 border-b px-2 transition-[transform,background-color,border-color] duration-300 ease-out sm:gap-2 sm:px-4 ${
+                scrolled ? "border-line backdrop-blur-md" : "border-transparent"
+              } ${showChrome ? "translate-y-0" : "-translate-y-full"}`
+            : `reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
+                showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
+              }`
+        }
+        style={{ right: besideChat, ...(article ? { background: scrolled ? `color-mix(in srgb, ${theme.bg} 85%, transparent)` : "transparent" } : {}) }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <Link href={BACK_HREF} aria-label="Back to the library" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
@@ -532,9 +569,18 @@ export function ReaderView({ id }: { id: string }) {
         <BarButton label="Contents (T)" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? null : "toc")}>
           <Icon d="M4 6h16M4 12h16M4 18h10" />
         </BarButton>
-        <div className="min-w-0 flex-1 px-1 text-center">
-          <p className="truncate font-serif text-[15px] leading-tight">{book?.title ?? "Opening…"}</p>
-          <p className="truncate text-[11px] text-muted">{book?.author}</p>
+        {/* An article's title shows here once the reader is past the one on the page. */}
+        <div className={`min-w-0 flex-1 px-1 text-center transition-opacity duration-300 ${article && !pastTitle ? "opacity-0" : "opacity-100"}`}>
+          {article ? (
+            <button onClick={() => void viewRef.current?.goTo(0)} title="Back to the top" className="max-w-full truncate rounded-full px-2.5 py-1 font-serif text-[16px] leading-tight hover:bg-chip">
+              {book?.title}
+            </button>
+          ) : (
+            <>
+              <p className="truncate font-serif text-[15px] leading-tight">{book?.title ?? "Opening…"}</p>
+              <p className="truncate text-[11px] text-muted">{book?.author}</p>
+            </>
+          )}
         </div>
         <BarButton label={book?.paperId || book?.clipId ? "Where you left off (recap)" : "Previously… (recap)"} onClick={recap} disabled={status !== "ready"}>
           <Icon d="M12 8v4l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 4v4h4" />
@@ -570,59 +616,62 @@ export function ReaderView({ id }: { id: string }) {
         <BarButton label="Reading settings (A)" active={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")}>
           <span className="font-serif text-[15px] leading-none">Aa</span>
         </BarButton>
+        {article && <span ref={hairline} aria-hidden className="absolute inset-x-0 -bottom-px h-[2px] origin-left bg-accent opacity-80" style={{ transform: "scaleX(0)" }} />}
       </header>
 
-      {/* Bottom bar: chapter, scrubber with chapter ticks, time left */}
-      <footer
-        className={`fixed inset-x-3 bottom-3 z-40 transition-all duration-300 ${
-          showChrome ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"
-        }`}
-        style={{ right: besideChat }}
-        onMouseEnter={() => clearTimeout(hideTimer.current)}
-      >
-        <div className="reader-surface mx-auto flex max-w-3xl items-center gap-3 rounded-full px-4 py-2">
-          <button onClick={() => void viewRef.current?.goLeft()} aria-label="Previous page" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip">
-            <Icon d="M15 6l-6 6 6 6" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="flex justify-between gap-3 text-[11px] text-muted">
-              <span className="truncate">{chapter}</span>
-              <span className="shrink-0 tabular-nums">
-                {minutesLeft !== null && scrub === null ? `${minutesLeft} min left in chapter · ` : ""}
-                {percent}%
-              </span>
+      {/* Bottom bar: chapter, scrubber with chapter ticks, time left. An article has none: it scrolls. */}
+      {!article && (
+        <footer
+          className={`fixed inset-x-3 bottom-3 z-40 transition-all duration-300 ${
+            showChrome ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"
+          }`}
+          style={{ right: besideChat }}
+          onMouseEnter={() => clearTimeout(hideTimer.current)}
+        >
+          <div className="reader-surface mx-auto flex max-w-3xl items-center gap-3 rounded-full px-4 py-2">
+            <button onClick={() => void viewRef.current?.goLeft()} aria-label="Previous page" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip">
+              <Icon d="M15 6l-6 6 6 6" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex justify-between gap-3 text-[11px] text-muted">
+                <span className="truncate">{chapter}</span>
+                <span className="shrink-0 tabular-nums">
+                  {minutesLeft !== null && scrub === null ? `${minutesLeft} min left in chapter · ` : ""}
+                  {percent}%
+                </span>
+              </div>
+              <div className="relative mt-1.5 h-4">
+                <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-chip" />
+                <div className="absolute top-1/2 left-0 h-1 -translate-y-1/2 rounded-full bg-accent" style={{ width: `${percent}%` }} />
+                {ticks.slice(1).filter(Number.isFinite).map((t, i) => (
+                  <span key={i} className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-fg/20" style={{ left: `${t * 100}%` }} />
+                ))}
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.0005}
+                  value={scrub ?? fraction}
+                  aria-label="Position in book"
+                  onChange={(e) => setScrub(Number(e.target.value))}
+                  onPointerUp={() => {
+                    if (scrub !== null) void viewRef.current?.goToFraction(scrub);
+                    setScrub(null);
+                  }}
+                  onKeyUp={() => {
+                    if (scrub !== null) void viewRef.current?.goToFraction(scrub);
+                    setScrub(null);
+                  }}
+                  className="absolute inset-0 w-full cursor-pointer opacity-0"
+                />
+              </div>
             </div>
-            <div className="relative mt-1.5 h-4">
-              <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-chip" />
-              <div className="absolute top-1/2 left-0 h-1 -translate-y-1/2 rounded-full bg-accent" style={{ width: `${percent}%` }} />
-              {ticks.slice(1).filter(Number.isFinite).map((t, i) => (
-                <span key={i} className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-fg/20" style={{ left: `${t * 100}%` }} />
-              ))}
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.0005}
-                value={scrub ?? fraction}
-                aria-label="Position in book"
-                onChange={(e) => setScrub(Number(e.target.value))}
-                onPointerUp={() => {
-                  if (scrub !== null) void viewRef.current?.goToFraction(scrub);
-                  setScrub(null);
-                }}
-                onKeyUp={() => {
-                  if (scrub !== null) void viewRef.current?.goToFraction(scrub);
-                  setScrub(null);
-                }}
-                className="absolute inset-0 w-full cursor-pointer opacity-0"
-              />
-            </div>
+            <button onClick={() => void viewRef.current?.goRight()} aria-label="Next page" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip">
+              <Icon d="M9 6l6 6-6 6" />
+            </button>
           </div>
-          <button onClick={() => void viewRef.current?.goRight()} aria-label="Next page" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip">
-            <Icon d="M9 6l6 6-6 6" />
-          </button>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       {/* Panels */}
       {panel === "toc" && (
@@ -635,10 +684,15 @@ export function ReaderView({ id }: { id: string }) {
           <BriefPanel
             bookId={book.id}
             sectionLabel={(i) => book.sections[i]?.title || `Section ${i + 1}`}
-            onGo={(i) => {
-                setPanel(null);
-                void viewRef.current?.goTo(i);
-              }}
+            // An article is one page: its brief's points have no section of their own to go to.
+            onGo={
+              book.sections.length > 1
+                ? (i) => {
+                    setPanel(null);
+                    void viewRef.current?.goTo(i);
+                  }
+                : undefined
+            }
           />
         </Drawer>
       )}
@@ -674,7 +728,7 @@ export function ReaderView({ id }: { id: string }) {
           <SearchPanel view={view} onGo={(cfi) => void view.goTo(cfi)} />
         </Drawer>
       )}
-      {panel === "settings" && <SettingsPanel settings={settings} onChange={changeSettings} />}
+      {panel === "settings" && <SettingsPanel settings={settings} onChange={changeSettings} article={article} />}
 
       {/* Selection popover */}
       {selected && (
@@ -741,7 +795,7 @@ export function ReaderView({ id }: { id: string }) {
           narrator={narrator}
           // The contents entry for the page shown (which follows the reading), else the file's title.
           chapter={(i) => (i === sectionIndex && loc?.tocItem?.label?.trim()) || book?.sections[i]?.title || `Chapter ${i + 1}`}
-          raised={showChrome}
+          raised={!article && showChrome}
           right={besideChat}
           onClose={() => setListening(false)}
         />
@@ -763,14 +817,15 @@ export function ReaderView({ id }: { id: string }) {
   );
 }
 
-function applySettings(view: FoliateView, s: ReaderSettings) {
+/** An article is always scrolled, in one column. */
+function applySettings(view: FoliateView, s: ReaderSettings, article = false) {
   const r = view.renderer;
-  r.setAttribute("flow", s.flow);
+  r.setAttribute("flow", article ? "scrolled" : s.flow);
   r.setAttribute("max-inline-size", `${s.width}px`);
-  r.setAttribute("max-column-count", s.spread ? "2" : "1");
-  r.setAttribute("gap", "7%");
+  r.setAttribute("max-column-count", s.spread && !article ? "2" : "1");
+  r.setAttribute("gap", article ? "6%" : "7%");
   r.setAttribute("margin", "36px");
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) r.removeAttribute("animated");
   else r.setAttribute("animated", "");
-  r.setStyles?.(bookCss(s));
+  r.setStyles?.(bookCss(s, article));
 }

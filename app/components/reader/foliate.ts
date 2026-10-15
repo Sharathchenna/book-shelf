@@ -41,8 +41,9 @@ export type FoliateView = HTMLElement & {
   goToFraction: (fraction: number) => Promise<void>;
   goLeft: () => Promise<void>;
   goRight: () => Promise<void>;
-  prev: () => Promise<void>;
-  next: () => Promise<void>;
+  /** Back or on a page, or, scrolled, by `distance` pixels. */
+  prev: (distance?: number) => Promise<void>;
+  next: (distance?: number) => Promise<void>;
   getCFI: (index: number, range: Range) => string;
   getSectionFractions: () => number[];
   addAnnotation: (annotation: Annotation, remove?: boolean) => Promise<void>;
@@ -163,8 +164,12 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   spread: true,
 };
 
-/** CSS injected into each book document (as foliate's demo reader does). */
-export function bookCss(s: ReaderSettings): string {
+/**
+ * CSS injected into each book document (as foliate's demo reader does). An article (a clipping
+ * made into an ebook, x-article-epub.ts) is set as Gloss sets its pages: one scrolled column,
+ * a little larger, ragged right, starting below the bar that floats over it.
+ */
+export function bookCss(s: ReaderSettings, article = false): string {
   const t = THEMES[s.theme];
   const font = FONTS[s.font].stack;
   return `
@@ -193,6 +198,17 @@ export function bookCss(s: ReaderSettings): string {
     html.narrator-tap { cursor: pointer; }
     pre { white-space: pre-wrap !important; }
     aside[epub|type~="footnote"], aside[epub|type~="endnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
+    /* The theme's colours, for an article's own styles. */
+    html { --rubric: ${t.link}; --muted: ${t.muted}; --rule: color-mix(in srgb, ${t.fg} 16%, transparent); }
+    ${
+      article
+        ? `
+    html { font-size: ${Math.round(s.size * 1.18)}% !important; }
+    @media (max-width: 640px) { html { font-size: ${Math.round(s.size * 1.06)}% !important; } }
+    body { padding: 112px 0 22vh !important; }
+    p, li, blockquote, dd { text-align: start !important; hyphens: manual !important; -webkit-hyphens: manual !important; }`
+        : ""
+    }
   `;
 }
 

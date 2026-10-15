@@ -9,7 +9,7 @@ export type LibrarySection = { title: string; chars: number };
 export const ARXIV_EPUB_BUILD = 2;
 
 /** The version of the article-to-EPUB conversion (x-article-epub.ts: X Articles and web articles); older ones are rebuilt when opened. */
-export const ARTICLE_EPUB_BUILD = 1;
+export const ARTICLE_EPUB_BUILD = 2;
 
 export type BookFormat = "epub" | "pdf";
 

@@ -178,7 +178,7 @@ export function SearchPanel({ view, onGo }: { view: FoliateView; onGo: (cfi: str
 }
 
 /** The "Aa" popover: theme, font, size, spacing, width, layout. */
-export function SettingsPanel({ settings, onChange }: { settings: ReaderSettings; onChange: (s: ReaderSettings) => void }) {
+export function SettingsPanel({ settings, onChange, article }: { settings: ReaderSettings; onChange: (s: ReaderSettings) => void; article?: boolean }) {
   const set = <K extends keyof ReaderSettings>(key: K, value: ReaderSettings[K]) => onChange({ ...settings, [key]: value });
 
   return (
@@ -223,17 +223,20 @@ export function SettingsPanel({ settings, onChange }: { settings: ReaderSettings
         <Slider label="Column width" value={settings.width} min={480} max={960} step={20} format={(v) => `${v}px`} onChange={(v) => set("width", v)} />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Toggle on={settings.flow === "scrolled"} onClick={() => set("flow", settings.flow === "scrolled" ? "paginated" : "scrolled")}>
-          Scroll
-        </Toggle>
-        <Toggle on={settings.spread} onClick={() => set("spread", !settings.spread)} className="hidden sm:inline-flex">
-          Two pages
-        </Toggle>
-        <Toggle on={settings.justify} onClick={() => set("justify", !settings.justify)}>
-          Justify
-        </Toggle>
-      </div>
+      {/* An article always scrolls, in one ragged column. */}
+      {!article && (
+        <div className="flex flex-wrap gap-2">
+          <Toggle on={settings.flow === "scrolled"} onClick={() => set("flow", settings.flow === "scrolled" ? "paginated" : "scrolled")}>
+            Scroll
+          </Toggle>
+          <Toggle on={settings.spread} onClick={() => set("spread", !settings.spread)} className="hidden sm:inline-flex">
+            Two pages
+          </Toggle>
+          <Toggle on={settings.justify} onClick={() => set("justify", !settings.justify)}>
+            Justify
+          </Toggle>
+        </div>
+      )}
     </div>
   );
 }
@@ -290,7 +293,7 @@ function Toggle({ on, onClick, className = "", children }: { on: boolean; onClic
  * The brief on a paper or article (lib/ai/brief.ts): the gist, its load-bearing claims and its
  * caveats, each with the section that shows it. Written the first time it's opened, then kept.
  */
-export function BriefPanel({ bookId, sectionLabel, onGo }: { bookId: string; sectionLabel: (section: number) => string; onGo: (section: number) => void }) {
+export function BriefPanel({ bookId, sectionLabel, onGo }: { bookId: string; sectionLabel: (section: number) => string; onGo?: (section: number) => void }) {
   const [state, setState] = useState<{ status: "loading" | "writing" | "ready" | "error"; brief?: Brief; error?: string }>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
 
@@ -339,7 +342,7 @@ export function BriefPanel({ bookId, sectionLabel, onGo }: { bookId: string; sec
   const point = (p: BriefPoint, i: number) => (
     <li key={i} className="rounded-2xl px-2 py-2">
       <p className="text-[15px] leading-relaxed">{p.text}</p>
-      {p.section !== undefined && (
+      {p.section !== undefined && onGo && (
         <button onClick={() => onGo(p.section!)} className="mt-1 max-w-full truncate text-xs text-accent hover:underline">
           {sectionLabel(p.section)} →
         </button>

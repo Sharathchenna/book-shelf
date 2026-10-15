@@ -1,18 +1,22 @@
 /**
  * Turns a clipped article (an X Article, or any other, read whole by lib/web-article.ts) into an
- * EPUB, so it reads in the EPUB reader like a book: themes, fonts, highlights and notes, and read
- * aloud. Its blocks (lib/x-article-types.ts) map onto plain XHTML: a chapter per top-level
- * heading, the title, author and cover on the first page, and the pictures fetched through the
- * site (the reader's pages can't load them from other sites).
+ * EPUB, so it opens in the reader with its highlights, notes, AI and reading aloud. It is made to
+ * read like a page in Gloss rather than a book: one section the reader scrolls from top to bottom
+ * (reader-view.tsx shows articles scrolled), headed by the site, the title, a standfirst and the
+ * byline, with the pictures fetched through the site (the reader's pages can't load them from
+ * other sites). Its blocks (lib/x-article-types.ts) map onto plain XHTML.
  */
-import type { XArticle, XArticleBlock } from "@/lib/x-article-types";
+import { articleMinutes, type XArticle, type XArticleBlock } from "@/lib/x-article-types";
 import { webArticle, type WebPage } from "./web-article";
 
-type Chapter = { file: string; title: string; html: string[]; headings: { id: string; label: string }[] };
+/** The page, and its headings for the contents: the top level the article uses, and those under it. */
+type Page = { title: string; html: string[]; headings: { id: string; label: string; sub: boolean }[]; lede: boolean };
 type Image = { path: string; data: Blob; cover?: boolean };
 
 const XHTML = "http://www.w3.org/1999/xhtml";
+const FILE = "article.xhtml";
 const MAX_IMAGES = 150;
+const HEADINGS = ["header-one", "header-two", "header-three"];
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
 
 export async function buildArticleEpub(clipId: string, onProgress: (label: string) => void): Promise<Blob> {
@@ -44,36 +48,30 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
     onProgress(`Fetching pictures ${++done} of ${wanted.length}…`);
   });
 
-  // ---- chapters: split at the top level of headings the article uses, when it uses several ----
-  onProgress("Binding the book…");
-  const top = ["header-one", "header-two"].find((t) => article.blocks.filter((b) => b.type === t).length >= 2);
-  const first: Chapter = { file: "c0.xhtml", title: article.title, html: [], headings: [] };
-  first.html.push(titlePage(article, pathOf));
-  const chapters: Chapter[] = [first];
-  let current = first;
+  // ---- the page ----
+  onProgress("Setting the page…");
+  // The contents list the top level of headings the article uses, with the next level under each.
+  const top = HEADINGS.find((t) => article.blocks.some((b) => b.type === t && b.text.trim()));
+  const page: Page = { title: article.title.trim(), html: [masthead(article, pathOf)], headings: [], lede: false };
   const blocks = article.blocks;
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
-    if (top && block.type === top && block.text.trim()) {
-      current = { file: `c${chapters.length}.xhtml`, title: block.text.trim(), html: [], headings: [] };
-      chapters.push(current);
-    }
     // Consecutive list items or lines of code make one list or one code block.
     if (/list-item$/.test(block.type)) {
       let end = i;
       while (end + 1 < blocks.length && /list-item$/.test(blocks[end + 1].type)) end++;
-      current.html.push(list(blocks.slice(i, end + 1)));
+      page.html.push(list(blocks.slice(i, end + 1)));
       i = end;
       continue;
     }
     if (block.type === "code-block") {
       let end = i;
       while (end + 1 < blocks.length && blocks[end + 1].type === "code-block") end++;
-      current.html.push(`<pre><code>${esc(blocks.slice(i, end + 1).map((b) => b.text).join("\n"))}</code></pre>`);
+      page.html.push(`<pre><code>${esc(blocks.slice(i, end + 1).map((b) => b.text).join("\n"))}</code></pre>`);
       i = end;
       continue;
     }
-    current.html.push(blockHtml(block, current, pathOf));
+    page.html.push(blockHtml(block, page, top, pathOf));
   }
 
   // ---- package ----
@@ -87,42 +85,60 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   const oebps = zip.folder("OEBPS")!;
   oebps.file("style.css", STYLE);
   for (const image of images) oebps.file(image.path, image.data);
-  for (const chapter of chapters) {
-    oebps.file(
-      chapter.file,
-      `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(chapter.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body class="xarticle">${chapter.html.join("\n")}</body></html>`,
-    );
-  }
-  oebps.file("nav.xhtml", nav(chapters, article.title));
-  oebps.file("content.opf", opf(article, chapters, images));
+  oebps.file(
+    FILE,
+    `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body class="xarticle">${page.html.join("\n")}</body></html>`,
+  );
+  oebps.file("nav.xhtml", nav(page, article.title));
+  oebps.file("content.opf", opf(article, images));
   return zip.generateAsync({ type: "blob", mimeType: "application/epub+zip", compression: "DEFLATE" });
 }
 
-/** The title, the author and date, and the cover. */
-function titlePage(article: XArticle, pathOf: Map<string, string>): string {
+/**
+ * The head of the page, as Gloss sets it: the site, the title, a standfirst, then under a rule
+ * who wrote it and when, how long it takes to read, and a link to the original; the cover last.
+ */
+function masthead(article: XArticle, pathOf: Map<string, string>): string {
   const cover = article.cover && pathOf.get(article.cover);
   const date = article.published ? fullDate.format(new Date(`${article.published}T00:00:00Z`)) : "";
+  const kicker = article.author.handle ? "X" : article.site && article.site !== article.author.name ? article.site : "";
+  // The preview is a standfirst when it is one: short, and not just the opening of the text.
+  const preview = article.preview.trim();
+  const opening = article.blocks.find((b) => b.type === "unstyled" && b.text.trim())?.text.trim() ?? "";
+  const dek = preview && preview.length <= 320 && !opening.startsWith(preview.replace(/\s*(…|\.\.\.)$/, "")) ? preview : "";
+  const who = article.author.handle ? `${article.author.name} <span class="handle">@${esc(article.author.handle)}</span>` : esc(article.author.name || article.site || "");
+  const length = { short: 26, medium: 50, long: 90 };
+  const size = article.title.length <= length.short ? "t1" : article.title.length <= length.medium ? "t2" : article.title.length <= length.long ? "t3" : "t4";
   return [
-    `<header class="title-page">`,
-    cover ? `<div class="cover"><img src="${cover}" alt=""/></div>` : "",
-    `<h1>${esc(article.title)}</h1>`,
-    article.author.handle
-      ? `<p class="byline">${esc(article.author.name)} <a href="https://x.com/${esc(article.author.handle)}">@${esc(article.author.handle)}</a>${date ? ` · ${esc(date)}` : ""}</p>`
-      : `<p class="byline">${esc([article.author.name, article.site !== article.author.name ? article.site : "", date].filter(Boolean).join(" · "))} <a href="${esc(article.url)}">↗</a></p>`,
+    `<header class="masthead">`,
+    kicker ? `<p class="kicker"><span class="dot"></span>${esc(kicker)}</p>` : "",
+    `<h1 class="${size}">${esc(article.title)}</h1>`,
+    dek ? `<p class="dek">${esc(dek)}</p>` : "",
+    `<div class="byline"><div class="who">`,
+    `<p class="name">${who}${date ? `<span class="date">  ·  ${esc(date)}</span>` : ""}</p>`,
+    `<p class="length">${articleMinutes(article)} min read</p>`,
+    `</div>`,
+    /^https?:\/\//i.test(article.url) ? `<a class="original" href="${esc(article.url)}">Original ↗</a>` : "",
+    `</div>`,
+    cover ? `<figure class="cover"><img src="${cover}" alt=""/></figure>` : "",
     `</header>`,
   ].join("");
 }
 
-function blockHtml(block: XArticleBlock, chapter: Chapter, pathOf: Map<string, string>): string {
+function blockHtml(block: XArticleBlock, page: Page, top: string | undefined, pathOf: Map<string, string>): string {
   switch (block.type) {
     case "header-one":
     case "header-two":
     case "header-three": {
       const level = { "header-one": 2, "header-two": 3, "header-three": 4 }[block.type];
-      // Unique in the chapter: its place among the chapter's blocks.
-      const id = `h${chapter.file.replace(/\D/g, "")}-${chapter.html.length}`;
-      // The heading a chapter starts with is the chapter's own title; the others go in the contents under it.
-      if (block.text.trim() && block.text.trim() !== chapter.title) chapter.headings.push({ id, label: block.text.trim() });
+      // Unique on the page: its place among the page's blocks.
+      const id = `h${page.html.length}`;
+      const label = block.text.trim();
+      // A heading repeating the title is left out of the contents, which start with the title.
+      if (label && label !== page.title && top) {
+        if (block.type === top) page.headings.push({ id, label, sub: false });
+        else if (block.type === HEADINGS[HEADINGS.indexOf(top) + 1] && page.headings.length) page.headings.push({ id, label, sub: true });
+      }
       return `<h${level} id="${id}">${inline(block)}</h${level}>`;
     }
     case "blockquote":
@@ -148,8 +164,16 @@ function blockHtml(block: XArticleBlock, chapter: Chapter, pathOf: Map<string, s
         return `<table><thead>${row(head, "th")}</thead><tbody>${rows.map((r) => row(r, "td")).join("")}</tbody></table>`;
       }
       return "";
-    default:
-      return block.text.trim() ? `<p>${inline(block)}</p>` : "";
+    default: {
+      if (!block.text.trim()) return "";
+      // The opening paragraph starts with a coloured capital, as in Gloss.
+      // Not on an editor's note set in italics, which some articles open with.
+      // (Its italics can come in pieces, around its links.)
+      const italic = block.styles.filter((r) => r.style === "Italic").reduce((n, r) => n + r.length, 0) >= block.text.trim().length * 0.8;
+      const lede = !page.lede && !italic && /^\p{L}/u.test(block.text.trim()) && block.text.trim().length > 60;
+      if (lede) page.lede = true;
+      return `<p${lede ? ' class="lede"' : ""}>${inline(block)}</p>`;
+    }
   }
 }
 
@@ -211,17 +235,17 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function nav(chapters: Chapter[], title: string): string {
-  const items = chapters
-    .map((c) => {
-      const sub = c.headings.length ? `<ol>${c.headings.map((h) => `<li><a href="${c.file}#${h.id}">${esc(h.label)}</a></li>`).join("")}</ol>` : "";
-      return `<li><a href="${c.file}">${esc(c.title)}</a>${sub}</li>`;
-    })
-    .join("");
-  return `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(title)}</title></head><body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol>${items}</ol></nav></body></html>`;
+function nav(page: Page, title: string): string {
+  const items: string[] = [];
+  for (const h of page.headings) {
+    const link = `<a href="${FILE}#${h.id}">${esc(h.label)}</a>`;
+    if (h.sub && items.length) items[items.length - 1] = items[items.length - 1].replace(/(<\/ol>)?<\/li>$/, (_, ol) => `${ol ? "" : "<ol>"}<li>${link}</li></ol></li>`);
+    else items.push(`<li>${link}</li>`);
+  }
+  return `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(title)}</title></head><body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol><li><a href="${FILE}">${esc(title)}</a></li>${items.join("")}</ol></nav></body></html>`;
 }
 
-function opf(article: XArticle, chapters: Chapter[], images: Image[]): string {
+function opf(article: XArticle, images: Image[]): string {
   const mime = (path: string) => ({ jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[path.split(".").pop()!] ?? "image/png";
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" xml:lang="en">
@@ -236,10 +260,10 @@ function opf(article: XArticle, chapters: Chapter[], images: Image[]): string {
 <manifest>
 <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 <item id="css" href="style.css" media-type="text/css"/>
-${chapters.map((c, i) => `<item id="c${i}" href="${c.file}" media-type="application/xhtml+xml"/>`).join("\n")}
+<item id="page" href="${FILE}" media-type="application/xhtml+xml"/>
 ${images.map((img, i) => `<item id="i${i}" href="${img.path}" media-type="${mime(img.path)}"${img.cover ? ' properties="cover-image"' : ""}/>`).join("\n")}
 </manifest>
-<spine>${chapters.map((_, i) => `<itemref idref="c${i}"/>`).join("")}</spine>
+<spine><itemref idref="page"/></spine>
 </package>`;
 }
 
@@ -252,27 +276,57 @@ async function pool<T>(items: T[], size: number, run: (item: T) => Promise<void>
   );
 }
 
-/** Just enough for the article's structure; the reader's theme, font and size settings apply on top (bookCss in foliate.ts). */
+/**
+ * Gloss's reading page: its title sizes, byline, headings, quotes, lists, figures and the coloured
+ * opening capital. The reader's theme, font, size and spacing settings apply on top (bookCss in
+ * foliate.ts), which also sets --rubric, --muted and --rule for the theme.
+ */
 const STYLE = `
-.xarticle .title-page { margin-bottom: 2em; }
-.xarticle .cover { margin: 0 0 1.4em; }
-.xarticle .cover img { width: 100%; height: auto; border-radius: .5em; }
-.xarticle h1 { font-size: 1.7em; line-height: 1.2; margin: 0 0 .5em; }
-.xarticle .byline { font-size: .9em; opacity: .75; }
-.xarticle .byline a { text-decoration: none; }
-.xarticle h2 { font-size: 1.35em; line-height: 1.3; margin: 1.4em 0 .6em; }
-.xarticle h3 { font-size: 1.15em; margin: 1.3em 0 .5em; }
-.xarticle h4 { font-size: 1em; margin: 1.1em 0 .4em; }
-.xarticle figure { margin: 1.4em 0; text-align: center; break-inside: avoid; }
+.xarticle { --rubric-c: var(--rubric, #1e7a58); --muted-c: var(--muted, rgba(127,127,127,.95)); --rule-c: var(--rule, rgba(127,127,127,.25)); font-variant-numeric: oldstyle-nums proportional-nums; font-kerning: normal; }
+.xarticle .masthead { margin: 0 0 3.2em; }
+.xarticle .kicker { display: flex; align-items: center; gap: .5em; margin: 0 0 1.5em; font: 500 .68em/1.3 system-ui, -apple-system, sans-serif; color: var(--muted-c); text-align: start !important; }
+.xarticle .kicker .dot { width: 6px; height: 6px; border-radius: 99px; background: var(--rubric-c); flex: none; }
+.xarticle h1 { font-weight: 380; letter-spacing: -0.022em; margin: 0; text-wrap: balance; font-variation-settings: "opsz" 72; }
+.xarticle h1.t1 { font-size: 2.9em; line-height: 1.02; }
+.xarticle h1.t2 { font-size: 2.4em; line-height: 1.06; }
+.xarticle h1.t3 { font-size: 1.95em; line-height: 1.1; }
+.xarticle h1.t4 { font-size: 1.6em; line-height: 1.14; }
+.xarticle .dek { margin: 1.1em 0 0; font-size: 1.05em; line-height: 1.55 !important; opacity: .8; text-align: start !important; hyphens: manual !important; text-wrap: pretty; }
+.xarticle .byline { display: flex; align-items: center; gap: 1em; margin: 2em 0 0; padding: 1.2em 0 0; border-top: 1px solid var(--rule-c); font-family: system-ui, -apple-system, sans-serif !important; }
+.xarticle .byline * { font-family: inherit !important; text-align: start !important; }
+.xarticle .who { flex: 1; min-width: 0; }
+.xarticle .byline p { margin: 0; line-height: 1.4 !important; }
+.xarticle .name { font-size: .74em; font-weight: 500; }
+.xarticle .name .handle, .xarticle .name .date { font-weight: 400; color: var(--muted-c); white-space: pre; }
+.xarticle .length { margin-top: .3em !important; font-size: .66em; color: var(--muted-c); }
+.xarticle .byline a.original { flex: none; padding: .55em 1em; border: 1px solid var(--rule-c); border-radius: 99px; font-size: .66em; font-weight: 500; text-decoration: none; color: inherit !important; opacity: .85; }
+.xarticle .cover { margin: 2.2em 0 0; }
+.xarticle .cover img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.xarticle p { margin: 0 0 .95em; text-wrap: pretty; }
+.xarticle p.lede::first-letter { float: left; font-size: 3.45em; line-height: .84; padding: .07em .06em 0 0; color: var(--rubric-c); font-weight: 400; }
+@supports (initial-letter: 2) or (-webkit-initial-letter: 2) {
+  .xarticle p.lede::first-letter { float: none; font-size: inherit; line-height: inherit; padding: 0; -webkit-initial-letter: 2; initial-letter: 2; margin-right: .12em; }
+}
+.xarticle h2 { font-size: 1.32em; line-height: 1.25; font-weight: 500; letter-spacing: -0.01em; margin: 2em 0 .7em; }
+.xarticle h3 { font-size: 1.08em; line-height: 1.3; font-weight: 600; margin: 1.6em 0 .5em; }
+.xarticle h4 { font-size: 1em; line-height: 1.3; font-weight: 600; margin: 1.4em 0 .4em; }
+.xarticle figure { margin: 1.6em 0 1.5em; text-align: center; }
+.xarticle figure img { display: block; max-width: 100%; height: auto; max-height: 72vh; margin: 0 auto; border-radius: 6px; }
 .xarticle img { max-width: 100%; height: auto; }
-.xarticle blockquote { margin: 1.2em 0; padding-left: 1em; border-left: 3px solid currentColor; opacity: .9; }
-.xarticle blockquote.post { border: 1px solid currentColor; border-radius: .6em; padding: .8em 1em; opacity: .85; }
-.xarticle .post-by { font-size: .85em; margin-top: .4em; }
-.xarticle pre { font-size: .8em; white-space: pre-wrap; padding: .8em 1em; border-radius: .5em; background: rgba(127,127,127,.12); }
-.xarticle code { font-size: .9em; }
-.xarticle ul, .xarticle ol { padding-left: 1.4em; }
-.xarticle li { margin: .25em 0; }
-.xarticle table { border-collapse: collapse; font-size: .85em; margin: 1.2em 0; width: 100%; }
-.xarticle th, .xarticle td { border: 1px solid rgba(127,127,127,.35); padding: .3em .5em; text-align: left; vertical-align: top; }
-.xarticle hr { border: 0; border-top: 1px solid currentColor; opacity: .3; margin: 2em 0; }
+.xarticle blockquote { margin: 1.2em 0; padding-left: 1.1em; border-left: 2px solid var(--rule-c); font-style: italic; opacity: .85; }
+.xarticle blockquote.post { font-style: normal; border: 1px solid var(--rule-c); border-radius: 10px; padding: .9em 1.1em; }
+.xarticle .post-by { font-size: .82em; margin: .4em 0 0; }
+.xarticle pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; font-size: .74em; line-height: 1.6; white-space: pre-wrap; padding: 1em 1.2em; border-radius: 8px; background: rgba(127,127,127,.1); }
+.xarticle pre *, .xarticle code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; }
+.xarticle code { font-size: .82em; padding: .1em .3em; border-radius: 4px; background: rgba(127,127,127,.1); }
+.xarticle pre code { padding: 0; background: none; font-size: 1em; }
+.xarticle ul, .xarticle ol { padding-left: 1.3em; margin: 0 0 .95em; }
+.xarticle li { margin: 0 0 .4em; }
+.xarticle li::marker { color: var(--muted-c); }
+.xarticle table { border-collapse: collapse; font-family: system-ui, -apple-system, sans-serif; font-size: .74em; margin: 1.4em 0; width: 100%; }
+.xarticle th, .xarticle td { border-bottom: 1px solid var(--rule-c); padding: .45em .6em; text-align: left; vertical-align: top; font-family: inherit !important; }
+.xarticle th { font-weight: 600; }
+.xarticle hr { border: 0; text-align: center; margin: 2.2em 0; }
+.xarticle hr::after { content: "· · ·"; letter-spacing: .5em; color: var(--muted-c); }
+.xarticle a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; text-decoration-color: var(--rule-c); }
 `;
