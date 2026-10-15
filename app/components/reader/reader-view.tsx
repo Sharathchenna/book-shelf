@@ -79,7 +79,9 @@ export function ReaderView({ id }: { id: string }) {
   const [pastTitle, setPastTitle] = useState(false);
   const [tucked, setTucked] = useState(false);
   const hairline = useRef<HTMLSpanElement>(null);
-  const lastScroll = useRef(0);
+  /** The box an article scrolls in, and what the bar last showed for it. */
+  const scroller = useRef<HTMLElement | null>(null);
+  const barState = useRef({ y: 0, scrolled: false, pastTitle: false, tucked: false, frame: 0 });
   const [toc, setToc] = useState<TocItem[]>([]);
   const [ticks, setTicks] = useState<number[]>([]);
   const [loc, setLoc] = useState<Location | null>(null);
@@ -141,27 +143,50 @@ export function ReaderView({ id }: { id: string }) {
   // ---- chrome (auto-hiding bars) ---------------------------------------------------------
 
   const poke = useEffectEvent(() => {
+    // An article's bar follows the scrolling instead. (Firefox also sends mouse moves while a
+    // page scrolls under the pointer; those would land here on every frame.)
+    if (articleRef.current) return;
     setChrome(true);
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setChrome(false), CHROME_HIDE_MS);
   });
 
   /**
-   * An article's bar, as in Gloss: frosted once the page has moved, tucked away while reading
+   * An article's bar, as in Gloss: opaque once the page has moved, tucked away while reading
    * down, back the moment the reader scrolls up, with how far they are as a hairline under it.
+   * Read once a frame from the scrolling box itself, and React hears only of changes, so the
+   * scrolling stays on the browser's own fast path.
    */
   const onScroll = useEffectEvent(() => {
-    const r = viewRef.current?.renderer as (FoliateView["renderer"] & { start: number; size: number; viewSize: number }) | undefined;
-    if (!articleRef.current || !r) return;
-    const y = r.start;
-    const max = r.viewSize - r.size;
-    if (hairline.current) hairline.current.style.transform = `scaleX(${max > 0 ? Math.min(1, y / max) : 0})`;
-    setScrolled(y > 8);
-    setPastTitle(y > 280);
-    if (Math.abs(y - lastScroll.current) < 6) return;
-    setTucked(y > lastScroll.current && y > 240);
-    lastScroll.current = y;
+    const bar = barState.current;
+    if (bar.frame) return;
+    bar.frame = requestAnimationFrame(() => {
+      bar.frame = 0;
+      const box = scroller.current;
+      if (!box) return;
+      const y = box.scrollTop;
+      const max = box.scrollHeight - box.clientHeight;
+      if (hairline.current) hairline.current.style.transform = `scaleX(${max > 0 ? Math.min(1, y / max) : 0})`;
+      const scrolled = y > 8;
+      const pastTitle = y > 280;
+      if (scrolled !== bar.scrolled) setScrolled((bar.scrolled = scrolled));
+      if (pastTitle !== bar.pastTitle) setPastTitle((bar.pastTitle = pastTitle));
+      if (Math.abs(y - bar.y) < 6) return;
+      const tucked = y > bar.y && y > 240;
+      bar.y = y;
+      if (tucked !== bar.tucked) setTucked((bar.tucked = tucked));
+    });
   });
+
+  /** Scrolls an article natively (smoothly, unless the reader prefers less motion). */
+  const scrollArticle = (by: number | "top" | "end") => {
+    const box = scroller.current;
+    if (!box) return;
+    const behavior: ScrollBehavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    if (by === "top") box.scrollTo({ top: 0, behavior });
+    else if (by === "end") box.scrollTo({ top: box.scrollHeight, behavior });
+    else box.scrollBy({ top: by, behavior });
+  };
 
   // ---- notes ----------------------------------------------------------------------------
 
@@ -283,14 +308,29 @@ export function ReaderView({ id }: { id: string }) {
       if (e.key === "Escape") (target as HTMLInputElement).blur();
       return;
     }
+    // An article scrolls with the browser's own smooth scrolling, a screenful (less a little) a page.
+    const page = () => (scroller.current?.clientHeight ?? window.innerHeight) - 80;
+    const turns: Record<string, () => void> = articleRef.current
+      ? {
+          ArrowUp: () => scrollArticle(-80),
+          ArrowDown: () => scrollArticle(80),
+          ArrowLeft: () => scrollArticle(-page()),
+          ArrowRight: () => scrollArticle(page()),
+          PageUp: () => scrollArticle(-page()),
+          PageDown: () => scrollArticle(page()),
+          " ": () => scrollArticle(e.shiftKey ? -page() : page()),
+          Home: () => scrollArticle("top"),
+          End: () => scrollArticle("end"),
+        }
+      : {
+          ArrowLeft: () => void view.goLeft(),
+          ArrowRight: () => void view.goRight(),
+          PageUp: () => void view.prev(),
+          PageDown: () => void view.next(),
+          " ": () => void (e.shiftKey ? view.prev() : view.next()),
+        };
     const keys: Record<string, () => void> = {
-      ArrowLeft: () => void view.goLeft(),
-      ArrowRight: () => void view.goRight(),
-      // In the page itself the arrows scroll it; from outside it (the bar), they scroll it too.
-      ...(articleRef.current ? { ArrowUp: () => void view.prev(80), ArrowDown: () => void view.next(80) } : {}),
-      PageUp: () => void view.prev(),
-      PageDown: () => void view.next(),
-      " ": () => void (e.shiftKey ? view.prev() : view.next()),
+      ...turns,
       t: () => setPanel((p) => (p === "toc" ? null : "toc")),
       c: () => setChat((c) => !c),
       l: () => listen(),
@@ -376,6 +416,7 @@ export function ReaderView({ id }: { id: string }) {
   useEffect(() => {
     let cancelled = false;
     let view: FoliateView | null = null;
+    const bar = barState.current;
 
     (async () => {
       const res = await fetch(`/api/books/${id}`);
@@ -432,12 +473,20 @@ export function ReaderView({ id }: { id: string }) {
       await view.open(new File([file], "book.epub", { type: "application/epub+zip" }));
       sanitizeBook(view.book.transformTarget);
       applySettings(view, stored, articleRef.current);
-      view.renderer.addEventListener("scroll", () => onScroll());
+
       // ?at=<cfi> opens at a highlight (the library's daily review); otherwise where they left off.
       const at = new URLSearchParams(window.location.search).get("at");
       await view.init({ lastLocation: at ?? data.progress?.cfi ?? null, showTextStart: !at && !data.progress });
       if (cancelled) return;
 
+      if (articleRef.current) {
+        // foliate's scrolling box sits in a closed shadow root; it is the first scrollable box
+        // above the page's frame.
+        let box = view.renderer.getContents()[0]?.doc.defaultView?.frameElement?.parentElement ?? null;
+        while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+        scroller.current = box;
+        box?.addEventListener("scroll", () => onScroll(), { passive: true });
+      }
       setSettings(stored);
       setView(view);
       setBook(data.book);
@@ -465,6 +514,9 @@ export function ReaderView({ id }: { id: string }) {
       view?.close();
       view?.remove();
       viewRef.current = null;
+      scroller.current = null;
+      cancelAnimationFrame(bar.frame);
+      bar.frame = 0;
     };
   }, [id]);
 
@@ -554,13 +606,13 @@ export function ReaderView({ id }: { id: string }) {
         className={
           article
             ? `fixed inset-x-0 top-0 z-40 flex h-14 items-center gap-0.5 border-b px-2 transition-[transform,background-color,border-color] duration-300 ease-out sm:gap-2 sm:px-4 ${
-                scrolled ? "border-line backdrop-blur-md" : "border-transparent"
+                scrolled ? "border-line" : "border-transparent"
               } ${showChrome ? "translate-y-0" : "-translate-y-full"}`
             : `reader-surface fixed inset-x-3 top-3 z-40 flex h-12 items-center gap-0.5 rounded-full px-1.5 transition-all duration-300 sm:gap-2 sm:px-2 ${
                 showChrome ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-4 opacity-0"
               }`
         }
-        style={{ right: besideChat, ...(article ? { background: scrolled ? `color-mix(in srgb, ${theme.bg} 85%, transparent)` : "transparent" } : {}) }}
+        style={{ right: besideChat, ...(article ? { background: scrolled ? theme.bg : "transparent" } : {}) }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
       >
         <Link href={BACK_HREF} aria-label="Back to the library" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-chip sm:size-9">
@@ -572,7 +624,7 @@ export function ReaderView({ id }: { id: string }) {
         {/* An article's title shows here once the reader is past the one on the page. */}
         <div className={`min-w-0 flex-1 px-1 text-center transition-opacity duration-300 ${article && !pastTitle ? "opacity-0" : "opacity-100"}`}>
           {article ? (
-            <button onClick={() => void viewRef.current?.goTo(0)} title="Back to the top" className="max-w-full truncate rounded-full px-2.5 py-1 font-serif text-[16px] leading-tight hover:bg-chip">
+            <button onClick={() => scrollArticle("top")} title="Back to the top" className="max-w-full truncate rounded-full px-2.5 py-1 font-serif text-[16px] leading-tight hover:bg-chip">
               {book?.title}
             </button>
           ) : (

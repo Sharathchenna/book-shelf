@@ -75,16 +75,55 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
   };
 
   const walk = (el: Element, depth = 0) => {
+    // Loose text and inline elements between blocks (pages set as text with <br><br> between
+    // paragraphs, like Paul Graham's) make paragraphs together, broken at a blank line.
+    let run: Node[] = [];
+    const flush = () => {
+      if (run.length) push("unstyled", inline(run, abs));
+      run = [];
+    };
+    /** A footnote's mark ("[5]") left between two paragraphs ends the one before, where it was. */
+    const mark = (child: Element): boolean => {
+      const prev = out.at(-1);
+      const foot = inline([child], abs);
+      if (!/^\[?\d{1,3}\]?$|^\*{1,3}$/.test(foot.text) || prev?.type !== "unstyled" || !prev.text) return false;
+      const at = prev.text.length + 1;
+      prev.text += ` ${foot.text}`;
+      prev.styles.push(...foot.styles.map((r) => ({ ...r, offset: r.offset + at })));
+      prev.links.push(...foot.links.map((r) => ({ ...r, offset: r.offset + at })));
+      return true;
+    };
+    /** Readability can leave a footnote's opening bracket as a paragraph of its own: it starts the next. */
+    const reopen = () => {
+      if (run.length || out.at(-1)?.type !== "unstyled" || out.at(-1)?.text !== "[") return;
+      out.pop();
+      run.push(el.ownerDocument.createTextNode("["));
+    };
     for (const node of Array.from(el.childNodes)) {
       if (node.nodeType === 3) {
-        // Loose text between blocks becomes its own paragraph.
-        if (node.textContent?.trim()) push("unstyled", inline([node], abs));
+        if (node.textContent?.trim()) reopen();
+        run.push(node);
         continue;
       }
       if (node.nodeType !== 1) continue;
       const child = node as Element;
       const tag = child.tagName.toUpperCase();
       if (SKIP.has(tag)) continue;
+      if (tag === "BR") {
+        const last = run.findLast((n) => n.nodeType !== 3 || n.textContent?.trim());
+        if (last && last.nodeType === 1 && (last as Element).tagName.toUpperCase() === "BR") {
+          run.splice(run.lastIndexOf(last));
+          flush();
+        } else run.push(child);
+        continue;
+      }
+      if (INLINE.has(tag) && !child.querySelector(BLOCKS)) {
+        reopen();
+        if (!run.some((n) => n.textContent?.trim()) && mark(child)) continue;
+        run.push(child);
+        continue;
+      }
+      flush();
       if (HEADINGS[tag]) push(HEADINGS[tag], inline([child], abs));
       else if (tag === "P") {
         // A paragraph that only holds a picture is a figure.
@@ -101,9 +140,10 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
       else if (tag === "FIGURE" || tag === "PICTURE") figure(Array.from(child.querySelectorAll("img")), child.querySelector("figcaption"));
       else if (tag === "IMG") figure([child], null);
       else if (tag === "TABLE") table(child);
-      else if (child.querySelector("p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, figure, img, table, hr, div, section")) walk(child, depth);
+      else if (child.querySelector(BLOCKS)) walk(child, depth);
       else if (child.textContent?.trim()) push("unstyled", inline([child], abs));
     }
+    flush();
   };
 
   const push = (type: string, run: Inline, depth = 0) => {
@@ -151,6 +191,10 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
   walk(root);
   return out;
 }
+
+/** Elements that start a block of their own, and those that run on inside a paragraph. */
+const BLOCKS = "p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, figure, img, table, hr, div, section";
+const INLINE = new Set(["A", "ABBR", "B", "BIG", "CITE", "CODE", "DEL", "DFN", "EM", "FONT", "I", "INS", "KBD", "MARK", "Q", "S", "SAMP", "SMALL", "SPAN", "STRIKE", "STRONG", "SUB", "SUP", "TIME", "TT", "U", "VAR"]);
 
 const firstSrcset = (srcset: string | null) => srcset?.split(",")[0]?.trim().split(/\s+/)[0] ?? null;
 

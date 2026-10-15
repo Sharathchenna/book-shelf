@@ -280,6 +280,8 @@ async function pool<T>(items: T[], size: number, run: (item: T) => Promise<void>
  * Gloss's reading page: its title sizes, byline, headings, quotes, lists, figures and the coloured
  * opening capital. The reader's theme, font, size and spacing settings apply on top (bookCss in
  * foliate.ts), which also sets --rubric, --muted and --rule for the theme.
+ * No vh units: the page's frame is as tall as the article, so they would measure that, and grow
+ * with it.
  */
 const STYLE = `
 .xarticle { --rubric-c: var(--rubric, #1e7a58); --muted-c: var(--muted, rgba(127,127,127,.95)); --rule-c: var(--rule, rgba(127,127,127,.25)); font-variant-numeric: oldstyle-nums proportional-nums; font-kerning: normal; }
@@ -311,7 +313,7 @@ const STYLE = `
 .xarticle h3 { font-size: 1.08em; line-height: 1.3; font-weight: 600; margin: 1.6em 0 .5em; }
 .xarticle h4 { font-size: 1em; line-height: 1.3; font-weight: 600; margin: 1.4em 0 .4em; }
 .xarticle figure { margin: 1.6em 0 1.5em; text-align: center; }
-.xarticle figure img { display: block; max-width: 100%; height: auto; max-height: 72vh; margin: 0 auto; border-radius: 6px; }
+.xarticle figure img { display: block; max-width: 100%; height: auto; max-height: 640px; margin: 0 auto; border-radius: 6px; }
 .xarticle img { max-width: 100%; height: auto; }
 .xarticle blockquote { margin: 1.2em 0; padding-left: 1.1em; border-left: 2px solid var(--rule-c); font-style: italic; opacity: .85; }
 .xarticle blockquote.post { font-style: normal; border: 1px solid var(--rule-c); border-radius: 10px; padding: .9em 1.1em; }

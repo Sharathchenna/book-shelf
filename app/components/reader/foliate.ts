@@ -167,7 +167,8 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
 /**
  * CSS injected into each book document (as foliate's demo reader does). An article (a clipping
  * made into an ebook, x-article-epub.ts) is set as Gloss sets its pages: one scrolled column,
- * a little larger, ragged right, starting below the bar that floats over it.
+ * a little larger, ragged right, starting below the bar that floats over it. (In px, not vh:
+ * the page's frame is as tall as the article, so vh would measure that, and grow with it.)
  */
 export function bookCss(s: ReaderSettings, article = false): string {
   const t = THEMES[s.theme];
@@ -205,7 +206,7 @@ export function bookCss(s: ReaderSettings, article = false): string {
         ? `
     html { font-size: ${Math.round(s.size * 1.18)}% !important; }
     @media (max-width: 640px) { html { font-size: ${Math.round(s.size * 1.06)}% !important; } }
-    body { padding: 112px 0 22vh !important; }
+    body { padding: 112px 0 200px !important; }
     p, li, blockquote, dd { text-align: start !important; hyphens: manual !important; -webkit-hyphens: manual !important; }`
         : ""
     }
