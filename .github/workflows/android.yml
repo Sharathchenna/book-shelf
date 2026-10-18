@@ -4,6 +4,9 @@ name: Android
 
 on:
   push:
+    # Branches as well as tags: with tags alone, pushes to a branch wouldn't run it.
+    # Paths only narrow branch pushes; a tag always runs.
+    branches: ["**"]
     paths: ["android/**", ".github/workflows/android.yml"]
     tags: ["android-v*"]
   pull_request:
