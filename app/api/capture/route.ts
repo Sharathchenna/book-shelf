@@ -1,9 +1,9 @@
-import { fromCaptureToken, isOwner } from "@/lib/auth/session";
+import { fromCaptureToken, isOwner, requestDevice } from "@/lib/auth/session";
 import { saveLink } from "@/lib/save";
 
 /**
- * Saving a link from elsewhere: the iOS share-sheet shortcut (with the capture token) or a
- * signed-in browser. Takes JSON { url } or { text } (whatever the share sheet passed: the first
+ * Saving a link from elsewhere: the iOS share-sheet shortcut (with the capture token), the Android
+ * app's share target (with its device token), or a signed-in browser. Takes JSON { url } or { text } (whatever the share sheet passed: the first
  * link in it is saved), with an optional note, and answers in a sentence fit for a notification.
  */
 export async function POST(request: Request) {
@@ -18,7 +18,9 @@ export async function POST(request: Request) {
   const note = typeof body.note === "string" && body.note.trim() ? body.note.slice(0, 2000) : undefined;
 
   try {
-    const { clip, refreshed } = await saveLink(url, { note, ...(token ? { via: "phone" as const } : {}) });
+    // From a phone (the shortcut, or the app's share sheet), so the library can show where it came from.
+    const fromPhone = token || (await requestDevice()) !== null;
+    const { clip, refreshed } = await saveLink(url, { note, ...(fromPhone ? { via: "phone" as const } : {}) });
     const what = clip.tweet ? `@${clip.tweet.handle}: ${clip.tweet.text}` : (clip.title ?? clip.url);
     return reply(`${refreshed ? "Already saved, refreshed" : "Saved"}. ${what.replace(/\s+/g, " ").slice(0, 120)}`);
   } catch (error) {

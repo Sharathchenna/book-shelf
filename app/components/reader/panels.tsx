@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Brief, BriefPoint, StoredBrief } from "@/lib/brief-types";
+import { hasCfi } from "@/lib/anchor";
 import type { Highlight } from "@/lib/library-types";
+import { InkDrawing } from "./ink";
 import {
   FONTS,
   HIGHLIGHT_HEX,
@@ -60,7 +62,8 @@ export function NotesPanel({
 }: {
   notes: Highlight[];
   sectionTitle: (index: number) => string;
-  onGo: (cfi: string) => void;
+  /** A CFI or "page:N"; a section's index for a drawing from the app, which has no place of its own here. */
+  onGo: (target: string | number) => void;
   onDelete: (id: string) => void;
   /** The highlights and notes as Markdown (lib/export.ts), for Copy. */
   markdown?: () => string;
@@ -92,11 +95,17 @@ export function NotesPanel({
         {sorted.map((n) => (
           <li key={n.id} className="group rounded-2xl p-3 transition-colors hover:bg-chip">
             <p className="text-[11px] tracking-[0.12em] text-muted uppercase">{sectionTitle(n.sectionIndex)}</p>
-            <button onClick={() => onGo(n.cfi)} className="mt-1.5 block w-full text-left">
-              <span className="font-serif text-[15px] leading-snug" style={{ boxShadow: `inset 0 -0.55em 0 ${HIGHLIGHT_HEX[n.color]}88` }}>
+            <button onClick={() => onGo(hasCfi(n.cfi) ? n.cfi : n.sectionIndex)} className="mt-1.5 block w-full text-left">
+              <span className="font-serif text-[15px] leading-snug" style={{ boxShadow: n.ink ? undefined : `inset 0 -0.55em 0 ${HIGHLIGHT_HEX[n.color]}88` }}>
                 {n.text}
               </span>
             </button>
+            {n.ink && (
+              <>
+                <InkDrawing ink={n.ink} className="mt-2 block rounded-xl bg-chip p-2 [&>svg]:h-auto [&>svg]:max-h-48 [&>svg]:w-full" />
+                {n.ink.recognized && <p className="mt-1 text-xs text-muted italic">{n.ink.recognized}</p>}
+              </>
+            )}
             {n.note && <p className="mt-2 border-l-2 border-line pl-3 text-sm text-muted">{n.note}</p>}
             <button onClick={() => onDelete(n.id)} className="mt-2 text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg focus:opacity-100">
               Remove

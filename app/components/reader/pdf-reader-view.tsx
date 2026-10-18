@@ -8,6 +8,7 @@ import { notesMarkdown } from "@/lib/export";
 import { AiCard, useAiStream } from "./ai-card";
 import { ChatPanel, type ChatQuote, type Cite } from "./chat-panel";
 import { BACK_HREF, BarButton, CHAT_SPACE, ChatIcon, Icon, OpeningBook, SelectionPopover, useWideScreen, type Selected } from "./chrome";
+import { InkDrawing } from "./ink";
 import { HIGHLIGHT_HEX, THEMES, type ThemeName, type TocItem } from "./foliate";
 import { BriefPanel, Drawer, NotesPanel, TocPanel } from "./panels";
 import { COST_PER_PAGE, readScannedPages, scannedPages } from "./scanned";
@@ -237,40 +238,49 @@ export function PdfReaderView({ id }: { id: string }) {
 
   // ---- notes ----------------------------------------------------------------------------
 
-  const saveNotes = (next: Highlight[]) => {
+  /** Sets the book's highlights, and sends the server the ones that changed (lib/library.ts merges them). */
+  const saveNotes = (next: Highlight[], changes: Highlight[]) => {
     notesRef.current = next;
     setNotes(next);
     void fetch(`/api/books/${id}/notes`, {
-      method: "PUT",
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ notes: next }),
+      body: JSON.stringify({ changes }),
     }).catch(() => {});
   };
 
   const addHighlight = (sel: PdfSelected, color: HighlightColor, note?: string) => {
-    saveNotes([
-      ...notesRef.current,
-      {
-        id: newId(),
-        cfi: `page:${sel.page}`,
-        rects: sel.rects,
-        text: sel.text.slice(0, 4000),
-        color,
-        note,
-        sectionIndex: sel.page - 1,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    const now = new Date().toISOString();
+    const highlight: Highlight = {
+      id: newId(),
+      cfi: `page:${sel.page}`,
+      rects: sel.rects,
+      text: sel.text.slice(0, 4000),
+      color,
+      note,
+      sectionIndex: sel.page - 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    saveNotes([...notesRef.current, highlight], [highlight]);
     window.getSelection()?.removeAllRanges();
     setSelected(null);
     setNoteDraft(null);
   };
 
-  const updateHighlight = (noteId: string, change: Partial<Highlight>) =>
-    saveNotes(notesRef.current.map((n) => (n.id === noteId ? { ...n, ...change } : n)));
+  const updateHighlight = (noteId: string, change: Partial<Highlight>) => {
+    const next = notesRef.current.map((n) => (n.id === noteId ? { ...n, ...change, updatedAt: new Date().toISOString() } : n));
+    const updated = next.find((n) => n.id === noteId);
+    if (updated) saveNotes(next, [updated]);
+  };
 
   const removeHighlight = (noteId: string) => {
-    saveNotes(notesRef.current.filter((n) => n.id !== noteId));
+    const note = notesRef.current.find((n) => n.id === noteId);
+    if (!note) return;
+    saveNotes(
+      notesRef.current.filter((n) => n.id !== noteId),
+      [{ ...note, deleted: true, updatedAt: new Date().toISOString() }],
+    );
     setSelected(null);
   };
 
@@ -709,8 +719,8 @@ export function PdfReaderView({ id }: { id: string }) {
             <NotesPanel
               notes={notes}
               sectionTitle={(i) => book?.sections[i]?.title ?? `Page ${i + 1}`}
-              onGo={(cfi) => {
-                goToPage(pageOf(cfi));
+              onGo={(target) => {
+                goToPage(typeof target === "number" ? target + 1 : pageOf(target));
                 setPanel(null);
               }}
               onDelete={removeHighlight}
@@ -970,6 +980,9 @@ const PdfPage = memo(function PdfPage({
               }}
             />
           )),
+        )}
+        {highlights.map((note) =>
+          note.ink?.place === "page" ? <InkDrawing key={`${note.id}-ink`} ink={note.ink} className="absolute inset-0 [&>svg]:size-full" /> : null,
         )}
       </div>
       <div ref={text} className="textLayer" />

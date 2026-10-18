@@ -65,21 +65,27 @@ export async function putProgress(id: string, progress: Progress) {
   await upsert("progress", id, progress);
 }
 
-export async function getNotes(id: string): Promise<Highlight[]> {
+const live = (notes: Highlight[]) => notes.filter((n) => !n.deleted);
+
+/** A book's highlights and notes; with `removed`, also the markers left by removed ones (for syncing devices). */
+export async function getNotes(id: string, { removed = false } = {}): Promise<Highlight[]> {
   const row = await (await db()).prepare("SELECT data FROM notes WHERE file_id = ?1").bind(id).first<{ data: string }>();
-  return row ? (JSON.parse(row.data) as Highlight[]) : [];
+  const notes = row ? (JSON.parse(row.data) as Highlight[]) : [];
+  return removed ? notes : live(notes);
 }
 
 /** How many highlights each file holds, keyed by file id. */
 export async function highlightCounts(): Promise<Map<string, number>> {
-  const { results } = await (await db()).prepare("SELECT file_id, json_array_length(data) AS n FROM notes").all<{ file_id: string; n: number }>();
+  const { results } = await (await db())
+    .prepare("SELECT file_id, (SELECT count(*) FROM json_each(notes.data) WHERE json_extract(value, '$.deleted') IS NULL) AS n FROM notes")
+    .all<{ file_id: string; n: number }>();
   return new Map(results.map((row) => [row.file_id, row.n]));
 }
 
 /** Every file's highlights, for the daily review and the Markdown export. */
 export async function allNotes(): Promise<Map<string, Highlight[]>> {
   const { results } = await (await db()).prepare("SELECT file_id, data FROM notes").all<{ file_id: string; data: string }>();
-  return new Map(results.map((row) => [row.file_id, JSON.parse(row.data) as Highlight[]]));
+  return new Map(results.map((row) => [row.file_id, live(JSON.parse(row.data) as Highlight[])]));
 }
 
 /** Where each highlight stands in the daily review (lib/review.ts), keyed by highlight id. */
@@ -98,6 +104,27 @@ export async function putReview(highlightId: string, fileId: string, review: Rev
     )
     .bind(highlightId, fileId, review.step, review.due, review.last, review.off ? 1 : 0)
     .run();
+}
+
+/** How long a removed highlight's marker is kept: longer than any device stays offline. */
+const REMOVED_KEEP_MS = 90 * 86_400_000;
+const changedAt = (n: Highlight) => n.updatedAt ?? n.createdAt;
+
+/**
+ * Applies changes to a book's highlights, from the web reader or a device: each one by its id,
+ * the newer copy winning, so two devices editing the same book offline don't undo each other.
+ * Returns the book's highlights afterwards (removed ones included).
+ */
+export async function mergeNotes(id: string, changes: Highlight[]): Promise<Highlight[]> {
+  const byId = new Map((await getNotes(id, { removed: true })).map((n) => [n.id, n]));
+  for (const change of changes) {
+    const kept = byId.get(change.id);
+    if (!kept || changedAt(change) >= changedAt(kept)) byId.set(change.id, change);
+  }
+  const now = Date.now();
+  const notes = [...byId.values()].filter((n) => !n.deleted || now - Date.parse(changedAt(n)) < REMOVED_KEEP_MS);
+  await upsert("notes", id, notes);
+  return notes;
 }
 
 export async function putNotes(id: string, notes: Highlight[]) {

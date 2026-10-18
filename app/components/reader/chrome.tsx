@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import type { Quote } from "@/lib/anchor";
 import { moreActions, READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
 import type { Highlight, HighlightColor } from "@/lib/library-types";
 import { HIGHLIGHT_HEX } from "./foliate";
@@ -18,6 +19,9 @@ export type Selected = {
   cfi: string;
   sectionIndex: number;
   sectionFraction: number;
+  /** EPUBs: the text around the selection and where it starts, so the app can find it too (lib/anchor.ts). */
+  quote?: Quote;
+  progression?: number;
   /** Set when the popover is for an existing highlight. */
   noteId?: string;
 };

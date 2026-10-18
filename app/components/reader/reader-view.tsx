@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { findQuote, hasCfi, quoteAround } from "@/lib/anchor";
 import type { Highlight, HighlightColor, LibraryBook, Progress } from "@/lib/library-types";
 import { READER_ACTIONS, type ReaderAction } from "@/lib/reader-actions";
 import { notesMarkdown } from "@/lib/export";
@@ -134,6 +135,8 @@ export function ReaderView({ id }: { id: string }) {
       cfi: detail.cfi,
       fraction: detail.fraction,
       sectionIndex: detail.section?.current ?? 0,
+      // Where in the section, so the Android app can come back here too.
+      ...(detail.range ? { progression: fractionInSection(detail.range) } : {}),
       updatedAt: new Date().toISOString(),
     };
     clearTimeout(saveTimer.current);
@@ -190,30 +193,35 @@ export function ReaderView({ id }: { id: string }) {
 
   // ---- notes ----------------------------------------------------------------------------
 
-  const saveNotes = (next: Highlight[]) => {
+  /** Sets the book's highlights, and sends the server the ones that changed (lib/library.ts merges them). */
+  const saveNotes = (next: Highlight[], changes: Highlight[]) => {
     notesRef.current = next;
     setNotes(next);
     void fetch(`/api/books/${id}/notes`, {
-      method: "PUT",
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ notes: next }),
+      body: JSON.stringify({ changes }),
     }).catch(() => {});
   };
 
   const addHighlight = (sel: Selected, color: HighlightColor, note?: string) => {
     const view = viewRef.current;
     if (!view) return;
+    const now = new Date().toISOString();
     const highlight: Highlight = {
       id: newId(),
       cfi: sel.cfi,
       text: sel.text.slice(0, 4000),
+      ...(sel.quote ? { quote: sel.quote } : {}),
+      ...(sel.progression !== undefined ? { progression: sel.progression } : {}),
       color,
       note,
       sectionIndex: sel.sectionIndex,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     void view.addAnnotation({ value: highlight.cfi, color: HIGHLIGHT_HEX[color] });
-    saveNotes([...notesRef.current, highlight]);
+    saveNotes([...notesRef.current, highlight], [highlight]);
     view.deselect();
     setSelected(null);
     setNoteDraft(null);
@@ -221,21 +229,47 @@ export function ReaderView({ id }: { id: string }) {
 
   const updateHighlight = (noteId: string, change: Partial<Highlight>) => {
     const view = viewRef.current;
-    const next = notesRef.current.map((n) => (n.id === noteId ? { ...n, ...change } : n));
+    const next = notesRef.current.map((n) => (n.id === noteId ? { ...n, ...change, updatedAt: new Date().toISOString() } : n));
     const updated = next.find((n) => n.id === noteId);
-    if (view && updated && change.color) {
+    if (!updated) return;
+    if (view && change.color && !updated.ink) {
       // Re-adding with the same value replaces the drawn highlight.
       void view.addAnnotation({ value: updated.cfi, color: HIGHLIGHT_HEX[updated.color] });
     }
-    saveNotes(next);
+    saveNotes(next, [updated]);
   };
 
   const removeHighlight = (noteId: string) => {
     const note = notesRef.current.find((n) => n.id === noteId);
-    if (note) void viewRef.current?.deleteAnnotation({ value: note.cfi });
-    saveNotes(notesRef.current.filter((n) => n.id !== noteId));
+    if (!note) return;
+    if (!note.ink) void viewRef.current?.deleteAnnotation({ value: note.cfi });
+    saveNotes(
+      notesRef.current.filter((n) => n.id !== noteId),
+      [{ ...note, deleted: true, updatedAt: new Date().toISOString() }],
+    );
     setSelected(null);
   };
+
+  /**
+   * Highlights made in the Android app arrive with their quote but no CFI. The first time their
+   * section opens here, find each by its text, draw it, and keep the CFI for next time.
+   */
+  const placeFromApp = useEffectEvent((doc: Document, index: number) => {
+    const view = viewRef.current;
+    if (!view) return;
+    const placed: Highlight[] = [];
+    const next = notesRef.current.map((n) => {
+      if (n.sectionIndex !== index || n.ink || hasCfi(n.cfi)) return n;
+      const range = findQuote(doc, n.text, n.quote, n.progression);
+      if (!range) return n;
+      const done = { ...n, cfi: view.getCFI(index, range), updatedAt: new Date().toISOString() };
+      placed.push(done);
+      return done;
+    });
+    if (!placed.length) return;
+    for (const n of placed) void view.addAnnotation({ value: n.cfi, color: HIGHLIGHT_HEX[n.color] });
+    saveNotes(next, placed);
+  });
 
   // ---- AI -------------------------------------------------------------------------------
 
@@ -371,6 +405,8 @@ export function ReaderView({ id }: { id: string }) {
       cfi: view.getCFI(index, range),
       sectionIndex: index,
       sectionFraction: fractionInSection(range, true),
+      quote: quoteAround(range),
+      progression: fractionInSection(range),
     });
   });
 
@@ -454,11 +490,13 @@ export function ReaderView({ id }: { id: string }) {
         doc.addEventListener("keyup", (ev) => ev.shiftKey && onSelect(doc, index));
         doc.addEventListener("click", (ev) => onTap(ev, doc));
         doc.addEventListener("mousemove", () => poke());
+        placeFromApp(doc, index);
       });
       view.addEventListener("create-overlay", (e) => {
         const { index } = (e as CustomEvent<{ index: number }>).detail;
         for (const note of notesRef.current) {
-          if (note.sectionIndex === index) void view!.addAnnotation({ value: note.cfi, color: HIGHLIGHT_HEX[note.color] });
+          // Drawings are listed in the notes panel, not drawn over the text; quote-only highlights wait for placeFromApp.
+          if (note.sectionIndex === index && !note.ink && hasCfi(note.cfi)) void view!.addAnnotation({ value: note.cfi, color: HIGHLIGHT_HEX[note.color] });
         }
       });
       view.addEventListener("draw-annotation", (e) => {
@@ -476,7 +514,10 @@ export function ReaderView({ id }: { id: string }) {
 
       // ?at=<cfi> opens at a highlight (the library's daily review); otherwise where they left off.
       const at = new URLSearchParams(window.location.search).get("at");
-      await view.init({ lastLocation: at ?? data.progress?.cfi ?? null, showTextStart: !at && !data.progress });
+      // A place saved by the Android app has no CFI: it's found by how far through the book it is.
+      const saved = data.progress && hasCfi(data.progress.cfi) ? data.progress.cfi : null;
+      await view.init({ lastLocation: at ?? saved, showTextStart: !at && !data.progress });
+      if (!at && data.progress && !saved) await view.goToFraction(data.progress.fraction);
       if (cancelled) return;
 
       if (articleRef.current) {
@@ -568,7 +609,7 @@ export function ReaderView({ id }: { id: string }) {
   const fraction = Number.isFinite(loc?.fraction) ? loc!.fraction : 0;
   const percent = Math.round((scrub ?? fraction) * 100);
   const minutesLeft = loc?.time?.section !== undefined ? Math.max(1, Math.round(loc.time.section)) : null;
-  const go = (target: string) => {
+  const go = (target: string | number) => {
     void viewRef.current?.goTo(target);
     setPanel(null);
   };

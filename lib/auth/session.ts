@@ -1,7 +1,7 @@
 import "server-only";
 import { timingSafeEqual } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getMeta, setMeta } from "../data";
 
 /**
@@ -117,17 +117,90 @@ export async function endSession() {
   (await cookies()).delete(COOKIE);
 }
 
-/** The real authorization check; call it in every owner-only route and page. */
+/**
+ * The real authorization check; call it in every owner-only route and page. The owner is the
+ * browser with the session cookie, or one of their devices (the Android app) with its token.
+ */
 export async function isOwner(): Promise<boolean> {
-  // Read the request's cookies before anything else: that is what makes every caller
+  // Read the request's cookies and headers before anything else: that is what makes every caller
   // request-time. Returning early first would let Next prerender the answer at build time.
   const token = (await cookies()).get(COOKIE)?.value;
-  if (!token || !ownerConfigured()) return false;
+  const bearer = (await headers()).get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+  if (!ownerConfigured()) return false;
+  if (token) {
+    try {
+      const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+      if (payload.role === "owner") return true;
+    } catch {}
+  }
+  return bearer ? fromDeviceToken(bearer) : false;
+}
+
+// ---- devices -------------------------------------------------------------------------------
+
+/**
+ * The owner's devices (the Android app), each signed in with the password once. A device token
+ * is a signed JWT with the full rights of the session cookie. It doesn't expire: signing the
+ * device out (or out of everything) revokes it, since only each token's id is kept, hashed.
+ */
+const DEVICES_META = "devices";
+
+export type Device = { id: string; name: string; created: string };
+type StoredDevice = Device & { hash: string };
+
+async function storedDevices(): Promise<StoredDevice[]> {
+  const stored = await getMeta(DEVICES_META);
+  return stored ? (JSON.parse(stored) as StoredDevice[]) : [];
+}
+
+export async function listDevices(): Promise<Device[]> {
+  return (await storedDevices()).map(({ id, name, created }) => ({ id, name, created }));
+}
+
+export async function createDeviceToken(name: string): Promise<{ token: string; device: Device }> {
+  const jti = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const device: Device = { id: jti.slice(0, 12), name: name.slice(0, 80) || "Device", created: new Date().toISOString() };
+  // A handful at most: the oldest goes when there are too many.
+  const devices = [...(await storedDevices()), { ...device, hash: await sha256(jti) }].slice(-20);
+  await setMeta(DEVICES_META, JSON.stringify(devices));
+  const token = await new SignJWT({ scope: "device", device: device.id })
+    .setProtectedHeader({ alg: "HS256" })
+    .setJti(jti)
+    .setIssuedAt()
+    .sign(secret());
+  return { token, device };
+}
+
+export async function revokeDevice(id: string): Promise<boolean> {
+  const devices = await storedDevices();
+  const rest = devices.filter((d) => d.id !== id);
+  if (rest.length === devices.length) return false;
+  await setMeta(DEVICES_META, rest.length ? JSON.stringify(rest) : null);
+  return true;
+}
+
+/** The device a request's bearer token belongs to, when it's a current device token. */
+export async function requestDevice(): Promise<Device | null> {
+  const bearer = (await headers()).get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+  return bearer ? deviceOf(bearer) : null;
+}
+
+async function fromDeviceToken(token: string): Promise<boolean> {
+  return (await deviceOf(token)) !== null;
+}
+
+async function deviceOf(token: string): Promise<Device | null> {
   try {
     const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
-    return payload.role === "owner";
+    if (payload.scope !== "device" || !payload.jti) return null;
+    const hash = Buffer.from(await sha256(payload.jti));
+    for (const { hash: stored, ...device } of await storedDevices()) {
+      const b = Buffer.from(stored);
+      if (b.length === hash.length && timingSafeEqual(hash, b)) return device;
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 

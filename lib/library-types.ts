@@ -37,11 +37,13 @@ export type LibraryBook = {
 };
 
 export type Progress = {
-  /** An EPUB CFI, or "page:N" (1-based) in a PDF. */
+  /** An EPUB CFI, or "page:N" (1-based) in a PDF. Empty when the Android app saved it: then `progression`. */
   cfi: string;
   /** Through the whole book, 0–1. */
   fraction: number;
   sectionIndex: number;
+  /** EPUBs: how far through the section, 0–1, which both readers can go to. */
+  progression?: number;
   updatedAt: string;
 };
 
@@ -49,16 +51,47 @@ export type HighlightColor = "yellow" | "green" | "blue" | "pink";
 
 export type Highlight = {
   id: string;
-  /** An EPUB CFI, or "page:N" in a PDF. */
+  /**
+   * An EPUB CFI, or "page:N" in a PDF. Empty for a highlight made in the Android app until the web
+   * reader first opens its section and finds it by its quote (lib/anchor.ts).
+   */
   cfi: string;
   /** PDFs: the highlighted lines as [left, top, width, height], fractions of the page's size. */
   rects?: [number, number, number, number][];
   text: string;
+  /** EPUBs: a little of the text on each side, so either reader can find the highlight again. */
+  quote?: { before: string; after: string };
+  /** EPUBs: how far into its section the highlight starts, 0–1. */
+  progression?: number;
   color: HighlightColor;
   note?: string;
+  /** A drawing made with a stylus in the Android app, beside `text` (or on the PDF page). */
+  ink?: Ink;
   sectionIndex: number;
   createdAt: string;
+  /** The last change; the newer copy wins when two devices change the same highlight. */
+  updatedAt?: string;
+  /** Removed: kept a while as a marker, so a device that hasn't heard doesn't bring it back. */
+  deleted?: boolean;
 };
+
+/**
+ * A stylus drawing. On a PDF page (`place: "page"`) points are in units of the page's width, so
+ * `size` is [1, height ÷ width] and the drawing scales with the page; in an EPUB's margin they are
+ * in the drawing's own box, `size` [width, height], beside the paragraph the highlight's text starts. Its handwriting, read on the device, is kept
+ * as `recognized`, so it can be searched and exported as text.
+ */
+export type Ink = {
+  place: "page" | "margin";
+  size: [number, number];
+  /** In an EPUB's margin: where the drawing's box sits from its paragraph's corner, in its own units. */
+  offset?: [number, number];
+  strokes: InkStroke[];
+  recognized?: string;
+};
+
+/** One stroke: a colour, a nib width (in the drawing's units), and points as x, y, pressure triples. */
+export type InkStroke = { color: string; width: number; points: number[] };
 
 /** A library entry as listed for the owner: the book plus where they are in it. */
 export type LibraryEntry = LibraryBook & { progress?: Progress; coverUrl?: string };

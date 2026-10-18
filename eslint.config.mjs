@@ -22,6 +22,8 @@ const eslintConfig = defineConfig([
     "public/ort/**",
     // Gloss, another reading app kept beside this one for reference; it isn't part of the site.
     "gloss/**",
+    // The Android app (Kotlin), and its Gradle build output.
+    "android/**",
   ]),
 ]);
 

@@ -1,3 +1,4 @@
+import { inkSvg } from "./ink";
 import type { Highlight } from "./library-types";
 
 /**
@@ -23,7 +24,16 @@ const day = (iso: string) => iso.slice(0, 10);
 const order = (a: Highlight, b: Highlight) =>
   a.sectionIndex - b.sectionIndex || (Number(a.cfi.match(/^page:(\d+)/)?.[1]) || 0) - (Number(b.cfi.match(/^page:(\d+)/)?.[1]) || 0) || a.createdAt.localeCompare(b.createdAt);
 
-export function notesMarkdown(meta: NotesMeta, highlights: Highlight[], { frontmatter = true } = {}): string {
+/**
+ * `ink` says how a drawing from the Android app goes into the Markdown: the zip export saves each
+ * as an SVG file beside the notes and embeds it (`![[…]]`); otherwise it's inline SVG, which
+ * Obsidian shows as it is.
+ */
+export function notesMarkdown(
+  meta: NotesMeta,
+  highlights: Highlight[],
+  { frontmatter = true, ink = (h: Highlight) => inkSvg(h.ink!, { standalone: true }) }: { frontmatter?: boolean; ink?: (h: Highlight) => string } = {},
+): string {
   const sorted = highlights.toSorted(order);
   const out: string[] = [];
   if (frontmatter) {
@@ -51,6 +61,10 @@ export function notesMarkdown(meta: NotesMeta, highlights: Highlight[], { frontm
     }
     out.push(...h.text.trim().split(/\n+/).map((line) => `> ${line}`));
     out.push("");
+    if (h.ink) {
+      out.push(ink(h), "");
+      if (h.ink.recognized?.trim()) out.push(`*Ink:* ${h.ink.recognized.trim().replace(/\s+/g, " ")}`, "");
+    }
     if (h.note?.trim()) out.push(h.note.trim(), "");
     out.push(`<small>${h.color} · ${day(h.createdAt)}</small>`, "");
   }
@@ -59,11 +73,11 @@ export function notesMarkdown(meta: NotesMeta, highlights: Highlight[], { frontm
 }
 
 /** A file name Obsidian (and every OS) accepts, from a title. */
-export function fileName(title: string): string {
+export function fileName(title: string, ext = "md"): string {
   const name = title
     .replace(/[\\/:*?"<>|#^[\]]+/g, " ")
     .replace(/\s+/g, " ")
     .slice(0, 120)
     .trim();
-  return `${name || "Untitled"}.md`;
+  return `${name || "Untitled"}.${ext}`;
 }

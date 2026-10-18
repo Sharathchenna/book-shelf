@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { fileName, notesMarkdown, type NotesMeta } from "@/lib/export";
+import { inkSvg } from "@/lib/ink";
 import type { Highlight } from "@/lib/library-types";
 
 /** Every book's highlights and notes as Markdown files in a zip, ready for an Obsidian vault (lib/export.ts). */
@@ -23,7 +24,14 @@ export function ExportNotes() {
         let name = fileName(meta.title);
         for (let n = 2; taken.has(name); n++) name = fileName(`${meta.title} (${n})`);
         taken.add(name);
-        zip.file(`Highlights/${name}`, notesMarkdown(meta, highlights));
+        // Drawings from the Android app go beside the notes as SVG files, embedded where they belong.
+        let drawings = 0;
+        const ink = (h: Highlight) => {
+          const file = fileName(`${name.replace(/\.md$/, "")} ink ${++drawings}`, "svg");
+          zip.file(`Highlights/attachments/${file}`, inkSvg(h.ink!, { standalone: true }));
+          return `![[attachments/${file}]]`;
+        };
+        zip.file(`Highlights/${name}`, notesMarkdown(meta, highlights, { ink }));
       }
       const blob = await zip.generateAsync({ type: "blob" });
       const a = document.createElement("a");
