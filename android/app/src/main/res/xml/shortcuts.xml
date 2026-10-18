@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="continue" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_continue">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.sharathchenna.shelf" android:targetClass="com.sharathchenna.shelf.MainActivity">
+            <extra android:name="target" android:value="continue"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="search" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_search">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.sharathchenna.shelf" android:targetClass="com.sharathchenna.shelf.MainActivity">
+            <extra android:name="target" android:value="search"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="review" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_review">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.sharathchenna.shelf" android:targetClass="com.sharathchenna.shelf.MainActivity">
+            <extra android:name="target" android:value="review"/>
+        </intent>
+    </shortcut>
+</shortcuts>

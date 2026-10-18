@@ -14,6 +14,7 @@ Live at **[read.sharathchenna.com](https://read.sharathchenna.com)**. Built with
 - [Saving from X and anywhere else](#saving-from-x-and-anywhere-else)
 - [Search](#search)
 - [The readers](#the-readers)
+- [The Android app](#the-android-app)
 - [AI features and cost](#ai-features-and-cost)
 - [Privacy and security](#privacy-and-security)
 - [Operations](#operations)
@@ -461,6 +462,22 @@ With a GPU machine of your own, the same Kokoro voices run there (`narrator-serv
   - **Keep it running:** copy `narrator.service` and `narrator-tunnel.service` to `~/.config/systemd/user/` and run `systemctl --user enable --now narrator narrator-tunnel`. To have them start at boot without a login, run `loginctl enable-linger <user>` once.
   - **Restarts:** chapters waiting to be saved are kept in `~/narrator/jobs/` and resume after a restart. `journalctl --user -u narrator` shows what it saved.
 
+## The Android app
+
+A native app for Android tablets and phones (`android/`, Kotlin and Jetpack Compose), built for the Moto Pad 70 Pro: the bookcase and the cards side by side, a Readium reader with two pages to a spread in landscape, the pen for highlighting and drawing in the margin, listening in the background, and "Save to Shelf" in the share sheet. It's sideloaded: see [`android/README.md`](android/README.md) to build and install it.
+
+**Signing in.** The app signs in once with `OWNER_PASSWORD` (`POST /api/auth/token`) and keeps a device token, encrypted with the Android Keystore. A device token has the owner's full rights; `GET /api/auth/devices` lists them and `DELETE /api/auth/devices?id=…` (or Settings → Sign out in the app) signs one out. The iPhone shortcut's capture token is separate and unaffected.
+
+**What it reads.** `GET /api/library` is the whole library as data (every spine with its look, the Goodreads books, the clippings, the files and where you are in each), with an ETag, so a device that's up to date gets a 304. Books download from R2 the first time they open and stay on the device; highlights and your place are written on the device first and sent when there's a connection.
+
+**One format for highlights.** Both readers save the highlighted text with a little of what comes before and after it (`quote`) and how far into its section it starts (`progression`), as well as the web reader's CFI. The app finds highlights by their quote; the web reader turns a highlight made in the app into a CFI the first time it opens that section (`lib/anchor.ts`). `POST /api/books/[id]/notes` merges changes by id, the newer winning, and keeps a marker for a removed highlight for 90 days, so two devices editing offline don't undo each other. Highlights made before this have no quote: run `POST /api/books/anchors` once (signed in) to fill them in from each book's text.
+
+**Drawings.** In the app, the pen draws in an EPUB's margin, anchored to the nearest paragraph by its opening words (so it moves with the text), or on a PDF page. The handwriting is read on the device by ML Kit and kept as text. The web reader shows drawings, read-only, in the notes panel and on PDF pages, and the Markdown export saves each as an SVG file beside the notes, embedded where it belongs, with the handwriting as text: Obsidian shows both.
+
+**Articles and papers.** Their ebooks are made in the browser (Readability, arXiv's HTML), which a Worker's CPU limit wouldn't allow. The app opens the site's opener in a web view signed in as the device (`GET /api/auth/session`, with the device token), and takes over in its own reader once the ebook is made.
+
+**What stays on the web.** Making a narration (the web reader splits chapters into sentences), uploading EPUBs and PDFs, and new text highlights on PDFs (Readium's PDF reader has no text selection; drawings on PDF pages work).
+
 ## AI features and cost
 
 All of these are owner-only. They run on Claude Haiku 5.5 and stream as they're written.
@@ -559,3 +576,9 @@ All of these are owner-only. They run on Claude Haiku 5.5 and stream as they're 
 | `narrator-server/`, `lib/narrator.ts`, `app/api/narrate/`, `app/api/books/[id]/narrate/` | Listening on a GPU server: Kokoro on CUDA behind a Cloudflare Tunnel (Workers VPC) |
 | `worker.ts`, `wrangler.jsonc`, `open-next.config.ts`, `patches/` | Cloudflare Workers deployment: edge cache, nightly sync |
 | `shelf.config.ts` | Your name, bio, links, site URL and Goodreads id |
+| `android/` | The Android app (see [`android/README.md`](android/README.md)) |
+| `app/api/auth/`, `lib/auth/throttle.ts` | Devices: signing the app in and out, and its way into the site's own pages |
+| `app/api/library/` | The whole library as data, for the app |
+| `lib/anchor.ts`, `app/api/books/anchors/` | Highlights both readers can find: quotes, and filling them in for old highlights |
+| `lib/ink.ts`, `app/components/reader/ink.tsx` | Drawings from the app, as SVG |
+| `.github/workflows/android.yml` | Builds the app, and releases a signed APK for an `android-v*` tag |

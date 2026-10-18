@@ -1,0 +1,57 @@
+# The Android app (android/): built on every push that touches it, and released as a signed APK
+# for a tag like android-v0.2.0. The app checks these releases for updates (update/Updates.kt).
+name: Android
+
+on:
+  push:
+    paths: ["android/**", ".github/workflows/android.yml"]
+    tags: ["android-v*"]
+  pull_request:
+    paths: ["android/**"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Version from the tag
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#android-v}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Keystore
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: echo "${{ secrets.SHELF_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+      - name: Build
+        env:
+          SHELF_KEYSTORE: release.keystore
+          SHELF_KEYSTORE_PASSWORD: ${{ secrets.SHELF_KEYSTORE_PASSWORD }}
+          SHELF_KEY_ALIAS: ${{ secrets.SHELF_KEY_ALIAS }}
+          SHELF_KEY_PASSWORD: ${{ secrets.SHELF_KEY_PASSWORD }}
+        run: |
+          if [ -n "$VERSION" ]; then
+            ./gradlew :app:assembleRelease -Pshelf.version="$VERSION" -Pshelf.versionCode="$VERSION_CODE"
+          else
+            ./gradlew :app:assembleDebug :app:testDebugUnitTest
+          fi
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "shelf-$VERSION.apk"
+          gh release create "$GITHUB_REF_NAME" "shelf-$VERSION.apk" --title "Shelf for Android $VERSION" --notes "Install over the previous version, or update from the app's Settings."
+        env:
+          GH_TOKEN: ${{ github.token }}

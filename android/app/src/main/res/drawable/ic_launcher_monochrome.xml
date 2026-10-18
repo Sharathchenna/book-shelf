@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The site's icon (app/icon.svg): three books on a shelf, sized for an adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="54" android:translateY="54" android:scaleX="1.434" android:scaleY="1.434">
+        <group android:translateY="1.5" android:scaleX="1.15" android:scaleY="1.15">
+            <group android:translateX="-32" android:translateY="-29">
+                <path android:pathData="M16.6,20 h5.3 a1.6,1.6 0 0 1 1.6,1.6 v22.8 a1.6,1.6 0 0 1 -1.6,1.6 h-5.3 a1.6,1.6 0 0 1 -1.6,-1.6 v-22.8 a1.6,1.6 0 0 1 1.6,-1.6 z" android:fillColor="#FFFFFFFF"/>
+                <path android:pathData="M27.1,14 h6.3 a1.6,1.6 0 0 1 1.6,1.6 v28.8 a1.6,1.6 0 0 1 -1.6,1.6 h-6.3 a1.6,1.6 0 0 1 -1.6,-1.6 v-28.8 a1.6,1.6 0 0 1 1.6,-1.6 z" android:fillColor="#FFFFFFFF"/>
+                <path android:pathData="M30,16V8.5l1.4,1.3 1.4,-1.3V16z" android:fillColor="#FFFFFFFF"/>
+                <group android:rotation="-14" android:pivotX="41.2" android:pivotY="46">
+                    <path android:pathData="M42.800000000000004,21 h4.8 a1.6,1.6 0 0 1 1.6,1.6 v21.8 a1.6,1.6 0 0 1 -1.6,1.6 h-4.8 a1.6,1.6 0 0 1 -1.6,-1.6 v-21.8 a1.6,1.6 0 0 1 1.6,-1.6 z" android:fillColor="#FFFFFFFF"/>
+                </group>
+                <path android:pathData="M14.8,46 h34.4 a1.8,1.8 0 0 1 1.8,1.8 v0.0 a1.8,1.8 0 0 1 -1.8,1.8 h-34.4 a1.8,1.8 0 0 1 -1.8,-1.8 v-0.0 a1.8,1.8 0 0 1 1.8,-1.8 z" android:fillColor="#FFFFFFFF"/>
+            </group>
+        </group>
+    </group>
+</vector>

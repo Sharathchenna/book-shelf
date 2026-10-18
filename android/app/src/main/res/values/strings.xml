@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shelf</string>
+    <string name="share_label">Save to Shelf</string>
+    <string name="widget_description">The books you\'re reading, to pick up where you left off</string>
+    <string name="shortcut_continue">Continue reading</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_review">Today\'s review</string>
+</resources>
