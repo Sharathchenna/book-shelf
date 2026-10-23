@@ -123,6 +123,9 @@ fun PanelContent(
     ai: AiTask?,
     here: () -> Pair<Int, Double>,
     controller: ReaderController,
+    marks: List<Bookmark>,
+    onRemoveMark: (Bookmark) -> Unit,
+    onSendNotes: () -> Unit,
     onClose: () -> Unit,
     onEdit: (Highlight) -> Unit,
     onAi: (AiTask) -> Unit,
@@ -137,6 +140,7 @@ fun PanelContent(
             Text(
                 when (panel) {
                     Panel.Contents -> "Contents"
+                    Panel.Search -> "Search"
                     Panel.Notes -> "Highlights & notes"
                     Panel.Ai -> when (task) {
                         is AiTask.Explain -> SelectionAction.entries.find { it.action == task.action }?.label ?: "Explain"
@@ -153,11 +157,24 @@ fun PanelContent(
             }
         }
         when (panel) {
-            Panel.Contents -> Contents(book.publication.tableOfContents.ifEmpty { book.publication.readingOrder }) { link ->
-                controller.navigator?.go(link, animated = false)
-                onClose()
+            Panel.Contents -> {
+                var tab by remember { mutableStateOf(0) }
+                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Chapters") })
+                    FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text(if (marks.isEmpty()) "Bookmarks" else "Bookmarks  ${marks.size}") })
+                }
+                if (tab == 0) Contents(book.publication.tableOfContents.ifEmpty { book.publication.readingOrder }) { link ->
+                    controller.navigator?.go(link, animated = false)
+                    onClose()
+                } else BookmarksList(book, marks, onGo = { controller.go(it.locator); onClose() }, onRemove = onRemoveMark)
             }
-            Panel.Notes -> NotesList(book, notes, onGo = { n -> book.locatorOf(n)?.let(controller::go); onClose() }, onEdit = onEdit)
+            Panel.Search -> SearchPanel(book, controller)
+            Panel.Notes -> {
+                if (notes.any { !it.isDeleted }) Row(Modifier.padding(horizontal = 16.dp)) {
+                    OutlinedButton(onClick = onSendNotes) { Text("Send to Obsidian") }
+                }
+                NotesList(book, notes, onGo = { n -> book.locatorOf(n)?.let(controller::go); onClose() }, onEdit = onEdit)
+            }
             Panel.Ai -> AiPanel(bookId, task, onAi)
         }
     }
@@ -302,32 +319,59 @@ data class NoteEdit(val note: Highlight, val focusNote: Boolean = false)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteSheet(edit: NoteEdit, onSave: (Highlight) -> Unit, onRemove: (Highlight) -> Unit, onExplain: (Highlight) -> Unit, onDismiss: () -> Unit) {
+    var latest by remember(edit) { mutableStateOf(edit.note) }
+    ModalBottomSheet(onDismissRequest = { onSave(latest) }) {
+        NoteEditor(edit, onSave, onRemove, onExplain, onChange = { latest = it })
+    }
+}
+
+/**
+ * A highlight's colour and note, its drawing if it has one, and Explain: in a sheet on a phone,
+ * beside the page on the tablet (with `onClose`, which keeps what's written).
+ */
+@Composable
+fun NoteEditor(edit: NoteEdit, onSave: (Highlight) -> Unit, onRemove: (Highlight) -> Unit, onExplain: (Highlight) -> Unit, onChange: (Highlight) -> Unit = {}, onClose: ((Highlight) -> Unit)? = null) {
     var note by remember(edit) { mutableStateOf(edit.note.note.orEmpty()) }
     var color by remember(edit) { mutableStateOf(edit.note.color) }
+    // Stamped when it's saved (Shelf.saveNote), so the same edit is the same value from frame to frame.
+    val current = edit.note.copy(note = note.ifBlank { null }, color = color)
+    LaunchedEffect(current) { onChange(current) }
     val focus = remember { FocusRequester() }
-    LaunchedEffect(edit) { if (edit.focusNote) focus.requestFocus() }
-    ModalBottomSheet(onDismissRequest = { onSave(edit.note.copy(note = note.ifBlank { null }, color = color)) }) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).imePadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            if (edit.note.text.isNotBlank()) Text("“${edit.note.text.take(600)}”", style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic))
-            edit.note.ink?.let { InkThumbnail(it) }
-            if (edit.note.ink == null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HIGHLIGHT_ARGB.keys.forEach { c ->
-                        Box(
-                            Modifier.size(32.dp).clip(CircleShape).background(hex(colorHex(c)))
-                                .then(if (c == color) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-                                .clickable { color = c },
-                        )
-                    }
+    LaunchedEffect(edit) { if (edit.focusNote) runCatching { focus.requestFocus() } }
+    val paper = LocalPaper.current
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = if (onClose != null) 14.dp else 0.dp, bottom = 32.dp).imePadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (onClose != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (edit.note.ink != null) "Drawing" else "Highlight", fontFamily = Serif, fontSize = 26.sp, modifier = Modifier.weight(1f))
+                Box(Modifier.size(36.dp).clip(CircleShape).background(paper.chip).clickable { onClose(current) }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.Close, "Close", modifier = Modifier.size(18.dp))
                 }
             }
-            OutlinedTextField(note, { note = it }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth().focusRequester(focus), minLines = 2)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onSave(edit.note.copy(note = note.ifBlank { null }, color = color)) }) { Text("Save") }
-                if (edit.note.text.isNotBlank()) OutlinedButton(onClick = { onExplain(edit.note) }) { Text("Explain") }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { onRemove(edit.note) }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+        }
+        if (edit.note.text.isNotBlank()) Text(
+            edit.note.text.take(600),
+            fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 16.sp, lineHeight = 24.sp,
+            modifier = if (edit.note.ink == null) Modifier.background(hex(colorHex(color)).copy(alpha = 0.3f)).padding(horizontal = 4.dp) else Modifier,
+        )
+        edit.note.ink?.let { InkThumbnail(it) }
+        edit.note.ink?.recognized?.let { Text(it, style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic), color = paper.muted) }
+        if (edit.note.ink == null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HIGHLIGHT_ARGB.keys.forEach { c ->
+                    Box(
+                        Modifier.size(32.dp).clip(CircleShape).background(hex(colorHex(c)))
+                            .then(if (c == color) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                            .clickable { color = c },
+                    )
+                }
             }
+        }
+        OutlinedTextField(note, { note = it }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth().focusRequester(focus), minLines = if (onClose != null) 5 else 2)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onSave(current) }) { Text("Save") }
+            if (edit.note.text.isNotBlank()) OutlinedButton(onClick = { onExplain(edit.note) }) { Text("Explain") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { onRemove(edit.note) }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -347,13 +391,34 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
             }
             if (!isPdf) {
                 Text("TYPE", style = Eyebrow, color = LocalPaper.current.muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("original" to "Book's own", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
-                        FilterChip(selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) }, label = { Text(label) })
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("original" to "Book's own", "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
+                        FilterChip(
+                            selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) },
+                            label = { Text(label, fontFamily = when (k) { "fraunces" -> Serif; "geist" -> com.sharathchenna.shelf.ui.theme.Sans; "serif" -> androidx.compose.ui.text.font.FontFamily.Serif; "sans" -> androidx.compose.ui.text.font.FontFamily.SansSerif; else -> null }) },
+                        )
                     }
                 }
                 Text("Size ${Math.round(settings.fontSize * 100)}%")
                 Slider(value = settings.fontSize.toFloat(), onValueChange = { onChange(settings.copy(fontSize = (Math.round(it * 20) / 20.0))) }, valueRange = 0.7f..2f)
+                Text("SPACING", style = Eyebrow, color = LocalPaper.current.muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(null to "Book's own", 1.3 to "Tight", 1.55 to "Normal", 1.85 to "Loose").forEach { (h, label) ->
+                        FilterChip(selected = settings.lineHeight == h, onClick = { onChange(settings.copy(lineHeight = h)) }, label = { Text(label) })
+                    }
+                }
+                Text("Margins")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0.5 to "Narrow", 1.0 to "Normal", 1.6 to "Wide", 2.2 to "Widest").forEach { (m, label) ->
+                        FilterChip(selected = settings.margins == m, onClick = { onChange(settings.copy(margins = m)) }, label = { Text(label) })
+                    }
+                }
+                Text("Alignment")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(null to "Book's own", false to "Ragged", true to "Justified").forEach { (j, label) ->
+                        FilterChip(selected = settings.justify == j, onClick = { onChange(settings.copy(justify = j)) }, label = { Text(label) })
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Scroll instead of turning pages", Modifier.weight(1f))
                     Switch(settings.scroll, { onChange(settings.copy(scroll = it)) })

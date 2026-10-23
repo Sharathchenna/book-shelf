@@ -15,7 +15,8 @@ import kotlin.math.max
 
 private fun r(v: Double) = "%.3f".format(java.util.Locale.ROOT, v)
 
-fun inkSvg(ink: Ink): String {
+/** `scale` sizes the picture on its own (a PDF page's drawing is in units of the page's width). */
+fun inkSvg(ink: Ink, scale: Double = 1.0): String {
     val (w, h) = ink.size[0] to ink.size[1]
     val parts = StringBuilder()
     for (s in ink.strokes) {
@@ -31,7 +32,7 @@ fun inkSvg(ink: Ink): String {
             i += 3
         }
     }
-    return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${r(w)} ${r(h)}\" width=\"${r(w)}\" height=\"${r(h)}\" stroke-linecap=\"round\" fill=\"none\">$parts</svg>"
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${r(w)} ${r(h)}\" width=\"${r(w * scale)}\" height=\"${r(h * scale)}\" stroke-linecap=\"round\" fill=\"none\">$parts</svg>"
 }
 
 private fun Double.ifZero(v: Double) = if (this == 0.0) v else this

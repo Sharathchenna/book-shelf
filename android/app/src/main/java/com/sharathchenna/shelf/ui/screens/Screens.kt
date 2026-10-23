@@ -482,6 +482,7 @@ fun SettingsScreen() {
                     update?.let { Text(it, fontFamily = Sans, fontSize = 13.sp, color = paper.muted) }
                 }
             }
+            Section("Obsidian") { ObsidianSettings() }
             Section("This device") {
                 Text("Signing out forgets this device's token, the books kept offline, and anything not yet sent to the site.", fontFamily = Sans, fontSize = 14.sp, color = paper.muted)
                 OutlinedButton(onClick = { confirm = true }) { Text("Sign out") }
@@ -497,4 +498,46 @@ fun SettingsScreen() {
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
     }
+}
+
+/**
+ * The vault the notes go to: chosen once with Android's folder picker. Each book's highlights,
+ * notes and drawings are written to Shelf/<title>.md there, from its notes panel in the reader or
+ * all at once here, in the same Markdown as the site's export.
+ */
+@Composable
+private fun ObsidianSettings() {
+    val shelf = LocalShelf.current
+    val paper = LocalPaper.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var vault by remember { mutableStateOf(com.sharathchenna.shelf.data.Vault.name(context)) }
+    var status by remember { mutableStateOf<String?>(null) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) {
+            com.sharathchenna.shelf.data.Vault.choose(context, tree)
+            vault = com.sharathchenna.shelf.data.Vault.name(context)
+        }
+    }
+    Text(vault?.let { "Vault: $it" } ?: "No vault chosen", fontFamily = Serif, fontSize = 20.sp, color = paper.fg)
+    Text(
+        "Highlights, notes and drawings go into a Shelf folder in your vault, a Markdown file a book, written over each time with the latest. Send a book's from its notes in the reader, or every book's from here.",
+        fontFamily = Sans, fontSize = 14.sp, lineHeight = 20.sp, color = paper.muted,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { pick.launch(null) }) { Text(if (vault == null) "Choose the vault folder" else "Change") }
+        if (vault != null) {
+            Button(onClick = {
+                status = "Sending…"
+                scope.launch {
+                    status = runCatching {
+                        val books = shelf.api.export().books
+                        books.forEach { b -> com.sharathchenna.shelf.data.Vault.write(context, com.sharathchenna.shelf.data.notesFileName(b.meta.title), com.sharathchenna.shelf.data.notesMarkdown(b.meta, b.highlights)) }
+                        "Sent ${books.size} book${if (books.size == 1) "" else "s"} to Shelf/ in the vault."
+                    }.getOrElse { it.message ?: "Couldn't send them." }
+                }
+            }) { Text("Send every book's notes") }
+        }
+    }
+    status?.let { Text(it, fontFamily = Sans, fontSize = 13.sp, color = paper.muted) }
 }

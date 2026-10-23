@@ -44,6 +44,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.size
@@ -78,7 +84,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** The reader's panels: beside the page on a wide screen, a sheet on a narrow one. */
-enum class Panel { Contents, Notes, Ai }
+enum class Panel { Contents, Notes, Ai, Search }
 
 /** What the AI panel is doing: explaining a passage, recapping, or chatting. */
 sealed interface AiTask {
@@ -100,15 +106,28 @@ data class ReaderSettings(
     val penWrite: Boolean = true,
     /** The highlighter's colour, for the pen and the menu alike. */
     val color: String = "yellow",
+    /** Space between lines, as a multiple of the type's size; null for the book's own. */
+    val lineHeight: Double? = null,
+    /** The page's margins, as a multiple of Readium's own. */
+    val margins: Double = 1.0,
+    /** Text set flush at both edges, hyphenated; null for the book's own. */
+    val justify: Boolean? = null,
 ) {
+    /** Whether the book's own styles stand: anything chosen here overrides them. */
+    val ownStyles: Boolean get() = font == "original" && lineHeight == null && justify == null
+
     fun epub(): EpubPreferences = EpubPreferences(
         theme = when (theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
         fontSize = fontSize,
         scroll = scroll,
         // Two pages side by side when the window is wide enough (as on the tablet in landscape).
         columnCount = if (spread) ColumnCount.AUTO else ColumnCount.ONE,
-        fontFamily = when (font) { "serif" -> FontFamily.SERIF; "sans" -> FontFamily.SANS_SERIF; else -> null },
-        publisherStyles = font == "original",
+        fontFamily = when (font) { "fraunces" -> FRAUNCES; "geist" -> GEIST; "serif" -> FontFamily.SERIF; "sans" -> FontFamily.SANS_SERIF; else -> null },
+        publisherStyles = ownStyles,
+        lineHeight = lineHeight,
+        pageMargins = margins,
+        textAlign = when (justify) { true -> org.readium.r2.navigator.preferences.TextAlign.JUSTIFY; false -> org.readium.r2.navigator.preferences.TextAlign.START; null -> null },
+        hyphens = justify,
     )
 
     companion object {
@@ -124,6 +143,9 @@ data class ReaderSettings(
                 penHighlight = p.getBoolean("penHighlight", true),
                 penWrite = p.getBoolean("penWrite", true),
                 color = p.getString("color", "yellow")!!,
+                lineHeight = p.getFloat("lineHeight", 0f).takeIf { it > 0 }?.toDouble(),
+                margins = p.getFloat("margins", 1f).toDouble(),
+                justify = if (p.contains("justify")) p.getBoolean("justify", false) else null,
             )
         }
     }
@@ -132,6 +154,8 @@ data class ReaderSettings(
         context.getSharedPreferences("reader", Context.MODE_PRIVATE).edit()
             .putString("theme", theme).putFloat("fontSize", fontSize.toFloat()).putBoolean("spread", spread).putString("font", font)
             .putBoolean("penHighlight", penHighlight).putBoolean("penWrite", penWrite).putString("color", color)
+            .putFloat("lineHeight", (lineHeight ?: 0.0).toFloat()).putFloat("margins", margins.toFloat())
+            .apply { if (justify == null) remove("justify") else putBoolean("justify", justify) }
             .apply { if (!article) putBoolean("scroll", scroll) }
             .apply()
     }
@@ -211,6 +235,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     var showSettings by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var locator by remember { mutableStateOf(initial) }
+    var marks by remember { mutableStateOf(Bookmarks.load(context, file.id)) }
+    var fresh by remember { mutableStateOf<Highlight?>(null) }
+    val positions = rememberPositions(book)
 
     // Highlights and drawings, drawn again whenever they change.
     LaunchedEffect(ready, notes) { if (ready) controller.showNotes(book, notes) }
@@ -262,6 +289,15 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     }
 
     val here = { (locator?.let(book::sectionOf) ?: 0) to (locator?.locations?.progression ?: 0.0) }
+    val marked = marks.any { it.isAt(locator) }
+    val toggleMark = {
+        locator?.let { at ->
+            marks = if (marked) marks.filterNot { it.isAt(at) }
+            else marks + Bookmark(UUID.randomUUID().toString().take(12), at, at.title ?: book.linkFor(book.sectionOf(at))?.title ?: file.sections.getOrNull(book.sectionOf(at))?.title.orEmpty(), System.currentTimeMillis())
+            Bookmarks.save(context, file.id, marks)
+        }
+        Unit
+    }
 
     /** What the selection menu asked for, applied to the text selected now. */
     val onSelection: (SelectionAction) -> Unit = { action ->
@@ -286,7 +322,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         updatedAt = now,
                     )
                     shelf.saveNote(file.id, note)
-                    if (action == SelectionAction.Note) editing = NoteEdit(note, focusNote = true)
+                    if (action == SelectionAction.Note) editing = NoteEdit(note, focusNote = true) else fresh = note
                 }
                 SelectionAction.Explain, SelectionAction.Define, SelectionAction.Simplify, SelectionAction.Check, SelectionAction.Related, SelectionAction.Counter -> {
                     ai = AiTask.Explain(text, action.action!!, section, fraction)
@@ -342,6 +378,35 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
         true
     }
 
+    // The book's notes into the Obsidian vault (Settings), or, with no vault chosen, to any app that takes text.
+    val sendNotes: () -> Unit = {
+        val meta = com.sharathchenna.shelf.data.NotesMeta(
+            title = file.title,
+            author = file.author.takeIf { it.isNotBlank() },
+            kind = if (file.paperId != null) "paper" else if (file.clipId != null) "article" else "book",
+            sections = file.sections.map { it.title },
+        )
+        val markdown = com.sharathchenna.shelf.data.notesMarkdown(meta, notes)
+        val name = com.sharathchenna.shelf.data.notesFileName(file.title)
+        if (com.sharathchenna.shelf.data.Vault.folder(context) == null) {
+            context.startActivity(
+                android.content.Intent.createChooser(
+                    android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/markdown").putExtra(android.content.Intent.EXTRA_TEXT, markdown).putExtra(android.content.Intent.EXTRA_SUBJECT, name.removeSuffix(".md")),
+                    "Send the notes",
+                ),
+            )
+        } else scope.launch {
+            message = runCatching { com.sharathchenna.shelf.data.Vault.write(context, name, markdown); "In your vault: Shelf/$name" }.getOrElse { it.message ?: "Couldn't write to the vault." }
+        }
+    }
+    val saveEdit: (Highlight) -> Unit = { note -> scope.launch { shelf.saveNote(file.id, note) }; editing = null }
+    val removeEdit: (Highlight) -> Unit = { note -> scope.launch { shelf.removeNote(file.id, note) }; editing = null }
+    val explainEdit: (Highlight) -> Unit = { note ->
+        editing = null
+        ai = AiTask.Explain(note.text, "explain", note.sectionIndex, note.progression ?: 0.0)
+        panel = Panel.Ai
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(readerBackground(settings.theme)).then(pageKeys)) {
         val wide = maxWidth >= 840.dp
         Row(Modifier.fillMaxSize()) {
@@ -358,7 +423,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     pen = pen,
                     penHighlight = settings.penHighlight && !drawing,
                     penWrite = settings.penWrite && !drawing,
-                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = 22.dp),
                 )
                 if (drawing && !book.isPdf) {
                     MarginInk(
@@ -396,10 +461,36 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         onSettings = { showSettings = true },
                         onListen = { onListen(locator?.let(book::sectionOf) ?: 0) },
                         isPdf = book.isPdf,
+                        searchable = book.searchable(),
+                        marked = marked,
+                        onMark = toggleMark,
+                    )
+                }
+                val progress = (locator?.locations?.totalProgression ?: 0.0).toFloat()
+                if (chrome && !drawing) {
+                    Scrubber(book, positions, progress, onGo = { controller.go(it) }, modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth())
+                } else if (!drawing) {
+                    val section = locator?.let(book::sectionOf) ?: 0
+                    ReadingFooter(
+                        chapter = locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
+                        where = whereLabel(book, positions, locator),
+                        progress = progress,
+                        ink = if (settings.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(end = if (panel == null) 230.dp else 0.dp),
+                    )
+                }
+                // Just highlighted: its colour, or a note, a tap away for a few seconds.
+                fresh?.let { note ->
+                    LaunchedEffect(note.id) { kotlinx.coroutines.delay(5000); if (fresh?.id == note.id) fresh = null }
+                    FreshHighlight(
+                        note,
+                        onColor = { c -> scope.launch { shelf.saveNote(file.id, note.copy(color = c)) }; fresh = null },
+                        onNote = { editing = NoteEdit(note, focusNote = true); fresh = null },
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 56.dp),
                     )
                 }
                 // The chat, always a tap away while reading, even with the bars tucked away.
-                if (panel == null && !drawing) {
+                if (panel == null && !drawing && !chrome) {
                     val paper = LocalPaper.current
                     Row(
                         Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp)
@@ -419,33 +510,26 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     Snackbar(Modifier.align(Alignment.BottomCenter).padding(24.dp), action = { TextButton(onClick = { message = null }) { Text("OK") } }) { Text(it) }
                 }
             }
-            if (wide && panel != null) {
-                Box(Modifier.width(400.dp).fillMaxHeight().background(LocalPaper.current.raised).statusBarsPadding()) {
-                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+            if (wide && (panel != null || editing != null)) {
+                Box(Modifier.width(400.dp).fillMaxHeight().background(LocalPaper.current.raised).statusBarsPadding().navigationBarsPadding()) {
+                    val edit = editing
+                    if (edit != null) NoteEditor(edit, onSave = saveEdit, onRemove = removeEdit, onExplain = explainEdit, onClose = { saveEdit(it) })
+                    else PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
                 }
             }
         }
         if (!wide && panel != null) {
             ModalBottomSheet(onDismissRequest = { panel = null }) {
                 Box(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
-                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
                 }
             }
         }
     }
 
-    editing?.let { edit ->
-        NoteSheet(
-            edit = edit,
-            onSave = { note -> scope.launch { shelf.saveNote(file.id, note) }; editing = null },
-            onRemove = { note -> scope.launch { shelf.removeNote(file.id, note) }; editing = null },
-            onExplain = { note ->
-                editing = null
-                ai = AiTask.Explain(note.text, "explain", note.sectionIndex, note.progression ?: 0.0)
-                panel = Panel.Ai
-            },
-            onDismiss = { editing = null },
-        )
+    // On the tablet the note is edited beside the page (above); on a phone, in a sheet.
+    if (!LocalConfiguration.current.let { it.screenWidthDp >= 840 }) editing?.let { edit ->
+        NoteSheet(edit = edit, onSave = saveEdit, onRemove = removeEdit, onExplain = explainEdit, onDismiss = { editing = null })
     }
     if (showSettings) {
         SettingsSheet(settings, isPdf = book.isPdf, onChange = { settings = it; it.save(context, article) }, onDismiss = { showSettings = false })
@@ -487,6 +571,9 @@ private fun TopBar(
     onDraw: () -> Unit,
     onSettings: () -> Unit,
     onListen: () -> Unit,
+    searchable: Boolean,
+    marked: Boolean,
+    onMark: () -> Unit,
 ) {
     val paper = LocalPaper.current
     Row(
@@ -499,7 +586,9 @@ private fun TopBar(
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("$percent% · $chapter", style = MaterialTheme.typography.labelSmall, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, "Contents") }
+        IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, "Contents and bookmarks") }
+        if (searchable) IconButton(onClick = { onPanel(Panel.Search) }) { Icon(Icons.Outlined.Search, "Search in the book") }
+        IconButton(onClick = onMark) { Icon(if (marked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, if (marked) "Remove the bookmark" else "Bookmark this page") }
         IconButton(onClick = { onPanel(Panel.Notes) }) { Icon(Icons.Outlined.EditNote, "Highlights and notes") }
         TextButton(onClick = onRecap) { Text("Recap") }
         // The chat, named as well as drawn: it's what the bar is most often opened for.
@@ -541,5 +630,25 @@ private fun PenMenu(at: androidx.compose.ui.geometry.Offset, onAction: (Selectio
                 )
             }
         }
+    }
+}
+
+/** The highlight just made: its colour changed, or a note added, without opening it. */
+@Composable
+private fun FreshHighlight(note: Highlight, onColor: (String) -> Unit, onNote: () -> Unit, modifier: Modifier = Modifier) {
+    val paper = LocalPaper.current
+    Row(
+        modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.raised, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        HIGHLIGHT_ARGB.forEach { (name, argb) ->
+            Box(
+                Modifier.size(34.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                    .then(if (name == note.color) Modifier.border(2.dp, paper.fg, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                    .clickable { onColor(name) }.padding(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color(argb)),
+            )
+        }
+        TextButton(onClick = onNote) { Text("Add a note") }
     }
 }

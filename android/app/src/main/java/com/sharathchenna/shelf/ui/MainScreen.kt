@@ -84,6 +84,8 @@ private enum class Tab(val key: String, val label: String, val icon: ImageVector
 fun MainScreen(nav: NavHostController, initialTab: String) {
     var tab by rememberSaveable { mutableStateOf(Tab.entries.find { it.key == initialTab } ?: Tab.Library) }
     val paper = LocalPaper.current
+    var adding by remember { mutableStateOf(false) }
+    if (adding) AddLinkSheet(onDismiss = { adding = false })
     BoxWithConstraints(Modifier.fillMaxSize().background(paper.bg)) {
         PaperGrain()
         val content: @Composable (Modifier) -> Unit = { modifier ->
@@ -95,6 +97,9 @@ fun MainScreen(nav: NavHostController, initialTab: String) {
                     Tab.Review -> ReviewScreen(nav)
                     Tab.Downloads -> DownloadsScreen(nav)
                     Tab.Settings -> SettingsScreen()
+                }
+                if (tab == Tab.Library || tab == Tab.Clippings) {
+                    AddButton(onClick = { adding = true }, modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(24.dp))
                 }
             }
         }

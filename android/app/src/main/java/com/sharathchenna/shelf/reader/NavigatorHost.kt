@@ -24,6 +24,7 @@ import org.readium.r2.navigator.VisualNavigator
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
+import org.readium.r2.navigator.epub.css.FontStyle
 import org.readium.r2.navigator.html.HtmlDecorationTemplate
 import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import org.readium.r2.navigator.input.InputListener
@@ -36,6 +37,10 @@ import org.readium.r2.shared.publication.Locator
 
 /** The colours of the site's highlighters (app/components/reader/foliate.ts HIGHLIGHT_HEX). */
 val HIGHLIGHT_ARGB = mapOf("yellow" to 0xFFFFD84D.toInt(), "green" to 0xFF8BD17C.toInt(), "blue" to 0xFF7CB8FF.toInt(), "pink" to 0xFFFF8FB8.toInt())
+
+/** The site's typefaces, served into the book's pages for its settings. */
+val FRAUNCES = org.readium.r2.navigator.preferences.FontFamily("Fraunces")
+val GEIST = org.readium.r2.navigator.preferences.FontFamily("Geist")
 
 /** A drawing in an EPUB's margin, drawn by Readium where its paragraph is, as the page lays out. */
 @Parcelize
@@ -137,7 +142,17 @@ fun NavigatorHost(
                 configuration = EpubNavigatorFragment.Configuration(
                     decorationTemplates = templates(),
                     selectionActionModeCallback = SelectionMenu(onSelection),
-                ),
+                ).apply {
+                    // The site's own type, offered in the reader's settings (assets/fonts).
+                    servedAssets = listOf("fonts/.*")
+                    addFontFamilyDeclaration(FRAUNCES) {
+                        addFontFace { addSource("fonts/Fraunces.ttf"); setFontStyle(FontStyle.NORMAL); setFontWeight(100..900) }
+                        addFontFace { addSource("fonts/Fraunces-Italic.ttf"); setFontStyle(FontStyle.ITALIC); setFontWeight(100..900) }
+                    }
+                    addFontFamilyDeclaration(GEIST) {
+                        addFontFace { addSource("fonts/Geist.ttf"); setFontStyle(FontStyle.NORMAL); setFontWeight(100..900) }
+                    }
+                },
             )
         }
     }

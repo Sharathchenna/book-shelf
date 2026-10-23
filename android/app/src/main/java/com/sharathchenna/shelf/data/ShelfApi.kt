@@ -164,6 +164,9 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
             setBody(mapOf("query" to query))
         }).body<Results>().results
 
+    /** Every book with highlights, with what its Markdown needs (/api/export). */
+    suspend fun export(): Export = check(http.get("/api/export") { auth() }).body()
+
     suspend fun review(today: Long): Review = check(http.get("/api/review") { auth(); parameter("today", today) }).body()
 
     @Serializable
