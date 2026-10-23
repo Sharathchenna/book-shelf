@@ -423,6 +423,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     pen = pen,
                     penHighlight = settings.penHighlight && !drawing,
                     penWrite = settings.penWrite && !drawing,
+                    scrolling = settings.scroll,
                     modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = 22.dp),
                 )
                 if (drawing && !book.isPdf) {

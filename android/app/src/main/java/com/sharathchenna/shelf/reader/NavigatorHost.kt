@@ -129,6 +129,7 @@ fun NavigatorHost(
     pen: PenListener,
     penHighlight: Boolean,
     penWrite: Boolean,
+    scrolling: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val tag = "reader"
@@ -172,6 +173,7 @@ fun NavigatorHost(
             layer.listener = pen
             layer.highlight = penHighlight && !book.isPdf
             layer.write = penWrite && !book.isPdf
+            layer.scrolling = scrolling
         },
     )
     DisposableEffect(book) {
