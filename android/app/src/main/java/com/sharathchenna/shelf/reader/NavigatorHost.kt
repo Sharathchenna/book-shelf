@@ -130,6 +130,8 @@ fun NavigatorHost(
     penHighlight: Boolean,
     penWrite: Boolean,
     scrolling: Boolean,
+    /** For an article: the page's gutters (CSS px), so the text keeps to a readable measure. */
+    gutter: Double? = null,
     modifier: Modifier = Modifier,
 ) {
     val tag = "reader"
@@ -144,6 +146,7 @@ fun NavigatorHost(
                     decorationTemplates = templates(),
                     selectionActionModeCallback = SelectionMenu(onSelection),
                 ).apply {
+                    gutter?.let { readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(pageGutter = org.readium.r2.navigator.epub.css.Length.Px(it)) }
                     // The site's own type, offered in the reader's settings (assets/fonts).
                     servedAssets = listOf("fonts/.*")
                     addFontFamilyDeclaration(FRAUNCES) {

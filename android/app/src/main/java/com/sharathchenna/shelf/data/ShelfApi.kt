@@ -164,6 +164,16 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
             setBody(mapOf("query" to query))
         }).body<Results>().results
 
+    /** A paper's or article's brief, if one's been written (/api/books/[id]/brief); null when none has. */
+    suspend fun brief(bookId: String): StoredBrief? = try {
+        check(http.get("/api/books/$bookId/brief") { auth() }).body()
+    } catch (e: ApiException) {
+        if (e.status == 404) null else throw e
+    }
+
+    /** Writes the brief (or writes it again). */
+    suspend fun writeBrief(bookId: String): StoredBrief = check(http.post("/api/books/$bookId/brief") { auth() }).body()
+
     /** Every book with highlights, with what its Markdown needs (/api/export). */
     suspend fun export(): Export = check(http.get("/api/export") { auth() }).body()
 

@@ -101,6 +101,8 @@ dependencies {
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)
     implementation(libs.readium.pdfium)
+    implementation(libs.pdf.viewer)
+    implementation(libs.pdf.document)
     implementation(libs.ink.authoring)
     implementation(libs.ink.brush)
     implementation(libs.ink.brush.compose)

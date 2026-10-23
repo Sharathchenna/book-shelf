@@ -36,15 +36,15 @@ interface PenListener {
  * it, and once it's the pen's the page is told the touch was cancelled.
  */
 @SuppressLint("ViewConstructor")
-class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, IntArray>>) : FrameLayout(context) {
+class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, IntArray>>) : PenRouter(context) {
     var listener: PenListener? = null
     var highlight = true
     var write = true
 
     private enum class Mode { Unknown, Text, Blank }
 
+    override val slopPx get() = slop
     private val slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
-    private val density = resources.displayMetrics.density
     private var tracking = false
     private var taken = false
     private var mode = Mode.Unknown
@@ -71,109 +71,15 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
     /** Articles read as a scroll: a pen stroke up or down the page scrolls it, one along a line highlights. */
     var scrolling = false
 
-    /** What the touch going on now is: a hand, a hand being ignored, or the pen (by its pointer's id). */
-    private sealed interface Gesture {
-        data object None : Gesture
-        data object Hand : Gesture
-        data object Ignored : Gesture
-        data class Pen(val id: Int, val downTime: Long) : Gesture
-    }
-
-    private var gesture: Gesture = Gesture.None
-    /** When the pen was last on or over the screen: a hand touching soon after is resting, not reading. */
-    private var penAt = 0L
-
-    private fun isPen(e: MotionEvent, i: Int) = e.getToolType(i).let { it == MotionEvent.TOOL_TYPE_STYLUS || it == MotionEvent.TOOL_TYPE_ERASER }
-
-    /** A palm, as the screen reports it: a contact far wider than a fingertip, or one the system has called off. */
-    private fun isPalm(e: MotionEvent, i: Int) =
-        e.getTouchMajor(i) > 120 * density || e.flags and MotionEvent.FLAG_CANCELED != 0
-
-    private fun penNear(now: Long) = now - penAt < PEN_GRACE_MS
-
-    /**
-     * The hand and the pen, sorted. A hand on its own reads the page as ever, unless it touches as
-     * a palm or while the pen is in use (hovering, or lifted a moment ago): then it's ignored, so a
-     * hand resting on the screen neither scrolls nor turns. When the pen comes down while a hand is
-     * resting, the hand's touch is cancelled for the page and only the pen is followed from then on.
-     */
-    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
-        val i = e.actionIndex
-        when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> gesture = when {
-                isPen(e, 0) -> Gesture.Pen(e.getPointerId(0), e.eventTime)
-                isPalm(e, 0) || penNear(e.eventTime) -> Gesture.Ignored
-                else -> Gesture.Hand
-            }
-            MotionEvent.ACTION_POINTER_DOWN -> if (isPen(e, i) && gesture !is Gesture.Pen) {
-                if (gesture == Gesture.Hand) {
-                    val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
-                    super.dispatchTouchEvent(cancel)
-                    cancel.recycle()
-                }
-                gesture = Gesture.Pen(e.getPointerId(i), e.eventTime)
-            } else if (gesture == Gesture.Hand && isPalm(e, i)) {
-                // A palm joining a finger: the page's touch ends, and the rest of it is ignored.
-                val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
-                super.dispatchTouchEvent(cancel)
-                cancel.recycle()
-                gesture = Gesture.Ignored
-            }
-        }
-        val result = when (val g = gesture) {
-            Gesture.None, Gesture.Hand -> super.dispatchTouchEvent(e)
-            Gesture.Ignored -> true
-            is Gesture.Pen -> {
-                penAt = e.eventTime
-                val at = e.findPointerIndex(g.id)
-                if (at < 0) true
-                else {
-                    // The pen's pointer on its own, as if no hand were there.
-                    val action = when {
-                        e.actionMasked == MotionEvent.ACTION_POINTER_DOWN && i == at -> MotionEvent.ACTION_DOWN
-                        e.actionMasked == MotionEvent.ACTION_POINTER_DOWN -> MotionEvent.ACTION_MOVE
-                        e.actionMasked == MotionEvent.ACTION_POINTER_UP && i == at -> MotionEvent.ACTION_UP
-                        e.actionMasked == MotionEvent.ACTION_POINTER_UP -> MotionEvent.ACTION_MOVE
-                        else -> e.actionMasked
-                    }
-                    val alone = single(e, at, action, g.downTime)
-                    val handled = pen(alone)
-                    alone.recycle()
-                    // The pen lifted with the hand still down: the rest of the hand's touch is ignored.
-                    if (action == MotionEvent.ACTION_UP && e.actionMasked == MotionEvent.ACTION_POINTER_UP) gesture = Gesture.Ignored
-                    handled
-                }
-            }
-        }
-        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) gesture = Gesture.None
-        return result
-    }
-
-    /** One pointer of an event as an event of its own, its history kept. */
-    private fun single(e: MotionEvent, index: Int, action: Int, downTime: Long): MotionEvent {
-        val props = arrayOf(MotionEvent.PointerProperties().also { e.getPointerProperties(index, it) })
-        fun coords(h: Int) = arrayOf(MotionEvent.PointerCoords().also { if (h < 0) e.getPointerCoords(index, it) else e.getHistoricalPointerCoords(index, h, it) })
-        val first = if (e.historySize > 0 && action == MotionEvent.ACTION_MOVE) 0 else -1
-        val out = MotionEvent.obtain(
-            downTime, if (first == 0) e.getHistoricalEventTime(0) else e.eventTime, action, 1, props, coords(first),
-            e.metaState, e.buttonState, e.xPrecision, e.yPrecision, e.deviceId, e.edgeFlags, e.source, e.flags,
-        )
-        if (first == 0) {
-            for (h in 1 until e.historySize) out.addBatch(e.getHistoricalEventTime(h), coords(h), e.metaState)
-            out.addBatch(e.eventTime, coords(-1), e.metaState)
-        }
-        return out
-    }
-
     /** The pen's own stroke: a tap or a long press for the page, a scroll in an article, or a stroke the pen keeps. */
-    private fun pen(e: MotionEvent): Boolean {
-        if (!highlight && !write) return super.dispatchTouchEvent(e)
+    override fun pen(e: MotionEvent): Boolean {
+        if (!highlight && !write) return page(e)
         if (e.actionMasked == MotionEvent.ACTION_DOWN) {
             tracking = true
             taken = false
             begin(e)
         }
-        if (!tracking) return super.dispatchTouchEvent(e)
+        if (!tracking) return page(e)
         if (!taken) {
             val dx = e.x - downX; val dy = e.y - downY
             if (e.actionMasked == MotionEvent.ACTION_MOVE && hypot(dx, dy) > slop) {
@@ -181,17 +87,17 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
                     // Up or down the page: the page scrolls, flings and all, as under a finger.
                     tracking = false
                     path.reset(); invalidate()
-                    return super.dispatchTouchEvent(e)
+                    return page(e)
                 }
                 taken = true
                 // The page had the touch until now; it ends there, as a cancelled one.
                 val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
-                super.dispatchTouchEvent(cancel)
+                page(cancel)
                 cancel.recycle()
             } else {
                 // A tap, or a long press for the system's own selection: the page's.
                 if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) tracking = false
-                return super.dispatchTouchEvent(e)
+                return page(e)
             }
         }
         stroke(e)
@@ -278,7 +184,6 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
 
     override fun dispatchGenericMotionEvent(e: MotionEvent): Boolean {
         if (e.isFromSource(InputDevice.SOURCE_STYLUS) || (e.pointerCount > 0 && isPen(e, 0))) {
-            penAt = e.eventTime
             when (e.actionMasked) {
                 MotionEvent.ACTION_HOVER_MOVE -> if (e.y < 72 * density) listener?.onNearTop()
                 MotionEvent.ACTION_BUTTON_PRESS -> if (e.actionButton and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY) != 0) {
@@ -296,8 +201,6 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
     }
 
     private companion object {
-        /** How long after the pen is lifted, or last hovered, a touch is taken as the hand resting. */
-        const val PEN_GRACE_MS = 1500L
 
         /** Whether there's a line of text at a point, rather than a margin, a gap or a picture. */
         const val TEXT_AT = """(function(x,y){

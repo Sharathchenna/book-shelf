@@ -127,13 +127,15 @@ private fun linkCites(text: String) = text.replace(CITE) { m ->
  * plus their highlights; a passage chosen from the selection menu travels with the next question.
  */
 @Composable
-fun ChatPanel(bookId: String, paper: Boolean, initialQuote: String?, here: () -> Pair<Int, Double>, onCite: (Cite) -> Unit, onClose: () -> Unit) {
+fun ChatPanel(bookId: String, paper: Boolean, initialQuote: String?, here: () -> Pair<Int, Double>, onCite: (Cite) -> Unit, onClose: () -> Unit, initialImage: String? = null) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
     val ink = LocalPaper.current
     val scope = rememberCoroutineScope()
     val messages = remember(bookId) { mutableStateListOf<ChatMessage>().apply { addAll(ChatStore.load(context, bookId)) } }
     var quote by remember(initialQuote) { mutableStateOf(initialQuote) }
+    // A PDF passage's picture (equations, a figure), sent once with the question about it.
+    var image by remember(initialQuote, initialImage) { mutableStateOf(initialImage) }
     var input by remember { mutableStateOf("") }
     var streaming by remember { mutableStateOf<Job?>(null) }
     val list = rememberLazyListState()
@@ -152,6 +154,8 @@ fun ChatPanel(bookId: String, paper: Boolean, initialQuote: String?, here: () ->
         messages.clear(); messages.addAll(history); messages += ChatMessage("assistant", "")
         input = ""
         quote = null
+        val sentImage = image
+        image = null
         val (section, fraction) = here()
         streaming = scope.launch {
             val body = buildJsonObject {
@@ -166,6 +170,7 @@ fun ChatPanel(bookId: String, paper: Boolean, initialQuote: String?, here: () ->
                     }
                 })
                 asked.quote?.let { put("quote", it) }
+                sentImage?.let { put("image", it) }
             }
             try {
                 shelf.api.stream("/api/reader/chat", body).collect { messages[messages.lastIndex] = ChatMessage("assistant", it) }
@@ -266,7 +271,7 @@ fun ChatPanel(bookId: String, paper: Boolean, initialQuote: String?, here: () ->
             quote?.let { q ->
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(ink.chip).padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.Top) {
                     Text("“$q”", fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 13.5.sp, color = ink.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Icon(Icons.Outlined.Close, "Don't ask about this passage", tint = ink.muted, modifier = Modifier.size(28.dp).clip(CircleShape).clickable { quote = null }.padding(6.dp))
+                    Icon(Icons.Outlined.Close, "Don't ask about this passage", tint = ink.muted, modifier = Modifier.size(28.dp).clip(CircleShape).clickable { quote = null; image = null }.padding(6.dp))
                 }
             }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -132,7 +132,7 @@ fun PanelContent(
 ) {
     val task = ai ?: AiTask.Chat(null)
     if (panel == Panel.Ai && task is AiTask.Chat) {
-        ChatPanel(bookId, paper, task.quote, here, onCite = { cite -> book.locatorOfCite(cite)?.let(controller::go) }, onClose = onClose)
+        ChatPanel(bookId, paper, task.quote, here, initialImage = task.image, onCite = { cite -> book.locatorOfCite(cite)?.let(controller::go) }, onClose = onClose)
         return
     }
     Column(Modifier.fillMaxSize()) {
@@ -141,6 +141,7 @@ fun PanelContent(
                 when (panel) {
                     Panel.Contents -> "Contents"
                     Panel.Search -> "Search"
+                    Panel.Brief -> "Brief"
                     Panel.Notes -> "Highlights & notes"
                     Panel.Ai -> when (task) {
                         is AiTask.Explain -> SelectionAction.entries.find { it.action == task.action }?.label ?: "Explain"
@@ -169,6 +170,7 @@ fun PanelContent(
                 } else BookmarksList(book, marks, onGo = { controller.go(it.locator); onClose() }, onRemove = onRemoveMark)
             }
             Panel.Search -> SearchPanel(book, controller)
+            Panel.Brief -> BriefPanel(bookId) { section -> book.locatorAt(section, 0.0)?.let(controller::go) }
             Panel.Notes -> {
                 if (notes.any { !it.isDeleted }) Row(Modifier.padding(horizontal = 16.dp)) {
                     OutlinedButton(onClick = onSendNotes) { Text("Send to Obsidian") }
@@ -267,7 +269,7 @@ fun colorHex(name: String) = "#%06X".format(0xFFFFFF and (HIGHLIGHT_ARGB[name] ?
 
 /** Explain and Recap, streamed from the site's reader routes as they're written; a follow-up goes to the chat. */
 @Composable
-private fun AiPanel(bookId: String, task: AiTask, onAi: (AiTask) -> Unit) {
+internal fun AiPanel(bookId: String, task: AiTask, onAi: (AiTask) -> Unit) {
     val shelf = LocalShelf.current
     val paper = LocalPaper.current
     var answer by remember(task) { mutableStateOf("") }
@@ -278,6 +280,7 @@ private fun AiPanel(bookId: String, task: AiTask, onAi: (AiTask) -> Unit) {
         val (path, body) = when (task) {
             is AiTask.Explain -> "/api/reader/explain" to buildJsonObject {
                 put("bookId", bookId); put("sectionIndex", task.sectionIndex); put("sectionFraction", task.fraction); put("selection", task.text); put("action", task.action)
+                task.image?.let { put("image", it) }
             }
             is AiTask.Recap -> "/api/reader/recap" to buildJsonObject {
                 put("bookId", bookId); put("sectionIndex", task.sectionIndex); put("sectionFraction", task.fraction)
@@ -304,7 +307,7 @@ private fun AiPanel(bookId: String, task: AiTask, onAi: (AiTask) -> Unit) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 22.dp, vertical = 12.dp)) {
-            OutlinedButton(onClick = { onAi(AiTask.Chat((task as? AiTask.Explain)?.text)) }) {
+            OutlinedButton(onClick = { onAi(AiTask.Chat((task as? AiTask.Explain)?.text, (task as? AiTask.Explain)?.image)) }) {
                 Icon(Icons.AutoMirrored.Outlined.Chat, null, Modifier.size(18.dp))
                 Text("  Ask a follow-up")
             }
@@ -428,6 +431,27 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                     Switch(settings.spread, { onChange(settings.copy(spread = it)) })
                 }
             }
+            if (isPdf) {
+                Text("PAGES", style = Eyebrow, color = LocalPaper.current.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Crop the margins")
+                        Text("The page's text fills the width; pinch to zoom out again.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
+                    }
+                    Switch(settings.crop, { onChange(settings.copy(crop = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Two pages side by side when there's room", Modifier.weight(1f))
+                    Switch(settings.spread, { onChange(settings.copy(spread = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Read as text")
+                        Text("The pages' text in one column, in the app's type. Figures and equations stay on the pages.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
+                    }
+                    Switch(settings.textView, { onChange(settings.copy(textView = it)) })
+                }
+            }
             Text("HIGHLIGHTER", style = Eyebrow, color = LocalPaper.current.muted)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HIGHLIGHT_ARGB.forEach { (name, argb) ->
@@ -437,7 +461,7 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                     )
                 }
             }
-            if (!isPdf) {
+            run {
                 Text("PEN", style = Eyebrow, color = LocalPaper.current.muted)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -448,8 +472,8 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Write in the margin to make a note")
-                        Text("Writing where there's no text starts a drawing beside the nearest paragraph.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
+                        Text(if (isPdf) "Write on the page" else "Write in the margin to make a note")
+                        Text(if (isPdf) "Writing where there's no text is kept as ink on the page. A loop round something, or a bracket beside a passage, offers it to the menu." else "Writing where there's no text starts a drawing beside the nearest paragraph.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
                     }
                     Switch(settings.penWrite, { onChange(settings.copy(penWrite = it)) })
                 }
@@ -460,7 +484,7 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
 
 // ---- drawing in an EPUB's margin -------------------------------------------------------------
 
-private val PENS = listOf("#1F1D1A", "#B0382F", "#2F5FB0", "#1E7A58")
+internal val PENS = listOf("#1F1D1A", "#B0382F", "#2F5FB0", "#1E7A58")
 
 /** Where a drawing goes: the paragraph nearest it, as the page's own script finds it. */
 @Serializable
@@ -581,7 +605,7 @@ private val WIDTHS = listOf(1.4f to "Fine", 2.2f to "Pen", 4f to "Bold")
 
 /** The pens (four colours, three widths), the eraser and undo, as the drawing sheets share them. */
 @Composable
-private fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: () -> Unit) {
+internal fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: (() -> Unit)?) {
     val paper = LocalPaper.current
     PENS.forEach { c ->
         val chosen = c == tool.color && !tool.erasing
@@ -601,7 +625,7 @@ private fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: () -> Uni
     IconButton(onClick = { onTool(tool.copy(erasing = !tool.erasing)) }, modifier = Modifier.clip(CircleShape).background(if (tool.erasing) paper.fg else androidx.compose.ui.graphics.Color.Transparent)) {
         Icon(Icons.Outlined.AutoFixNormal, "Eraser (or the pen's eraser end, or its button held)", tint = if (tool.erasing) paper.bg else paper.fg)
     }
-    IconButton(onClick = onUndo) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") }
+    onUndo?.let { IconButton(onClick = it) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") } }
 }
 
 /** Turns a drawing (in screen pixels) into a margin note anchored to the nearest paragraph. */

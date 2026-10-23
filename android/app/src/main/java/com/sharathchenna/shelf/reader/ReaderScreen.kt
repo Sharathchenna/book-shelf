@@ -84,13 +84,13 @@ import java.time.Instant
 import java.util.UUID
 
 /** The reader's panels: beside the page on a wide screen, a sheet on a narrow one. */
-enum class Panel { Contents, Notes, Ai, Search }
+enum class Panel { Contents, Notes, Ai, Search, Brief }
 
 /** What the AI panel is doing: explaining a passage, recapping, or chatting. */
 sealed interface AiTask {
-    data class Explain(val text: String, val action: String, val sectionIndex: Int, val fraction: Double) : AiTask
+    data class Explain(val text: String, val action: String, val sectionIndex: Int, val fraction: Double, val image: String? = null) : AiTask
     data class Recap(val sectionIndex: Int, val fraction: Double) : AiTask
-    data class Chat(val quote: String?) : AiTask
+    data class Chat(val quote: String?, val image: String? = null) : AiTask
 }
 
 /** The reader's settings, kept on the device. */
@@ -112,6 +112,10 @@ data class ReaderSettings(
     val margins: Double = 1.0,
     /** Text set flush at both edges, hyphenated; null for the book's own. */
     val justify: Boolean? = null,
+    /** A PDF's margins trimmed away, its text filling the width. */
+    val crop: Boolean = false,
+    /** A PDF's text set as a column to read, rather than its pages. */
+    val textView: Boolean = false,
 ) {
     /** Whether the book's own styles stand: anything chosen here overrides them. */
     val ownStyles: Boolean get() = font == "original" && lineHeight == null && justify == null
@@ -131,8 +135,12 @@ data class ReaderSettings(
     )
 
     companion object {
+        /** Articles keep settings of their own, set as a magazine sets its pages until changed. */
+        private fun prefs(context: Context, article: Boolean) = context.getSharedPreferences(if (article) "reader-article" else "reader", Context.MODE_PRIVATE)
+
         fun load(context: Context, article: Boolean): ReaderSettings {
-            val p = context.getSharedPreferences("reader", Context.MODE_PRIVATE)
+            val p = prefs(context, article)
+            if (article && !p.contains("font")) return ReaderSettings(font = "fraunces", lineHeight = 1.65, margins = 1.0, scroll = true, justify = false)
             return ReaderSettings(
                 theme = p.getString("theme", "light")!!,
                 fontSize = p.getFloat("fontSize", 1f).toDouble(),
@@ -146,15 +154,16 @@ data class ReaderSettings(
                 lineHeight = p.getFloat("lineHeight", 0f).takeIf { it > 0 }?.toDouble(),
                 margins = p.getFloat("margins", 1f).toDouble(),
                 justify = if (p.contains("justify")) p.getBoolean("justify", false) else null,
+                crop = p.getBoolean("crop", false),
             )
         }
     }
 
     fun save(context: Context, article: Boolean) {
-        context.getSharedPreferences("reader", Context.MODE_PRIVATE).edit()
+        prefs(context, article).edit()
             .putString("theme", theme).putFloat("fontSize", fontSize.toFloat()).putBoolean("spread", spread).putString("font", font)
             .putBoolean("penHighlight", penHighlight).putBoolean("penWrite", penWrite).putString("color", color)
-            .putFloat("lineHeight", (lineHeight ?: 0.0).toFloat()).putFloat("margins", margins.toFloat())
+            .putFloat("lineHeight", (lineHeight ?: 0.0).toFloat()).putFloat("margins", margins.toFloat()).putBoolean("crop", crop)
             .apply { if (justify == null) remove("justify") else putBoolean("justify", justify) }
             .apply { if (!article) putBoolean("scroll", scroll) }
             .apply()
@@ -165,6 +174,8 @@ private sealed interface Phase {
     data class Loading(val progress: Float?) : Phase
     data class Failed(val message: String) : Phase
     data class Ready(val opened: Shelf.Opened, val book: OpenedBook, val initial: Locator?) : Phase
+    /** A PDF, for Android's own PDF view (pdf/PdfReader.kt). */
+    data class Pdf(val opened: Shelf.Opened) : Phase
 }
 
 /** A book from the library, in Readium: an EPUB laid out as pages or a scroll, or a PDF. */
@@ -173,9 +184,12 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
     val shelf = LocalShelf.current
     val context = LocalContext.current
     var phase by remember(fileId) { mutableStateOf<Phase>(Phase.Loading(null)) }
-    LaunchedEffect(fileId) {
+    // Readium's PDF reader, for a device without the system's PDF engine or a PDF that engine can't open.
+    var simplePdf by remember(fileId) { mutableStateOf(false) }
+    LaunchedEffect(fileId, simplePdf) {
         phase = runCatching {
             val opened = shelf.open(fileId) { phase = Phase.Loading(it) }
+            if (opened.file.isPdf && !simplePdf && com.sharathchenna.shelf.reader.pdf.pdfEngineAvailable()) return@runCatching Phase.Pdf(opened)
             val book = BookOpener(context).open(opened.path, opened.file.isPdf).apply { titles = opened.file.sections.map { it.title } }
             val notes = shelf.notes(fileId).first()
             Phase.Ready(opened, book, initialLocator(book, opened.progress, notes.find { it.id == at }))
@@ -198,6 +212,7 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
         is Phase.Ready -> {
             Reading(p.opened, p.book, p.initial, onBack, onListen)
         }
+        is Phase.Pdf -> com.sharathchenna.shelf.reader.pdf.PdfReading(p.opened, at, onBack, onListen, onFallback = { simplePdf = true })
     }
 }
 
@@ -278,7 +293,15 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
             chrome = false
         }
     }
-    LaunchedEffect(locator?.locations?.position, locator?.locations?.progression) { if (panel == null) chrome = false }
+    // Scrolling down tucks the bars away; scrolling back up brings them, as the best article readers do.
+    var lastSeen by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(locator?.locations?.position, locator?.locations?.progression) {
+        val now = locator?.locations?.totalProgression
+        val before = lastSeen
+        lastSeen = now
+        if (panel != null) return@LaunchedEffect
+        chrome = settings.scroll && now != null && before != null && now < before - 0.002
+    }
 
     BackHandler(enabled = panel != null || drawing || editing != null) {
         when {
@@ -424,6 +447,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     penHighlight = settings.penHighlight && !drawing,
                     penWrite = settings.penWrite && !drawing,
                     scrolling = settings.scroll,
+                    gutter = if (article) ((LocalConfiguration.current.screenWidthDp - 720) / 2.0).coerceAtLeast(24.0) else null,
                     modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = 22.dp),
                 )
                 if (drawing && !book.isPdf) {
@@ -465,6 +489,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         searchable = book.searchable(),
                         marked = marked,
                         onMark = toggleMark,
+                        onBrief = if (file.clipId != null || file.paperId != null) ({ panel = if (panel == Panel.Brief) null else Panel.Brief }) else null,
                     )
                 }
                 val progress = (locator?.locations?.totalProgression ?: 0.0).toFloat()
@@ -560,7 +585,7 @@ fun readerBackground(theme: String) = when (theme) {
 }
 
 @Composable
-private fun TopBar(
+internal fun TopBar(
     title: String,
     chapter: String,
     percent: Int,
@@ -575,6 +600,8 @@ private fun TopBar(
     searchable: Boolean,
     marked: Boolean,
     onMark: () -> Unit,
+    onBrief: (() -> Unit)? = null,
+    contentsLabel: String = "Contents and bookmarks",
 ) {
     val paper = LocalPaper.current
     Row(
@@ -587,11 +614,11 @@ private fun TopBar(
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("$percent% · $chapter", style = MaterialTheme.typography.labelSmall, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, "Contents and bookmarks") }
+        IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentsLabel) }
         if (searchable) IconButton(onClick = { onPanel(Panel.Search) }) { Icon(Icons.Outlined.Search, "Search in the book") }
         IconButton(onClick = onMark) { Icon(if (marked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, if (marked) "Remove the bookmark" else "Bookmark this page") }
         IconButton(onClick = { onPanel(Panel.Notes) }) { Icon(Icons.Outlined.EditNote, "Highlights and notes") }
-        TextButton(onClick = onRecap) { Text("Recap") }
+        onBrief?.let { TextButton(onClick = it) { Text("Brief") } } ?: TextButton(onClick = onRecap) { Text("Recap") }
         // The chat, named as well as drawn: it's what the bar is most often opened for.
         Row(
             Modifier.padding(horizontal = 4.dp).clip(RoundedCornerShape(50)).background(paper.fg).clickable(onClick = onChat).padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
@@ -600,15 +627,15 @@ private fun TopBar(
             Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(18.dp))
             Text("  Chat", color = paper.bg, style = MaterialTheme.typography.labelLarge)
         }
-        IconButton(onClick = onDraw) { Icon(Icons.Outlined.Draw, if (isPdf) "Draw on this page" else "Draw in the margin") }
+        IconButton(onClick = onDraw) { Icon(Icons.Outlined.Draw, if (isPdf) "Pens and the eraser" else "Draw in the margin") }
         IconButton(onClick = onListen) { Icon(Icons.Outlined.Headphones, "Listen") }
-        if (!isPdf) IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, "Text and layout") }
+        IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, if (isPdf) "Page and layout" else "Text and layout") }
     }
 }
 
 /** The reader's menu, where the pen lifted after selecting with its button held. */
 @Composable
-private fun PenMenu(at: androidx.compose.ui.geometry.Offset, onAction: (SelectionAction) -> Unit, onDismiss: () -> Unit) {
+internal fun PenMenu(at: androidx.compose.ui.geometry.Offset, onAction: (SelectionAction) -> Unit, onDismiss: () -> Unit) {
     val paper = LocalPaper.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null, onClick = onDismiss)) {
@@ -636,7 +663,7 @@ private fun PenMenu(at: androidx.compose.ui.geometry.Offset, onAction: (Selectio
 
 /** The highlight just made: its colour changed, or a note added, without opening it. */
 @Composable
-private fun FreshHighlight(note: Highlight, onColor: (String) -> Unit, onNote: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FreshHighlight(note: Highlight, onColor: (String) -> Unit, onNote: () -> Unit, modifier: Modifier = Modifier) {
     val paper = LocalPaper.current
     Row(
         modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.raised, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 6.dp),

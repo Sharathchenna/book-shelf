@@ -271,3 +271,13 @@ data class NarratedSections(val sections: List<NarratedSection> = emptyList())
 
 @Serializable
 data class NarratedSection(val section: Int, val duration: Double)
+
+/** A sentence of a brief, and the reader's section (0-based) that shows it, when there is one (lib/brief-types.ts). */
+@Serializable
+data class BriefPoint(val text: String, val section: Int? = null)
+
+@Serializable
+data class Brief(val gist: String, val claims: List<BriefPoint> = emptyList(), val caveats: List<BriefPoint> = emptyList())
+
+@Serializable
+data class StoredBrief(val version: Int = 1, val at: String = "", val brief: Brief)
