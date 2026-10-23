@@ -63,6 +63,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.sharathchenna.shelf.data.InkStroke
+import androidx.compose.material.icons.outlined.AutoFixNormal
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import com.sharathchenna.shelf.ui.theme.Serif
 import androidx.compose.ui.unit.sp
@@ -358,6 +363,32 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                     Switch(settings.spread, { onChange(settings.copy(spread = it)) })
                 }
             }
+            Text("HIGHLIGHTER", style = Eyebrow, color = LocalPaper.current.muted)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HIGHLIGHT_ARGB.forEach { (name, argb) ->
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).then(if (settings.color == name) Modifier.border(2.dp, LocalPaper.current.fg, CircleShape) else Modifier)
+                            .clickable { onChange(settings.copy(color = name)) }.padding(5.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(argb)),
+                    )
+                }
+            }
+            if (!isPdf) {
+                Text("PEN", style = Eyebrow, color = LocalPaper.current.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Draw across text to highlight it")
+                        Text("Hold the pen's button to choose Explain, Ask and the rest instead; the eraser end rubs highlights out.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
+                    }
+                    Switch(settings.penHighlight, { onChange(settings.copy(penHighlight = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Write in the margin to make a note")
+                        Text("Writing where there's no text starts a drawing beside the nearest paragraph.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
+                    }
+                    Switch(settings.penWrite, { onChange(settings.copy(penWrite = it)) })
+                }
+            }
         }
     }
 }
@@ -422,7 +453,7 @@ private fun anchorScript(y: Double) = """
 """
 
 /** The page web views Readium shows now (two in a spread), with where each is in the window. */
-private fun visibleWebViews(root: View?): List<Pair<WebView, IntArray>> {
+internal fun visibleWebViews(root: View?): List<Pair<WebView, IntArray>> {
     val found = mutableListOf<Pair<WebView, IntArray>>()
     fun walk(v: View) {
         if (!v.isShown) return
@@ -445,35 +476,67 @@ private suspend fun WebView.evaluate(script: String): String? = suspendCancellab
  * drawn in the page by Readium from then on, moving with the text.
  */
 @Composable
-fun MarginInk(controller: ReaderController, book: OpenedBook, onPlaced: (Highlight) -> Unit, onClose: () -> Unit, onError: (String) -> Unit) {
+fun MarginInk(controller: ReaderController, book: OpenedBook, seed: InkStroke?, onPlaced: (Highlight) -> Unit, onClose: () -> Unit, onError: (String) -> Unit) {
     val draft = remember { InkDraft() }
-    var pen by remember { mutableStateOf(PENS[0]) }
+    var tool by remember { mutableStateOf(PenTool()) }
     var penOnly by remember { mutableStateOf(true) }
-    var origin by remember { mutableStateOf(Offset.Zero) }
+    var origin by remember { mutableStateOf<Offset?>(null) }
     val scope = rememberCoroutineScope()
     val paper = LocalPaper.current
+    // A note begun by writing straight on the page: its first stroke, moved from the window's pixels to this sheet's.
+    LaunchedEffect(origin) {
+        val at = origin ?: return@LaunchedEffect
+        if (seed != null && draft.isEmpty) draft.strokes += seed.copy(points = seed.points.mapIndexed { i, v -> when (i % 3) { 0 -> v - at.x; 1 -> v - at.y; else -> v } })
+    }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
-        InkCanvas(draft, pen, widthDp = 2.2f, penOnly = penOnly)
+        InkCanvas(draft, tool.color, widthDp = tool.width, penOnly = penOnly, erasing = tool.erasing)
         Row(
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).background(paper.raised, RoundedCornerShape(20.dp)).padding(horizontal = 8.dp),
+            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp).shadow(4.dp, RoundedCornerShape(24.dp)).background(paper.raised, RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PENS.forEach { c ->
-                Box(Modifier.size(26.dp).clip(CircleShape).background(hex(c)).then(if (c == pen) Modifier.border(3.dp, paper.accent, CircleShape) else Modifier).clickable { pen = c })
-            }
+            PenTools(tool, onTool = { tool = it }, onUndo = draft::undo)
             FilterChip(selected = penOnly, onClick = { penOnly = !penOnly }, label = { Text("Pen only") })
-            IconButton(onClick = draft::undo) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") }
             TextButton(onClick = onClose) { Text("Cancel") }
             Button(enabled = !draft.isEmpty, onClick = {
                 scope.launch {
-                    val note = place(draft, origin, controller, book)
+                    val note = place(draft, origin ?: Offset.Zero, controller, book)
                     if (note == null) onError("Couldn't find a paragraph near the drawing. Draw beside the text you mean.") else onPlaced(note)
                     onClose()
                 }
             }) { Text("Done") }
         }
     }
+}
+
+/** The pen as the drawing toolbar sets it: its colour, its width in dp, or rubbing out. */
+data class PenTool(val color: String = PENS[0], val width: Float = 2.2f, val erasing: Boolean = false)
+
+private val WIDTHS = listOf(1.4f to "Fine", 2.2f to "Pen", 4f to "Bold")
+
+/** The pens (four colours, three widths), the eraser and undo, as the drawing sheets share them. */
+@Composable
+private fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: () -> Unit) {
+    val paper = LocalPaper.current
+    PENS.forEach { c ->
+        val chosen = c == tool.color && !tool.erasing
+        Box(
+            Modifier.size(30.dp).clip(CircleShape).then(if (chosen) Modifier.border(2.dp, paper.fg, CircleShape) else Modifier).clickable { onTool(tool.copy(color = c, erasing = false)) }.padding(5.dp).clip(CircleShape).background(hex(c)),
+        )
+    }
+    Box(Modifier.size(1.dp, 24.dp).background(paper.rule))
+    WIDTHS.forEach { (w, label) ->
+        val chosen = w == tool.width && !tool.erasing
+        Box(
+            Modifier.size(32.dp).clip(CircleShape).background(if (chosen) paper.chip else androidx.compose.ui.graphics.Color.Transparent).clickable { onTool(tool.copy(width = w, erasing = false)) }.semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) { Box(Modifier.size((w * 2.4f).dp).clip(CircleShape).background(if (chosen) paper.fg else paper.muted)) }
+    }
+    Box(Modifier.size(1.dp, 24.dp).background(paper.rule))
+    IconButton(onClick = { onTool(tool.copy(erasing = !tool.erasing)) }, modifier = Modifier.clip(CircleShape).background(if (tool.erasing) paper.fg else androidx.compose.ui.graphics.Color.Transparent)) {
+        Icon(Icons.Outlined.AutoFixNormal, "Eraser (or the pen's eraser end, or its button held)", tint = if (tool.erasing) paper.bg else paper.fg)
+    }
+    IconButton(onClick = onUndo) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") }
 }
 
 /** Turns a drawing (in screen pixels) into a margin note anchored to the nearest paragraph. */
@@ -528,7 +591,7 @@ private suspend fun place(draft: InkDraft, overlay: Offset, controller: ReaderCo
 fun PageSketch(pdf: File, page: Int, onSave: (Ink) -> Unit, onDismiss: () -> Unit) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     val draft = remember { InkDraft() }
-    var pen by remember { mutableStateOf(PENS[1]) }
+    var tool by remember { mutableStateOf(PenTool(color = PENS[1])) }
     var imageOrigin by remember { mutableStateOf(Offset.Zero) }
     var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
     var imageWidth by remember { mutableStateOf(1f) }
@@ -554,8 +617,7 @@ fun PageSketch(pdf: File, page: Int, onSave: (Ink) -> Unit, onDismiss: () -> Uni
         Column(Modifier.fillMaxSize().background(LocalPaper.current.bg).statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Page ${page + 1}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))
-                PENS.forEach { c -> Box(Modifier.size(26.dp).clip(CircleShape).background(hex(c)).then(if (c == pen) Modifier.border(3.dp, LocalPaper.current.accent, CircleShape) else Modifier).clickable { pen = c }) }
-                IconButton(onClick = draft::undo) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") }
+                PenTools(tool, onTool = { tool = it }, onUndo = draft::undo)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Button(enabled = !draft.isEmpty && bitmap != null, onClick = {
@@ -576,7 +638,7 @@ fun PageSketch(pdf: File, page: Int, onSave: (Ink) -> Unit, onDismiss: () -> Uni
                         },
                     )
                 }
-                InkCanvas(draft, pen, widthDp = 2f, penOnly = true)
+                InkCanvas(draft, tool.color, widthDp = tool.width, penOnly = true, erasing = tool.erasing)
             }
         }
     }

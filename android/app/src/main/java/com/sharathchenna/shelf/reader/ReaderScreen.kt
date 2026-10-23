@@ -44,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
@@ -87,7 +88,19 @@ sealed interface AiTask {
 }
 
 /** The reader's settings, kept on the device. */
-data class ReaderSettings(val theme: String = "light", val fontSize: Double = 1.0, val scroll: Boolean = false, val spread: Boolean = true, val font: String = "original") {
+data class ReaderSettings(
+    val theme: String = "light",
+    val fontSize: Double = 1.0,
+    val scroll: Boolean = false,
+    val spread: Boolean = true,
+    val font: String = "original",
+    /** The pen marks text it's drawn across, as a highlighter. */
+    val penHighlight: Boolean = true,
+    /** The pen writing where there's no text begins a note in the margin. */
+    val penWrite: Boolean = true,
+    /** The highlighter's colour, for the pen and the menu alike. */
+    val color: String = "yellow",
+) {
     fun epub(): EpubPreferences = EpubPreferences(
         theme = when (theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
         fontSize = fontSize,
@@ -108,6 +121,9 @@ data class ReaderSettings(val theme: String = "light", val fontSize: Double = 1.
                 scroll = if (article) true else p.getBoolean("scroll", false),
                 spread = p.getBoolean("spread", true),
                 font = p.getString("font", "original")!!,
+                penHighlight = p.getBoolean("penHighlight", true),
+                penWrite = p.getBoolean("penWrite", true),
+                color = p.getString("color", "yellow")!!,
             )
         }
     }
@@ -115,6 +131,7 @@ data class ReaderSettings(val theme: String = "light", val fontSize: Double = 1.
     fun save(context: Context, article: Boolean) {
         context.getSharedPreferences("reader", Context.MODE_PRIVATE).edit()
             .putString("theme", theme).putFloat("fontSize", fontSize.toFloat()).putBoolean("spread", spread).putString("font", font)
+            .putBoolean("penHighlight", penHighlight).putBoolean("penWrite", penWrite).putString("color", color)
             .apply { if (!article) putBoolean("scroll", scroll) }
             .apply()
     }
@@ -188,6 +205,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     var ai by remember { mutableStateOf<AiTask?>(null) }
     var editing by remember { mutableStateOf<NoteEdit?>(null) }
     var drawing by remember { mutableStateOf(false) }
+    var written by remember { mutableStateOf<com.sharathchenna.shelf.data.InkStroke?>(null) }
+    var penMenu by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var sketching by remember { mutableStateOf<Int?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -236,7 +255,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
 
     BackHandler(enabled = panel != null || drawing || editing != null) {
         when {
-            drawing -> drawing = false
+            drawing -> { drawing = false; written = null }
             editing != null -> editing = null
             else -> panel = null
         }
@@ -261,7 +280,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         text = text.take(4000),
                         quote = quoteOf(selected.text),
                         progression = selected.locations.progression,
-                        color = "yellow",
+                        color = settings.color,
                         sectionIndex = section,
                         createdAt = now,
                         updatedAt = now,
@@ -278,6 +297,34 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     panel = Panel.Ai
                 }
             }
+        }
+    }
+
+    // The pen: across text it highlights (with the button held, it selects for the menu, and the
+    // eraser end rubs highlights out); where there's no text it begins a note; hovering at the top
+    // brings the bar; its button, pressed in the air, turns the page.
+    val pen = remember {
+        object : PenListener {
+            override fun onPassage(menu: Boolean, x: Float, y: Float) {
+                if (menu) penMenu = androidx.compose.ui.geometry.Offset(x, y) else onSelection(SelectionAction.Highlight)
+            }
+            override fun onRubOut() {
+                scope.launch {
+                    val selected = controller.selection() ?: return@launch
+                    controller.clearSelection()
+                    val text = selected.text.highlight?.trim().orEmpty()
+                    if (text.isEmpty()) return@launch
+                    val section = book.sectionOf(selected)
+                    notes.filter { it.ink == null && it.sectionIndex == section && (it.text.contains(text) || text.contains(it.text.trim())) }
+                        .forEach { shelf.removeNote(file.id, it) }
+                }
+            }
+            override fun onWrite(stroke: com.sharathchenna.shelf.data.InkStroke) {
+                written = stroke
+                drawing = true
+            }
+            override fun onNearTop() { if (!chrome) chrome = true }
+            override fun onButton() { (controller.navigator as? org.readium.r2.navigator.OverflowableNavigator)?.goForward(animated = true) }
         }
     }
 
@@ -308,12 +355,16 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     onSelection = onSelection,
                     onTap = { chrome = !chrome },
                     onDecoration = { id -> notes.find { it.id == id }?.let { editing = NoteEdit(it) } },
+                    pen = pen,
+                    penHighlight = settings.penHighlight && !drawing,
+                    penWrite = settings.penWrite && !drawing,
                     modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp),
                 )
                 if (drawing && !book.isPdf) {
                     MarginInk(
                         controller = controller,
                         book = book,
+                        seed = written,
                         onPlaced = { note ->
                             // Saved at once; the handwriting is read after, which the first time means fetching the model.
                             scope.launch {
@@ -321,7 +372,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                                 com.sharathchenna.shelf.ink.Recognizer.read(note.ink!!.strokes)?.let { words -> shelf.saveNote(file.id, note.copy(ink = note.ink.copy(recognized = words))) }
                             }
                         },
-                        onClose = { drawing = false },
+                        onClose = { drawing = false; written = null },
                         onError = { message = it },
                     )
                 }
@@ -360,6 +411,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(20.dp))
                         Text("  Ask about the book", color = paper.bg, style = MaterialTheme.typography.labelLarge)
                     }
+                }
+                penMenu?.let { at ->
+                    PenMenu(at, onAction = { penMenu = null; onSelection(it) }, onDismiss = { penMenu = null; controller.clearSelection() })
                 }
                 message?.let {
                     Snackbar(Modifier.align(Alignment.BottomCenter).padding(24.dp), action = { TextButton(onClick = { message = null }) { Text("OK") } }) { Text(it) }
@@ -459,5 +513,33 @@ private fun TopBar(
         IconButton(onClick = onDraw) { Icon(Icons.Outlined.Draw, if (isPdf) "Draw on this page" else "Draw in the margin") }
         IconButton(onClick = onListen) { Icon(Icons.Outlined.Headphones, "Listen") }
         if (!isPdf) IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, "Text and layout") }
+    }
+}
+
+/** The reader's menu, where the pen lifted after selecting with its button held. */
+@Composable
+private fun PenMenu(at: androidx.compose.ui.geometry.Offset, onAction: (SelectionAction) -> Unit, onDismiss: () -> Unit) {
+    val paper = LocalPaper.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null, onClick = onDismiss)) {
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset((at.x - with(density) { 180.dp.toPx() }).toInt().coerceAtLeast(16), (at.y + with(density) { 28.dp.toPx() }).toInt()) }
+                .width(360.dp)
+                .shadow(8.dp, RoundedCornerShape(18.dp))
+                .background(paper.raised, RoundedCornerShape(18.dp))
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            SelectionAction.entries.forEach { a ->
+                Text(
+                    a.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = paper.fg,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onAction(a) }.padding(horizontal = 12.dp, vertical = 9.dp),
+                )
+            }
+        }
     }
 }

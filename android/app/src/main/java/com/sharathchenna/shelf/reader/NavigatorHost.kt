@@ -121,6 +121,9 @@ fun NavigatorHost(
     onSelection: (SelectionAction) -> Unit,
     onTap: () -> Unit,
     onDecoration: (id: String) -> Unit,
+    pen: PenListener,
+    penHighlight: Boolean,
+    penWrite: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val tag = "reader"
@@ -143,10 +146,17 @@ fun NavigatorHost(
         modifier = modifier,
         factory = { context ->
             // The fragment goes in once the container is in the window, so the manager can find it.
-            FragmentContainerView(context).apply {
+            val container = FragmentContainerView(context).apply {
                 id = containerId
                 post { attach(activity, containerId, factory, tag, controller, onTap, onDecoration) }
             }
+            // The pen reads an EPUB's text; a PDF's pages are images, drawn on in their own sheet.
+            PenLayer(context) { visibleWebViews(controller.epub?.view) }.apply { addView(container) }
+        },
+        update = { layer ->
+            layer.listener = pen
+            layer.highlight = penHighlight && !book.isPdf
+            layer.write = penWrite && !book.isPdf
         },
     )
     DisposableEffect(book) {

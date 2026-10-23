@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.ink.authoring.compose.InProgressStrokes
@@ -28,6 +30,28 @@ class InkDraft {
 
     fun undo() {
         if (strokes.isNotEmpty()) strokes.removeAt(strokes.lastIndex)
+    }
+
+    /** Rubs out every stroke passing within `radius` of a point, as an eraser takes a whole line at a time. */
+    fun erase(x: Float, y: Float, radius: Float) {
+        strokes.removeAll { s ->
+            val p = s.points
+            var hit = false
+            var i = 0
+            // The distance to each segment of the line, not only its points: a quick stroke has few.
+            while (!hit && i + 1 < p.size) {
+                val ax = p[i].toFloat(); val ay = p[i + 1].toFloat()
+                val bx = if (i + 4 < p.size) p[i + 3].toFloat() else ax
+                val by = if (i + 4 < p.size) p[i + 4].toFloat() else ay
+                val dx = bx - ax; val dy = by - ay
+                val len = dx * dx + dy * dy
+                val t = if (len == 0f) 0f else (((x - ax) * dx + (y - ay) * dy) / len).coerceIn(0f, 1f)
+                val cx = ax + t * dx - x; val cy = ay + t * dy - y
+                hit = cx * cx + cy * cy <= radius * radius
+                i += 3
+            }
+            hit
+        }
     }
 
     /** The bounds of everything drawn, as left, top, right, bottom in screen pixels. */
@@ -71,26 +95,35 @@ class InkDraft {
 /**
  * A sheet of glass for the stylus: wet ink from androidx.ink while the pen is down (drawn ahead of
  * the frame, at 144Hz on the tablet), kept as plain strokes once it lifts. Strokes made with a
- * finger are ignored when `penOnly`, so the hand resting on the screen doesn't draw.
+ * finger are ignored when `penOnly`, so the hand resting on the screen doesn't draw. The pen's
+ * eraser end, the pen with its button held, or anything while `erasing`, rubs strokes out instead.
  */
 @Composable
-fun InkCanvas(draft: InkDraft, color: String, widthDp: Float, penOnly: Boolean, modifier: Modifier = Modifier) {
+fun InkCanvas(draft: InkDraft, color: String, widthDp: Float, penOnly: Boolean, modifier: Modifier = Modifier, erasing: Boolean = false) {
     val density = LocalDensity.current.density
     val width = widthDp * density
     val brush = remember(color, width) {
         Brush.createWithColorIntArgb(StockBrushes.pressurePen(), hex(color).toArgb(), width, 0.1f)
     }
-    // androidx.ink leaves alone any pointer already consumed, so the palm (and fingers) are
-    // consumed here first, before the ink sees them.
-    val palm = if (!penOnly) Modifier else Modifier.pointerInput(Unit) {
+    val radius = 14 * density
+    // androidx.ink leaves alone any pointer already consumed, so the palm (and fingers), and the
+    // eraser, are taken here first, before the ink sees them.
+    val hands = Modifier.pointerInput(penOnly, erasing) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                event.changes.forEach { if (it.type == PointerType.Touch) it.consume() }
+                val button = event.buttons.isPrimaryPressed || event.buttons.isSecondaryPressed
+                event.changes.forEach { c ->
+                    val rubbing = c.type == PointerType.Eraser || (c.type == PointerType.Stylus && button) || (erasing && (c.type != PointerType.Touch || !penOnly))
+                    when {
+                        rubbing -> { if (c.pressed) draft.erase(c.position.x, c.position.y, radius); c.consume() }
+                        penOnly && c.type == PointerType.Touch -> c.consume()
+                    }
+                }
             }
         }
     }
-    Box(modifier.fillMaxSize().then(palm)) {
+    Box(modifier.fillMaxSize().then(hands)) {
         Canvas(Modifier.fillMaxSize()) { draft.strokes.forEach { drawInk(Ink("screen", listOf(1.0, 1.0), strokes = listOf(it)), 1f) } }
         InProgressStrokes(defaultBrush = brush, onStrokesFinished = { finished ->
             for (stroke in finished) {
