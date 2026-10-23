@@ -44,6 +44,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -140,7 +144,7 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
         is Phase.Loading -> Box(Modifier.fillMaxSize().background(LocalPaper.current.bg), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (p.progress != null) CircularProgressIndicator(progress = { p.progress }) else CircularProgressIndicator()
-                Text(if (p.progress != null) "Downloading… ${Math.round(p.progress * 100)}%" else "Opening…", color = LocalPaper.current.muted, modifier = Modifier.padding(top = 16.dp))
+                Text(if (p.progress != null) "Downloading the book… ${Math.round(p.progress * 100)}%" else "Opening the book…", color = LocalPaper.current.muted, modifier = Modifier.padding(top = 16.dp))
             }
         }
         is Phase.Failed -> Box(Modifier.fillMaxSize().background(LocalPaper.current.bg), contentAlignment = Alignment.Center) {
@@ -192,12 +196,21 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     // Highlights and drawings, drawn again whenever they change.
     LaunchedEffect(ready, notes) { if (ready) controller.showNotes(book, notes) }
 
-    // Where the owner is, saved a moment after they stop turning pages.
+    // Where the owner is, saved a moment after they stop turning pages. The page the book opens at
+    // isn't saved: it's where they already were, and saving it would trade the web reader's exact
+    // place (a CFI) for the app's coarser one without their having moved.
     LaunchedEffect(ready) {
         val nav = controller.navigator ?: return@LaunchedEffect
         launch { nav.currentLocator.collect { locator = it } }
+        var at: Pair<Int, Long>? = null
         nav.currentLocator.debounce(1500).collect { l ->
             val section = book.sectionOf(l)
+            val here = section to Math.round((l.locations.progression ?: 0.0) * 1000)
+            if (at == null || at == here) {
+                at = here
+                return@collect
+            }
+            at = here
             shelf.saveProgress(
                 file.id,
                 Progress(
@@ -256,8 +269,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     shelf.saveNote(file.id, note)
                     if (action == SelectionAction.Note) editing = NoteEdit(note, focusNote = true)
                 }
-                SelectionAction.Explain, SelectionAction.Define -> {
-                    ai = AiTask.Explain(text, if (action == SelectionAction.Define) "define" else "explain", section, fraction)
+                SelectionAction.Explain, SelectionAction.Define, SelectionAction.Simplify, SelectionAction.Check, SelectionAction.Related, SelectionAction.Counter -> {
+                    ai = AiTask.Explain(text, action.action!!, section, fraction)
                     panel = Panel.Ai
                 }
                 SelectionAction.Ask -> {
@@ -322,6 +335,10 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         onBack = onBack,
                         onPanel = { panel = if (panel == it) null else it },
                         onRecap = { val (s, f) = here(); ai = AiTask.Recap(s, f); panel = Panel.Ai },
+                        onChat = {
+                            if (panel == Panel.Ai && ai is AiTask.Chat) panel = null
+                            else { ai = AiTask.Chat(null); panel = Panel.Ai }
+                        },
                         onDraw = {
                             if (book.isPdf) sketching = locator?.let(book::sectionOf) ?: 0 else drawing = true
                         },
@@ -330,20 +347,34 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         isPdf = book.isPdf,
                     )
                 }
+                // The chat, always a tap away while reading, even with the bars tucked away.
+                if (panel == null && !drawing) {
+                    val paper = LocalPaper.current
+                    Row(
+                        Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp)
+                            .shadow(6.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(paper.fg)
+                            .clickable { ai = AiTask.Chat(null); panel = Panel.Ai }
+                            .padding(start = 14.dp, end = 18.dp, top = 11.dp, bottom = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(20.dp))
+                        Text("  Ask about the book", color = paper.bg, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
                 message?.let {
                     Snackbar(Modifier.align(Alignment.BottomCenter).padding(24.dp), action = { TextButton(onClick = { message = null }) { Text("OK") } }) { Text(it) }
                 }
             }
             if (wide && panel != null) {
                 Box(Modifier.width(400.dp).fillMaxHeight().background(LocalPaper.current.raised).statusBarsPadding()) {
-                    PanelContent(panel!!, book, file.id, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
                 }
             }
         }
         if (!wide && panel != null) {
             ModalBottomSheet(onDismissRequest = { panel = null }) {
                 Box(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
-                    PanelContent(panel!!, book, file.id, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
                 }
             }
         }
@@ -398,6 +429,7 @@ private fun TopBar(
     onBack: () -> Unit,
     onPanel: (Panel) -> Unit,
     onRecap: () -> Unit,
+    onChat: () -> Unit,
     onDraw: () -> Unit,
     onSettings: () -> Unit,
     onListen: () -> Unit,
@@ -415,8 +447,15 @@ private fun TopBar(
         }
         IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, "Contents") }
         IconButton(onClick = { onPanel(Panel.Notes) }) { Icon(Icons.Outlined.EditNote, "Highlights and notes") }
-        IconButton(onClick = { onPanel(Panel.Ai) }) { Icon(Icons.AutoMirrored.Outlined.Chat, "Ask about the book") }
         TextButton(onClick = onRecap) { Text("Recap") }
+        // The chat, named as well as drawn: it's what the bar is most often opened for.
+        Row(
+            Modifier.padding(horizontal = 4.dp).clip(RoundedCornerShape(50)).background(paper.fg).clickable(onClick = onChat).padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(18.dp))
+            Text("  Chat", color = paper.bg, style = MaterialTheme.typography.labelLarge)
+        }
         IconButton(onClick = onDraw) { Icon(Icons.Outlined.Draw, if (isPdf) "Draw on this page" else "Draw in the margin") }
         IconButton(onClick = onListen) { Icon(Icons.Outlined.Headphones, "Listen") }
         if (!isPdf) IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, "Text and layout") }

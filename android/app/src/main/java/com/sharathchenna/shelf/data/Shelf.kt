@@ -88,7 +88,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         val remote = runCatching { api.openBook(fileId) }
         val opened = remote.getOrNull()
         if (opened == null && local == null) throw remote.exceptionOrNull()!!
-        val file = opened?.book ?: file(fileId) ?: throw ApiException(404, "This book isn't on the device.")
+        val file = opened?.book ?: file(fileId) ?: throw ApiException(404, "This book isn't on this device, and the site can't be reached.")
         val path = local?.let { File(it.path) } ?: run {
             val into = bookFile(file)
             api.download(opened!!.fileUrl, into, progress)

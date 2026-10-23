@@ -52,7 +52,7 @@ fun SignInScreen() {
         Column(Modifier.widthIn(max = 420.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Shelf", style = MaterialTheme.typography.displayMedium)
             Text(
-                "Sign in with the owner's password for ${BuildConfig.SITE_URL.removePrefix("https://")}. This device keeps a token; sign it out from the app or the site.",
+                "Sign in to ${BuildConfig.SITE_URL.removePrefix("https://").removePrefix("http://")} with your password. This device stays signed in until you sign it out, here or on the site.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = LocalPaper.current.muted,
             )

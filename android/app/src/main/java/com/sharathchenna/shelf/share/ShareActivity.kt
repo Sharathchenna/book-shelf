@@ -22,9 +22,9 @@ class ShareActivity : ComponentActivity() {
         val shelf = (application as ShelfApp).shelf
         lifecycleScope.launch {
             when {
-                text.isEmpty() -> toast("Nothing to save: there was no text or link.")
+                text.isEmpty() -> toast("Nothing to save: there was no link in what was shared.")
                 !shelf.signedIn.first() -> {
-                    toast("Sign in to Shelf first.")
+                    toast("Sign in to Shelf first, then share it again.")
                     startActivity(Intent(this@ShareActivity, MainActivity::class.java))
                 }
                 else -> toast(runCatching { shelf.capture(text) }.getOrElse { it.message ?: "Not saved." })

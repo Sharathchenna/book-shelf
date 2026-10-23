@@ -13,7 +13,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -64,6 +63,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.automirrored.outlined.Chat
+import com.sharathchenna.shelf.ui.theme.Serif
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -110,6 +113,7 @@ fun PanelContent(
     panel: Panel,
     book: OpenedBook,
     bookId: String,
+    paper: Boolean,
     notes: List<Highlight>,
     ai: AiTask?,
     here: () -> Pair<Int, Double>,
@@ -118,14 +122,30 @@ fun PanelContent(
     onEdit: (Highlight) -> Unit,
     onAi: (AiTask) -> Unit,
 ) {
+    val task = ai ?: AiTask.Chat(null)
+    if (panel == Panel.Ai && task is AiTask.Chat) {
+        ChatPanel(bookId, paper, task.quote, here, onCite = { cite -> book.locatorOfCite(cite)?.let(controller::go) }, onClose = onClose)
+        return
+    }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 22.dp, end = 12.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                when (panel) { Panel.Contents -> "Contents"; Panel.Notes -> "Highlights & notes"; Panel.Ai -> "Ask" },
-                style = MaterialTheme.typography.titleLarge,
+                when (panel) {
+                    Panel.Contents -> "Contents"
+                    Panel.Notes -> "Highlights & notes"
+                    Panel.Ai -> when (task) {
+                        is AiTask.Explain -> SelectionAction.entries.find { it.action == task.action }?.label ?: "Explain"
+                        is AiTask.Recap -> "Recap"
+                        is AiTask.Chat -> "Chat"
+                    }
+                },
+                fontFamily = Serif,
+                fontSize = 26.sp,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "Close") }
+            Box(Modifier.size(36.dp).clip(CircleShape).background(LocalPaper.current.chip).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Close, "Close", modifier = Modifier.size(18.dp))
+            }
         }
         when (panel) {
             Panel.Contents -> Contents(book.publication.tableOfContents.ifEmpty { book.publication.readingOrder }) { link ->
@@ -133,8 +153,21 @@ fun PanelContent(
                 onClose()
             }
             Panel.Notes -> NotesList(book, notes, onGo = { n -> book.locatorOf(n)?.let(controller::go); onClose() }, onEdit = onEdit)
-            Panel.Ai -> AiPanel(bookId, ai ?: AiTask.Chat(null), here, onAi)
+            Panel.Ai -> AiPanel(bookId, task, onAi)
         }
+    }
+}
+
+/** Where a citation in an answer points: a PDF's page, an EPUB's printed page if it lists them, or a numbered section. */
+private fun OpenedBook.locatorOfCite(cite: Cite): org.readium.r2.shared.publication.Locator? = when (cite) {
+    is Cite.Page ->
+        if (isPdf) locatorAt(cite.page - 1, null)
+        else publication.subcollections["pageList"]?.firstOrNull()?.links?.find { it.title == cite.page.toString() }?.let { publication.locatorFromLink(it) }
+    is Cite.Section -> {
+        fun walk(links: List<Link>): Link? = links.firstNotNullOfOrNull { l ->
+            l.takeIf { it.title?.trim()?.let { t -> t == cite.number || t.startsWith("${cite.number} ") || t.startsWith("${cite.number}.") } == true } ?: walk(l.children)
+        }
+        walk(publication.tableOfContents)?.let { publication.locatorFromLink(it) }
     }
 }
 
@@ -210,84 +243,51 @@ fun colorHex(name: String) = "#%06X".format(0xFFFFFF and (HIGHLIGHT_ARGB[name] ?
 
 // ---- the AI panel ----------------------------------------------------------------------------
 
-@Serializable
-private data class ChatMessage(val role: String, val content: String)
-
-/** Explain, Recap and Chat, streamed from the site's reader routes as they're written. */
+/** Explain and Recap, streamed from the site's reader routes as they're written; a follow-up goes to the chat. */
 @Composable
-private fun AiPanel(bookId: String, task: AiTask, here: () -> Pair<Int, Double>, onAi: (AiTask) -> Unit) {
+private fun AiPanel(bookId: String, task: AiTask, onAi: (AiTask) -> Unit) {
     val shelf = LocalShelf.current
     val paper = LocalPaper.current
-    val scope = rememberCoroutineScope()
-    val messages = remember(task) { mutableStateListOf<ChatMessage>() }
     var answer by remember(task) { mutableStateOf("") }
     var error by remember(task) { mutableStateOf<String?>(null) }
-    var busy by remember(task) { mutableStateOf(false) }
-    var draft by remember(task) { mutableStateOf("") }
-    val list = rememberLazyListState()
-
-    fun run(path: String, body: kotlinx.serialization.json.JsonObject, chat: Boolean) {
-        busy = true; error = null; answer = ""
-        scope.launch {
-            runCatching { shelf.api.stream(path, body).collect { answer = it } }.onFailure { error = it.message }
-            if (chat && answer.isNotBlank()) messages += ChatMessage("assistant", answer.trim())
-            if (chat) answer = ""
-            busy = false
-        }
-    }
+    var busy by remember(task) { mutableStateOf(true) }
 
     LaunchedEffect(task) {
-        when (task) {
-            is AiTask.Explain -> run("/api/reader/explain", buildJsonObject {
+        val (path, body) = when (task) {
+            is AiTask.Explain -> "/api/reader/explain" to buildJsonObject {
                 put("bookId", bookId); put("sectionIndex", task.sectionIndex); put("sectionFraction", task.fraction); put("selection", task.text); put("action", task.action)
-            }, chat = false)
-            is AiTask.Recap -> run("/api/reader/recap", buildJsonObject {
+            }
+            is AiTask.Recap -> "/api/reader/recap" to buildJsonObject {
                 put("bookId", bookId); put("sectionIndex", task.sectionIndex); put("sectionFraction", task.fraction)
-            }, chat = false)
-            is AiTask.Chat -> Unit
+            }
+            is AiTask.Chat -> return@LaunchedEffect
         }
+        runCatching { shelf.api.stream(path, body).collect { answer = it } }.onFailure { error = it.message ?: "Couldn't reach the server." }
+        busy = false
     }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
-        LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             when (task) {
-                is AiTask.Explain -> item { Text("“${task.text.take(400)}”", style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic), color = paper.muted) }
-                is AiTask.Recap -> item { Text("WHERE YOU ARE", style = Eyebrow, color = paper.muted) }
-                is AiTask.Chat -> {
-                    task.quote?.let { item { Text("“${it.take(400)}”", style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic), color = paper.muted) } }
-                    if (messages.isEmpty() && answer.isEmpty()) item { Text("Ask anything about what you've read so far. It won't give away what's ahead.", color = paper.muted) }
-                    items(messages) { m ->
-                        if (m.role == "user") Text(m.content, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 32.dp))
-                        else Markdown(m.content)
-                    }
-                }
+                is AiTask.Explain -> Text(
+                    task.text.take(400),
+                    fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 15.sp, lineHeight = 22.sp, color = paper.muted, maxLines = 6,
+                    modifier = Modifier.drawBehind { drawLine(paper.accent, Offset(-12.dp.toPx(), 0f), Offset(-12.dp.toPx(), size.height), strokeWidth = 2.dp.toPx()) }.padding(start = 2.dp),
+                )
+                is AiTask.Recap -> Text("WHERE YOU ARE", style = Eyebrow, color = paper.muted)
+                is AiTask.Chat -> Unit
             }
-            if (answer.isNotEmpty()) item { Markdown(answer) }
-            if (busy && answer.isEmpty()) item { Text("Thinking…", color = paper.muted) }
-            error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+            if (answer.isNotEmpty()) Markdown(answer)
+            if (busy && answer.isEmpty()) Thinking()
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        if (task !is AiTask.Chat) {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onAi(AiTask.Chat((task as? AiTask.Explain)?.text)) }) { Text("Ask a follow-up") }
-            }
-        } else {
-            Row(Modifier.padding(12.dp).navigationBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(draft, { draft = it }, placeholder = { Text("Ask about the book…") }, modifier = Modifier.weight(1f), maxLines = 4)
-                IconButton(enabled = draft.isNotBlank() && !busy, onClick = {
-                    val question = draft.trim()
-                    draft = ""
-                    messages += ChatMessage("user", question)
-                    val (section, fraction) = here()
-                    run("/api/reader/chat", buildJsonObject {
-                        put("bookId", bookId); put("sectionIndex", section); put("sectionFraction", fraction)
-                        task.quote?.let { put("quote", it) }
-                        put("messages", buildJsonArray { messages.forEach { m -> add(buildJsonObject { put("role", m.role); put("content", m.content) }) } })
-                    }, chat = true)
-                }) { Icon(Icons.AutoMirrored.Outlined.Send, "Send") }
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 22.dp, vertical = 12.dp)) {
+            OutlinedButton(onClick = { onAi(AiTask.Chat((task as? AiTask.Explain)?.text)) }) {
+                Icon(Icons.AutoMirrored.Outlined.Chat, null, Modifier.size(18.dp))
+                Text("  Ask a follow-up")
             }
         }
     }
-    LaunchedEffect(messages.size, answer.length) { if (messages.isNotEmpty() || answer.isNotEmpty()) list.animateScrollToItem(maxOf(0, list.layoutInfo.totalItemsCount - 1)) }
 }
 
 // ---- a highlight's sheet ---------------------------------------------------------------------
@@ -468,7 +468,7 @@ fun MarginInk(controller: ReaderController, book: OpenedBook, onPlaced: (Highlig
             Button(enabled = !draft.isEmpty, onClick = {
                 scope.launch {
                     val note = place(draft, origin, controller, book)
-                    if (note == null) onError("Couldn't find a paragraph near the drawing.") else onPlaced(note)
+                    if (note == null) onError("Couldn't find a paragraph near the drawing. Draw beside the text you mean.") else onPlaced(note)
                     onClose()
                 }
             }) { Text("Done") }
@@ -566,7 +566,7 @@ fun PageSketch(pdf: File, page: Int, onSave: (Ink) -> Unit, onDismiss: () -> Uni
                 }) { Text("Save") }
             }
             HorizontalDivider()
-            BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInWindow() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInWindow() }, contentAlignment = Alignment.Center) {
                 bitmap?.let { bmp ->
                     Image(
                         bmp.asImageBitmap(),

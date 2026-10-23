@@ -111,7 +111,7 @@ fun ListenScreen(fileId: String, startSection: Int, onBack: () -> Unit) {
 
     LaunchedEffect(fileId) {
         runCatching { shelf.api.voices(fileId).filter { it.sections > 0 }.map { it.voice } }
-            .onSuccess { voices = it; voice = it.firstOrNull(); if (it.isEmpty()) error = "Nothing narrated yet. Start a narration from the web reader's Listen." }
+            .onSuccess { voices = it; voice = it.firstOrNull(); if (it.isEmpty()) error = "Nothing narrated yet. Start a narration from Listen in the web reader, and its chapters play here as they're ready." }
             .onFailure { error = it.message }
     }
     LaunchedEffect(voice) {

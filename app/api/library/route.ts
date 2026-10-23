@@ -3,6 +3,7 @@ import { lookOf, TOPICS, type ShelfBook } from "@/lib/bookcase";
 import { getClippings, getShelf } from "@/lib/data";
 import { allProgress, highlightCounts, listFiles, shelfItemFor } from "@/lib/library";
 import { shelfBooks } from "@/lib/shelving";
+import { shelfConfig } from "@/shelf.config";
 
 /**
  * The whole library as data, for the Android app: every book and clipping as the bookcase draws
@@ -71,6 +72,7 @@ export async function GET(request: Request) {
     });
 
   const body = JSON.stringify({
+    owner: shelfConfig.owner,
     updatedAt,
     topics: TOPICS.map(({ key, name, shades, blurb }) => ({ key, name, shades, blurb })),
     books: [...shelf, ...loose],

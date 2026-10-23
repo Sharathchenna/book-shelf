@@ -42,7 +42,14 @@ val HIGHLIGHT_ARGB = mapOf("yellow" to 0xFFFFD84D.toInt(), "green" to 0xFF8BD17C
 data class InkMark(val svg: String, val dx: Double, val dy: Double) : Decoration.Style
 
 /** What the reader asks of the selection menu. */
-enum class SelectionAction(val label: String) { Highlight("Highlight"), Note("Note"), Explain("Explain"), Ask("Ask"), Define("Define") }
+/**
+ * What the menu over selected text offers: highlighting, and the web reader's actions
+ * (lib/reader-actions.ts), each sent to /api/reader/explain with its `action`.
+ */
+enum class SelectionAction(val label: String, val action: String? = null) {
+    Highlight("Highlight"), Note("Note"), Explain("Explain", "explain"), Define("Define", "define"),
+    Simplify("Simplify", "simplify"), Check("Fact-check", "check"), Related("Related", "connect"), Counter("Counterpoint", "counter"), Ask("Ask"),
+}
 
 /**
  * The reader's handle on Readium's navigator, whichever kind it is: the EPUB one, which draws

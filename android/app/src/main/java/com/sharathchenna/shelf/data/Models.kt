@@ -11,6 +11,8 @@ import kotlinx.serialization.Serializable
 /** GET /api/library: everything on the bookcase, and what's behind each card. */
 @Serializable
 data class Library(
+    /** The owner's name, for "<owner>'s library". */
+    val owner: String? = null,
     val updatedAt: String = "",
     val topics: List<Topic> = emptyList(),
     val books: List<ShelfBook> = emptyList(),

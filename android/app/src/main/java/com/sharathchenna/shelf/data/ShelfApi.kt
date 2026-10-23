@@ -71,7 +71,7 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
         if (res.status.isSuccess() || res.status == HttpStatusCode.NotModified) return res
         if (res.status == HttpStatusCode.Unauthorized) onSignedOut()
         val message = runCatching { ShelfJson.parseToJsonElement(res.bodyAsText()).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
-        throw ApiException(res.status.value, message ?: "The site answered ${res.status.value}.")
+        throw ApiException(res.status.value, message ?: "The site couldn't do that just now (error ${res.status.value}).")
     }
 
     // ---- signing in ------------------------------------------------------------------------
