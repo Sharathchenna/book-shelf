@@ -28,9 +28,9 @@ export async function GET(request: Request) {
 
   const fileOf = new Map<string, string>();
   for (const file of files) {
-    // An article's copy from an older conversion, with nothing highlighted in it, is made again
-    // when next opened (/api/books/clips), so the app goes to the opener rather than to it.
-    if (file.clipId && (file.build ?? 1) < ARTICLE_EPUB_BUILD && !(marks.get(file.id) ?? 0)) continue;
+    // An article's copy from an older conversion is made again when next opened (/api/books/clips),
+    // its highlights carried over, so the app goes to the opener rather than to it.
+    if (file.clipId && (file.build ?? 1) < ARTICLE_EPUB_BUILD) continue;
     const of = file.paperId ?? file.clipId ?? shelfItemFor(file, items);
     if (of && !fileOf.has(of)) fileOf.set(of, file.id);
   }

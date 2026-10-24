@@ -41,8 +41,13 @@ export function ClipOpener({ clipId }: { clipId: string }) {
         (patch) => show(patch.stage === "uploading" ? `Saving to your library… ${Math.round((patch.progress ?? 0) * 100)}%` : "Reading it…"),
         { clipId, build: ARTICLE_EPUB_BUILD },
       );
-      // A copy made by an older conversion is no longer needed.
-      await Promise.all((data.replaces ?? []).map((old) => fetch(`/api/books/${old}`, { method: "DELETE" }).catch(() => {})));
+      // A copy made by an older conversion hands its highlights and place to the new one, then goes.
+      // If the handing over fails the old copy stays, so nothing's lost.
+      show("Bringing your highlights across…");
+      for (const old of data.replaces ?? []) {
+        const adopted = await fetch(`/api/books/${id}/adopt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: old }) }).catch(() => null);
+        if (adopted?.ok) await fetch(`/api/books/${old}`, { method: "DELETE" }).catch(() => {});
+      }
       if (!cancelled) router.replace(`/reader/${id}`);
     })().catch((err: Error) => !cancelled && setError(err.message));
     return () => {

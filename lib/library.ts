@@ -48,6 +48,21 @@ export async function removeFile(id: string) {
   );
 }
 
+/**
+ * A copy made again (an article rebuilt by a newer conversion) taking over from the one before:
+ * its highlights, their places in the review, and the owner's place. The highlights' CFIs were
+ * made against the old copy's markup, so they're dropped (a PDF page's are kept) and each is
+ * found again by its text and the quote either side, as both readers already do.
+ */
+export async function adoptFile(toId: string, fromId: string) {
+  const now = new Date().toISOString();
+  const notes = await getNotes(fromId);
+  if (notes.length) await mergeNotes(toId, notes.map((n) => ({ ...n, cfi: n.cfi.startsWith("page:") ? n.cfi : "", updatedAt: now })));
+  await (await db()).prepare("UPDATE reviews SET file_id = ?1 WHERE file_id = ?2").bind(toId, fromId).run();
+  const place = await getProgress(fromId);
+  if (place && !(await getProgress(toId))) await putProgress(toId, { ...place, cfi: place.cfi.startsWith("page:") ? place.cfi : "" });
+}
+
 // ---- the owner's place and notes ---------------------------------------------------------------
 
 export async function getProgress(id: string): Promise<Progress | null> {

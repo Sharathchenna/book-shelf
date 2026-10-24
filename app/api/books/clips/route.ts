@@ -1,7 +1,7 @@
 import { requireOwner } from "@/lib/auth/session";
 import { readableClip } from "@/lib/clippings";
 import { getClipping } from "@/lib/data";
-import { highlightCounts, listFiles } from "@/lib/library";
+import { listFiles } from "@/lib/library";
 import { ARTICLE_EPUB_BUILD } from "@/lib/library-types";
 
 /**
@@ -16,11 +16,9 @@ export async function POST(request: Request) {
   const clip = typeof clipId === "string" ? await getClipping(clipId) : null;
   if (!clip || !readableClip(clip)) return Response.json({ error: "That isn't an article." }, { status: 404 });
 
-  const [all, marks] = await Promise.all([listFiles(), highlightCounts()]);
-  const files = all.filter((b) => b.clipId === clip.id);
-  // A copy with highlights is kept whatever made it: rebuilt, they'd lose their places.
-  const current = files.find((b) => (b.build ?? 1) >= ARTICLE_EPUB_BUILD) ?? files.find((b) => (marks.get(b.id) ?? 0) > 0);
+  const files = (await listFiles()).filter((b) => b.clipId === clip.id);
+  const current = files.find((b) => (b.build ?? 1) >= ARTICLE_EPUB_BUILD);
   if (current) return Response.json({ id: current.id, ready: true });
-  // Made by an older conversion: built again, and the old copy goes.
+  // Made by an older conversion: built again, the new copy takes the old one's highlights and place (/api/books/[id]/adopt), and the old copy goes.
   return Response.json({ build: "epub", replaces: files.map((b) => b.id) });
 }
