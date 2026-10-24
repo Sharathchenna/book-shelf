@@ -383,7 +383,7 @@ fun NoteEditor(edit: NoteEdit, onSave: (Highlight) -> Unit, onRemove: (Highlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSettings) -> Unit, onDismiss: () -> Unit) {
+fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, article: Boolean = false, onChange: (ReaderSettings) -> Unit, onDismiss: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val behaviour = rememberBehaviour()
     var tab by remember { mutableStateOf(0) }
@@ -399,7 +399,7 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                 0 -> {
                     Text("THEME", style = Eyebrow, color = muted)
                     Choices(listOf("auto" to "Auto", "light" to "Paper", "sepia" to "Sepia", "dark" to "Night"), settings.theme) { onChange(settings.copy(theme = it)) }
-                    if (isPdf) PdfLook(settings, onChange) else BookLook(settings, onChange)
+                    if (isPdf) PdfLook(settings, onChange) else BookLook(settings, article, onChange)
                 }
                 1 -> BehaviourControls(behaviour) { ReaderBehaviour.update(context, it) }
                 else -> PenSettings(settings, isPdf, onChange)
@@ -417,8 +417,9 @@ private fun <T> Choices(options: List<Pair<T, String>>, chosen: T, onChoose: (T)
 }
 
 @Composable
-private fun BookLook(settings: ReaderSettings, onChange: (ReaderSettings) -> Unit) {
+private fun BookLook(settings: ReaderSettings, article: Boolean, onChange: (ReaderSettings) -> Unit) {
     val muted = LocalPaper.current.muted
+    val own = if (article) "Article's own" else "Book's own"
     Text("LAYOUT", style = Eyebrow, color = muted)
     val layout = when { settings.scroll -> "scroll"; settings.spread -> "two"; else -> "single" }
     Choices(listOf("single" to "Single page", "two" to "Two pages", "scroll" to "Scroll"), layout) {
@@ -427,7 +428,7 @@ private fun BookLook(settings: ReaderSettings, onChange: (ReaderSettings) -> Uni
     if (layout == "two") Text("Two pages show side by side when the screen is wide enough, as on the tablet in landscape.", style = MaterialTheme.typography.bodySmall, color = muted)
     Text("TYPE", style = Eyebrow, color = muted)
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("original" to "Book's own", "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
+        listOf("original" to own, "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
             FilterChip(
                 selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) },
                 label = { Text(label, fontFamily = when (k) { "fraunces" -> Serif; "geist" -> com.sharathchenna.shelf.ui.theme.Sans; "serif" -> androidx.compose.ui.text.font.FontFamily.Serif; "sans" -> androidx.compose.ui.text.font.FontFamily.SansSerif; else -> null }) },
@@ -441,17 +442,26 @@ private fun BookLook(settings: ReaderSettings, onChange: (ReaderSettings) -> Uni
     }
     Slider(value = settings.fontSize.toFloat(), onValueChange = { onChange(settings.copy(fontSize = (Math.round(it * 20) / 20.0))) }, valueRange = 0.7f..2.5f)
     Text("Weight")
-    Choices(listOf(null to "Book's own", 0.8 to "Light", 1.25 to "Bold", 1.6 to "Bolder"), settings.fontWeight) { onChange(settings.copy(fontWeight = it)) }
+    Choices(listOf(null to own, 0.8 to "Light", 1.25 to "Bold", 1.6 to "Bolder"), settings.fontWeight) { onChange(settings.copy(fontWeight = it)) }
     Text("SPACING", style = Eyebrow, color = muted)
     Text("Between lines")
-    Choices(listOf(null to "Book's own", 1.3 to "Tight", 1.55 to "Normal", 1.85 to "Loose", 2.1 to "Looser"), settings.lineHeight) { onChange(settings.copy(lineHeight = it)) }
+    Choices(listOf(null to own, 1.3 to "Tight", 1.55 to "Normal", 1.85 to "Loose", 2.1 to "Looser"), settings.lineHeight) { onChange(settings.copy(lineHeight = it)) }
     Text("Between paragraphs")
-    Choices(listOf(null to "Book's own", 0.0 to "None", 0.6 to "Some", 1.2 to "More"), settings.paragraphSpacing) { onChange(settings.copy(paragraphSpacing = it)) }
-    Text("Margins")
-    Choices(listOf(0.5 to "Narrow", 1.0 to "Normal", 1.6 to "Wide", 2.2 to "Widest"), settings.margins) { onChange(settings.copy(margins = it)) }
+    Choices(listOf(null to own, 0.0 to "None", 0.6 to "Some", 1.2 to "More"), settings.paragraphSpacing) { onChange(settings.copy(paragraphSpacing = it)) }
+    if (article && settings.scroll) {
+        // An article's column is held to a measure, in its own type, as read-later apps set it.
+        Text("Line width")
+        Choices(listOf("narrow" to "Narrow", "medium" to "Medium", "wide" to "Wide"), settings.lineWidth) { onChange(settings.copy(lineWidth = it)) }
+    } else {
+        Text("Margins")
+        Choices(listOf(0.5 to "Narrow", 1.0 to "Normal", 1.6 to "Wide", 2.2 to "Widest"), settings.margins) { onChange(settings.copy(margins = it)) }
+    }
     Text("Alignment")
-    Choices(listOf(null to "Book's own", false to "Ragged", true to "Justified"), settings.justify) { onChange(settings.copy(justify = it)) }
-    TextButton(onClick = { onChange(settings.booksOwn()) }) { Text("Reset to the book's own") }
+    Choices(listOf(null to own, false to "Ragged", true to "Justified"), settings.justify) { onChange(settings.copy(justify = it)) }
+    if (article) TextButton(onClick = {
+        onChange(ReaderSettings.ARTICLE.copy(theme = settings.theme, color = settings.color, penHighlight = settings.penHighlight, penWrite = settings.penWrite))
+    }) { Text("Back to the article's look") }
+    else TextButton(onClick = { onChange(settings.booksOwn()) }) { Text("Reset to the book's own") }
 }
 
 @Composable

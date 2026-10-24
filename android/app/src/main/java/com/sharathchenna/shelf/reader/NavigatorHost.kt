@@ -128,14 +128,15 @@ fun NavigatorHost(
     preferences: EpubPreferences,
     controller: ReaderController,
     onSelection: (SelectionAction) -> Unit,
-    onTap: () -> Unit,
+    /** A tap in the middle of the page, where it fell (in the navigator's pixels). */
+    onTap: (android.graphics.PointF) -> Unit,
     onDecoration: (id: String) -> Unit,
     pen: PenListener,
     penHighlight: Boolean,
     penWrite: Boolean,
     scrolling: Boolean,
     graceMs: Long,
-    /** For an article: the page's gutters (CSS px), so the text keeps to a readable measure. */
+    /** For an article: the page's gutters (CSS px), beside a column held to its measure (articleCss). */
     gutter: Double? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -147,6 +148,12 @@ fun NavigatorHost(
             EpubNavigatorFactory(book.publication).createFragmentFactory(
                 initialLocator = initial,
                 initialPreferences = preferences,
+                // A link out of the book opens in the browser, over the app.
+                listener = object : EpubNavigatorFragment.Listener {
+                    override fun onExternalLinkActivated(url: org.readium.r2.shared.util.AbsoluteUrl) {
+                        if (url.scheme.value == "http" || url.scheme.value == "https") com.sharathchenna.shelf.ui.openExternal(activity, url.toString())
+                    }
+                },
                 configuration = EpubNavigatorFragment.Configuration(
                     decorationTemplates = templates(),
                     selectionActionModeCallback = SelectionMenu(onSelection),
@@ -200,7 +207,7 @@ private fun attach(
     factory: FragmentFactory,
     tag: String,
     controller: ReaderController,
-    onTap: () -> Unit,
+    onTap: (android.graphics.PointF) -> Unit,
     onDecoration: (String) -> Unit,
 ) {
     val fm = activity.supportFragmentManager
@@ -218,7 +225,7 @@ private fun attach(
     })
     navigator.addInputListener(object : InputListener {
         override fun onTap(event: TapEvent): Boolean {
-            onTap()
+            onTap(event.point)
             return true
         }
     })

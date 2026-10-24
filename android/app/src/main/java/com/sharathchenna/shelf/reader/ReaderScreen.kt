@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -72,6 +74,7 @@ import com.sharathchenna.shelf.ui.LocalShelf
 import com.sharathchenna.shelf.ui.theme.LocalPaper
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.readium.r2.navigator.epub.EpubPreferences
@@ -124,6 +127,8 @@ data class ReaderSettings(
     val pdfLayout: String = "scroll",
     /** A PDF's page fitted to the width, or whole (page) on the screen. */
     val pdfFit: String = "width",
+    /** An article's measure: narrow, medium or wide, in the type's own size so it holds as the type grows. */
+    val lineWidth: String = "medium",
 ) {
     /** Whether the book's own styles stand: anything chosen here overrides them. */
     val ownStyles: Boolean get() = font == "original" && lineHeight == null && justify == null && paragraphSpacing == null
@@ -156,7 +161,7 @@ data class ReaderSettings(
 
         fun load(context: Context, article: Boolean): ReaderSettings {
             val p = prefs(context, article)
-            if (article && !p.contains("font")) return ReaderSettings(font = "fraunces", lineHeight = 1.65, margins = 1.0, scroll = true, justify = false)
+            if (article && !p.contains("font")) return ARTICLE
             return ReaderSettings(
                 theme = p.getString("theme", "light")!!,
                 fontSize = p.getFloat("fontSize", 1f).toDouble(),
@@ -175,8 +180,12 @@ data class ReaderSettings(
                 fontWeight = p.getFloat("fontWeight", 0f).takeIf { it > 0 }?.toDouble(),
                 pdfLayout = p.getString("pdfLayout", "scroll")!!,
                 pdfFit = p.getString("pdfFit", "width")!!,
+                lineWidth = p.getString("lineWidth", "medium")!!,
             )
         }
+
+        /** An article as a good read-later app sets it: Fraunces, airy lines, ragged right, one long scroll. */
+        val ARTICLE = ReaderSettings(font = "fraunces", fontSize = 1.1, lineHeight = 1.65, margins = 1.0, scroll = true, justify = false)
     }
 
     fun save(context: Context, article: Boolean) {
@@ -187,7 +196,7 @@ data class ReaderSettings(
             .apply { if (justify == null) remove("justify") else putBoolean("justify", justify) }
             .putBoolean("scroll", scroll)
             .putFloat("paragraphSpacing", (paragraphSpacing ?: -1.0).toFloat()).putFloat("fontWeight", (fontWeight ?: 0.0).toFloat())
-            .putString("pdfLayout", pdfLayout).putString("pdfFit", pdfFit)
+            .putString("pdfLayout", pdfLayout).putString("pdfFit", pdfFit).putString("lineWidth", lineWidth)
             .apply()
     }
 }
@@ -195,7 +204,8 @@ data class ReaderSettings(
 private sealed interface Phase {
     data class Loading(val progress: Float?) : Phase
     data class Failed(val message: String) : Phase
-    data class Ready(val opened: Shelf.Opened, val book: OpenedBook, val initial: Locator?) : Phase
+    /** `restore`: the progression to find again in a scrolled article, when it opens where it was left. */
+    data class Ready(val opened: Shelf.Opened, val book: OpenedBook, val initial: Locator?, val restore: Double? = null) : Phase
     /** A PDF, for Android's own PDF view (pdf/PdfReader.kt). */
     data class Pdf(val opened: Shelf.Opened) : Phase
 }
@@ -214,7 +224,8 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
             if (opened.file.isPdf && !simplePdf && com.sharathchenna.shelf.reader.pdf.pdfEngineAvailable()) return@runCatching Phase.Pdf(opened)
             val book = BookOpener(context).open(opened.path, opened.file.isPdf).apply { titles = opened.file.sections.map { it.title } }
             val notes = shelf.notes(fileId).first()
-            Phase.Ready(opened, book, initialLocator(book, opened.progress, notes.find { it.id == at }))
+            val highlight = notes.find { it.id == at }
+            Phase.Ready(opened, book, initialLocator(book, opened.progress, highlight), restore = if (highlight == null && opened.file.clipId != null) opened.progress?.progression else null)
         }.getOrElse { Phase.Failed(it.message ?: "This book wouldn't open.") }
     }
     when (val p = phase) {
@@ -232,7 +243,7 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
             }
         }
         is Phase.Ready -> {
-            Reading(p.opened, p.book, p.initial, onBack, onListen)
+            Reading(p.opened, p.book, p.initial, p.restore, onBack, onListen)
         }
         is Phase.Pdf -> com.sharathchenna.shelf.reader.pdf.PdfReading(p.opened, at, onBack, onListen, onFallback = { simplePdf = true })
     }
@@ -250,7 +261,7 @@ private suspend fun initialLocator(book: OpenedBook, progress: Progress?, highli
 
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
-private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, onBack: () -> Unit, onListen: (Int) -> Unit) {
+private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, restore: Double?, onBack: () -> Unit, onListen: (Int) -> Unit) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
     val activity = LocalActivity.current as FragmentActivity
@@ -281,7 +292,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     var locator by remember { mutableStateOf(initial) }
     var marks by remember { mutableStateOf(Bookmarks.load(context, file.id)) }
     var fresh by remember { mutableStateOf<Highlight?>(null) }
+    var picture by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     val positions = rememberPositions(book)
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
 
     // Highlights and drawings, drawn again whenever they change.
     LaunchedEffect(ready, notes) { if (ready) controller.showNotes(book, notes) }
@@ -292,6 +305,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     LaunchedEffect(ready) {
         val nav = controller.navigator ?: return@LaunchedEffect
         launch { nav.currentLocator.collect { locator = it } }
+        // A scrolled article's place is the page's own scroll, saved below.
+        if (article && look.scroll) return@LaunchedEffect
         var at: Pair<Int, Long>? = null
         nav.currentLocator.debounce(1500).collect { l ->
             val section = book.sectionOf(l)
@@ -313,7 +328,33 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
         }
     }
 
+    // A scrolled article's place, read from the page as it scrolls: Readium's own locator can
+    // stall on a long page whose pictures change its height as they load.
+    var scrolled by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(ready, article && look.scroll) {
+        scrolled = null
+        if (!ready || !article || !look.scroll) return@LaunchedEffect
+        // Opened where they left off (not at a highlight asked for): the place found again once the page has its pictures.
+        if (restore != null) controller.settle(restore)
+        launch {
+            var at: Long? = null
+            snapshotFlow { scrolled }.filterNotNull().debounce(1500).collect { p ->
+                val here = Math.round(p * 1000)
+                // Not the place it opened at, as above.
+                if (at == null || at == here) { at = here; return@collect }
+                at = here
+                shelf.saveProgress(file.id, Progress(cfi = "", fraction = p, sectionIndex = locator?.let(book::sectionOf) ?: 0, progression = p))
+            }
+        }
+        while (true) {
+            controller.pageProgression()?.let { scrolled = it }
+            kotlinx.coroutines.delay(400)
+        }
+    }
+
     LaunchedEffect(look) { controller.epub?.submitPreferences(look.epub()) }
+    // An article's column, masthead colours and room for the bars, put in the page once it's loaded and as the look changes.
+    LaunchedEffect(ready, look, locator?.href) { if (ready && article) controller.style("shelf-article", articleCss(look)) }
 
     // The bars step out of the way of the page: a few seconds after showing, and on a page turn.
     LaunchedEffect(chrome, panel) {
@@ -324,8 +365,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     }
     // Scrolling down tucks the bars away; scrolling back up brings them, as the best article readers do.
     var lastSeen by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(locator?.locations?.position, locator?.locations?.progression) {
-        val now = locator?.locations?.totalProgression
+    LaunchedEffect(locator?.locations?.position, locator?.locations?.progression, scrolled) {
+        val now = scrolled ?: locator?.locations?.totalProgression
         val before = lastSeen
         lastSeen = now
         if (panel != null) return@LaunchedEffect
@@ -474,7 +515,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     preferences = look.epub(),
                     controller = controller,
                     onSelection = onSelection,
-                    onTap = { chrome = !chrome },
+                    // A tap on a picture shows it on its own; anywhere else, the bars.
+                    onTap = { point -> scope.launch { picture = controller.pictureAt(point, density) ?: run { chrome = !chrome; null } } },
                     onDecoration = { id -> notes.find { it.id == id }?.let { editing = NoteEdit(it) } },
                     pen = pen,
                     penHighlight = penMode == PenMode.Mark && settings.penHighlight && !drawing,
@@ -482,8 +524,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     // Marking, a stroke down the text marks it too; scrolling is the fingers' while marking.
                     scrolling = false,
                     graceMs = penMode.graceMs,
-                    gutter = if (article) ((LocalConfiguration.current.screenWidthDp - 720) / 2.0).coerceAtLeast(24.0) else null,
-                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = 22.dp),
+                    gutter = if (article) ARTICLE_GUTTER else null,
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = if (article && look.scroll) 0.dp else 22.dp),
                 )
                 if (drawing && !book.isPdf) {
                     MarginInk(
@@ -507,7 +549,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         chapter = (locator?.let(book::sectionOf) ?: 0).let { section ->
                             locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title ?: ""
                         },
-                        percent = ((locator?.locations?.totalProgression ?: 0.0) * 100).toInt(),
+                        percent = ((scrolled ?: locator?.locations?.totalProgression ?: 0.0) * 100).toInt(),
                         onBack = onBack,
                         onPanel = { panel = if (panel == it) null else it },
                         onRecap = { val (s, f) = here(); ai = AiTask.Recap(s, f); panel = Panel.Ai },
@@ -527,16 +569,25 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         onBrief = if (file.clipId != null || file.paperId != null) ({ panel = if (panel == Panel.Brief) null else Panel.Brief }) else null,
                     )
                 }
-                val progress = (locator?.locations?.totalProgression ?: 0.0).toFloat()
+                val progress = (scrolled ?: locator?.locations?.totalProgression ?: 0.0).toFloat()
+                val ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black
+                if (article && !drawing && !chrome) ArticleProgress(progress, ink, Modifier.align(Alignment.TopCenter))
                 if (chrome && !drawing) {
                     Scrubber(book, positions, progress, onGo = { controller.go(it) }, modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth())
                 } else if (!drawing) {
                     val section = locator?.let(book::sectionOf) ?: 0
+                    // A scrolled article runs to the foot of the screen, fading under the footer.
+                    if (article && look.scroll) Box(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().height(64.dp)
+                            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, readerBackground(look.theme)))),
+                    )
                     ReadingFooter(
-                        chapter = locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
-                        where = whereLabel(book, positions, locator),
-                        progress = progress,
-                        ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black,
+                        // An article's title is the page's own masthead; the foot keeps to what's left.
+                        chapter = if (article) "" else locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
+                        where = if (article) listOf(minutesLeft(positions, progress), "${Math.round(progress * 100)}%").filter { it.isNotEmpty() }.joinToString("  ·  ") else whereLabel(book, positions, locator),
+                        // An article's progress is the line along the top.
+                        progress = if (article) 0f else progress,
+                        ink = ink,
                         modifier = Modifier.align(Alignment.BottomStart).padding(end = if (panel == null) 230.dp else 0.dp),
                     )
                 }
@@ -566,7 +617,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(20.dp))
-                        Text("  Ask about the book", color = paper.bg, style = MaterialTheme.typography.labelLarge)
+                        Text(if (article) "  Ask about the article" else "  Ask about the book", color = paper.bg, style = MaterialTheme.typography.labelLarge)
                     }
                 }
                 penMenu?.let { at ->
@@ -598,8 +649,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
         NoteSheet(edit = edit, onSave = saveEdit, onRemove = removeEdit, onExplain = explainEdit, onDismiss = { editing = null })
     }
     if (showSettings) {
-        SettingsSheet(settings, isPdf = book.isPdf, onChange = { settings = it; it.save(context, article) }, onDismiss = { showSettings = false })
+        SettingsSheet(settings, isPdf = book.isPdf, article = article, onChange = { settings = it; it.save(context, article) }, onDismiss = { showSettings = false })
     }
+    picture?.let { PictureViewer(it, onDismiss = { picture = null }) }
     sketching?.let { page ->
         PageSketch(
             pdf = opened.path,
