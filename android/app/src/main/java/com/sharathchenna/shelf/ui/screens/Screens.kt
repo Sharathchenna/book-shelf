@@ -482,6 +482,10 @@ fun SettingsScreen() {
                     update?.let { Text(it, fontFamily = Sans, fontSize = 13.sp, color = paper.muted) }
                 }
             }
+            Section("Reading") {
+                Text("How every reader behaves. A book's type, layout and theme are in its Aa sheet.", fontFamily = Sans, fontSize = 14.sp, color = paper.muted)
+                com.sharathchenna.shelf.reader.BehaviourControls(com.sharathchenna.shelf.reader.rememberBehaviour()) { com.sharathchenna.shelf.reader.ReaderBehaviour.update(context, it) }
+            }
             Section("Obsidian") { ObsidianSettings() }
             Section("This device") {
                 Text("Signing out forgets this device's token, the books kept offline, and anything not yet sent to the site.", fontFamily = Sans, fontSize = 14.sp, color = paper.muted)

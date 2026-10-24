@@ -44,6 +44,8 @@ interface PdfPenListener {
     /** The eraser at a point of a page (the page's points), rubbing out whatever's within `radius`. */
     fun onErase(page: Int, x: Float, y: Float, radius: Float)
     fun onNearTop()
+    /** A swipe that ended on the page (a finger, or the pen reading), in pixels. */
+    fun onSwipe(dx: Float, dy: Float, millis: Long) {}
     fun onButton()
 }
 
@@ -168,6 +170,19 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
 
     private fun showHighlights() = pdf.setHighlights(highlights + live)
 
+    override fun onHandSwipe(dx: Float, dy: Float, millis: Long) { listener?.onSwipe(dx, dy, millis) }
+
+    /** The height of a page on screen, in pixels, at the view's zoom. */
+    fun pageHeightOnScreen(page: Int): Float? {
+        val h = pageSizes[page]?.second ?: return null
+        val a = pdf.pdfToViewPoint(PdfPoint(page, 0f, 0f)) ?: return null
+        val b = pdf.pdfToViewPoint(PdfPoint(page, 0f, h)) ?: return null
+        return b.y - a.y
+    }
+
+    /** Where a page's top is on screen now, in pixels. */
+    fun pageTopOnScreen(page: Int): Float? = pdf.pdfToViewPoint(PdfPoint(page, 0f, 0f))?.y
+
     override fun onHandTap(x: Float, y: Float): Boolean {
         val p = pdf.viewToPdfPoint(x, y) ?: return false
         return listener?.onTap(p.pageNum, p.x, p.y, x, y) == true
@@ -175,6 +190,8 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
 
     override fun pen(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN) begin(e)
+        // The pen reading, its stroke given to the page: a swipe, told once it ends.
+        if (e.actionMasked == MotionEvent.ACTION_UP && kind == Kind.None && !taken && hypot(e.x - downX, e.y - downY) > slop) listener?.onSwipe(e.x - downX, e.y - downY, e.eventTime - e.downTime)
         if (!tracking) return page(e)
         if (!taken) {
             val dx = e.x - downX; val dy = e.y - downY

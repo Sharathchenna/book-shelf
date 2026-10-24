@@ -61,6 +61,10 @@ enum class SelectionAction(val label: String, val action: String? = null) {
  * highlights and drawings and lets text be selected, or the PDF one, which only turns pages.
  */
 class ReaderController {
+    /** Taps at a page's edges turn it, and turns are animated: as the reader's settings say. */
+    var tapEdges = true
+    var animate = true
+
     var navigator: VisualNavigator? = null
         internal set(value) {
             field = value
@@ -208,7 +212,10 @@ private fun attach(
     controller.navigator = navigator
     // Taps at the edges turn the page (and arrow keys, Page Up/Down and Space on the keyboard cover);
     // a tap in the middle shows or hides the bars.
-    navigator.addInputListener(DirectionalNavigationAdapter(navigator as org.readium.r2.navigator.OverflowableNavigator))
+    navigator.addInputListener(object : InputListener {
+        override fun onTap(event: TapEvent): Boolean =
+            controller.tapEdges && DirectionalNavigationAdapter(navigator as org.readium.r2.navigator.OverflowableNavigator, animatedTransition = controller.animate).onTap(event)
+    })
     navigator.addInputListener(object : InputListener {
         override fun onTap(event: TapEvent): Boolean {
             onTap()

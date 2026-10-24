@@ -94,7 +94,10 @@ import com.sharathchenna.shelf.reader.NoteEdit
 import com.sharathchenna.shelf.reader.NoteEditor
 import com.sharathchenna.shelf.reader.NoteSheet
 import com.sharathchenna.shelf.reader.Panel
+import com.sharathchenna.shelf.reader.ApplyBehaviour
 import com.sharathchenna.shelf.reader.PenMode
+import com.sharathchenna.shelf.reader.rememberBehaviour
+import com.sharathchenna.shelf.reader.startMode
 import com.sharathchenna.shelf.reader.PenModeToggle
 import com.sharathchenna.shelf.reader.PenTool
 import com.sharathchenna.shelf.reader.graceMs
@@ -118,6 +121,13 @@ import java.util.UUID
 
 /** Whether this device has the system's PDF engine that Android's PDF library needs (SDK extension 13, from Android 15). */
 fun pdfEngineAvailable(): Boolean = runCatching { SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 13 }.getOrDefault(false)
+
+/** One page at a time: where a gesture began, and the zoom at which a page fits the screen. */
+private class Paging {
+    var start: Int? = null
+    var top = 0f
+    var fit = 0f
+}
 
 private enum class PdfPanel { Pages, Notes, Search, Ai, Brief, Pinned }
 
@@ -148,6 +158,12 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     val notes by shelf.notes(file.id).collectAsState(initial = emptyList())
     val currentNotes by rememberUpdatedState(notes)
     var settings by remember { mutableStateOf(ReaderSettings.load(context, article = false)) }
+    val behaviour = rememberBehaviour()
+    ApplyBehaviour(behaviour)
+    // The look as shown: Auto's theme taken from the system.
+    val look = settings.resolve(androidx.compose.foundation.isSystemInDarkTheme())
+    val currentLook by rememberUpdatedState(look)
+    val currentBehaviour by rememberUpdatedState(behaviour)
     var chrome by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf<PdfPanel?>(null) }
     var ai by remember { mutableStateOf<AiTask?>(null) }
@@ -159,7 +175,9 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     var jumpFrom by remember { mutableStateOf<Int?>(null) }
     var pinned by remember { mutableStateOf<Int?>(null) }
     var tools by remember { mutableStateOf(false) }
-    var penMode by remember { mutableStateOf(PenMode.Read) }
+    var penMode by remember { mutableStateOf(behaviour.startMode()) }
+    // Single page: where a swipe began, and the zoom at which a page fits the screen.
+    val paging = remember { Paging() }
     var tool by remember { mutableStateOf(PenTool()) }
     var searchHits by remember { mutableStateOf<List<PdfHighlight>>(emptyList()) }
     var reference by remember { mutableStateOf<Reference?>(null) }
@@ -181,10 +199,13 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
             ?: 0
     }
 
+    /** Pages a turn moves: two when they're side by side. */
+    val step = if (look.pdfLayout == "two") 2 else 1
+
     /** Goes to a page, remembering where the reader was so they can come back. */
     fun go(to: Int, point: PdfPoint? = null) {
         val l = layer ?: return
-        if (kotlin.math.abs(to - page) >= 2) jumpFrom = page
+        if (kotlin.math.abs(to - page) > (if (currentLook.pdfLayout == "two") 2 else 1)) jumpFrom = page
         if (point != null) l.pdf.scrollToPosition(point) else l.pdf.scrollToPage(to.coerceIn(0, (count - 1).coerceAtLeast(0)))
     }
 
@@ -200,9 +221,9 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
         } + searchHits
         l.inks = live.filter { it.ink?.place == "page" }.map { pageOf(it) to it.ink!! }
     }
-    LaunchedEffect(layer, settings, tool, tools, penMode) {
+    LaunchedEffect(layer, settings, look, tool, tools, penMode) {
         val l = layer ?: return@LaunchedEffect
-        l.tint(settings.theme)
+        l.tint(look.theme)
         l.highlightColor = (HIGHLIGHT_ARGB[settings.color] ?: HIGHLIGHT_ARGB.getValue("yellow")) and 0x00FFFFFF or 0x66000000
         l.highlight = settings.penHighlight
         l.write = settings.penWrite
@@ -314,6 +335,13 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         citationNear(around)?.let { n -> findReference(d, n)?.let { reference = it } }
                     }
                 }
+                // The page's edges turn it, when asked to; the middle shows the bars.
+                if (currentBehaviour.tapEdges) {
+                    val turn = if (currentLook.pdfLayout == "two") 2 else 1
+                    val w = l.width.toFloat()
+                    if (screenX < w * 0.15f) { go(page - turn); return true }
+                    if (screenX > w * 0.85f) { go(page + turn); return true }
+                }
                 chrome = !chrome
                 return false
             }
@@ -353,7 +381,17 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
             }
 
             override fun onNearTop() { if (!chrome) chrome = true }
-            override fun onButton() { go(page + 1) }
+            override fun onButton() { go(page + (if (currentLook.pdfLayout == "two") 2 else 1)) }
+
+            override fun onSwipe(dx: Float, dy: Float, millis: Long) {
+                // Sideways, one page at a time or two side by side: the page turns, as a book's does.
+                if (currentLook.pdfLayout == "scroll" || currentLook.textView) return
+                val far = 72 * context.resources.displayMetrics.density
+                if (kotlin.math.abs(dx) > far && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f) {
+                    val turn = if (currentLook.pdfLayout == "two") 2 else 1
+                    go(if (dx < 0) page + turn else page - turn)
+                }
+            }
         }
     }
 
@@ -376,23 +414,27 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     }
 
     val pageKeys = Modifier.onPreviewKeyEvent { e ->
-        if (e.type != KeyEventType.KeyDown || panel == PdfPanel.Ai || editing != null) return@onPreviewKeyEvent false
-        when (e.key) {
-            Key.DirectionRight, Key.PageDown, Key.DirectionDown -> go(page + 1)
-            Key.DirectionLeft, Key.PageUp, Key.DirectionUp -> go(page - 1)
-            Key.Spacebar -> go(if (e.isShiftPressed) page - 1 else page + 1)
+        if (panel == PdfPanel.Ai || editing != null) return@onPreviewKeyEvent false
+        // The volume keys turn pages when asked to, the key's lifting kept from the system too.
+        val volume = behaviour.volumeKeys && (e.key == Key.VolumeDown || e.key == Key.VolumeUp)
+        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent volume
+        when {
+            e.key == Key.DirectionRight || e.key == Key.PageDown || e.key == Key.DirectionDown || (volume && e.key == Key.VolumeDown) -> go(page + step)
+            e.key == Key.DirectionLeft || e.key == Key.PageUp || e.key == Key.DirectionUp || (volume && e.key == Key.VolumeUp) -> go(page - step)
+            e.key == Key.Spacebar -> go(if (e.isShiftPressed) page - step else page + step)
             else -> return@onPreviewKeyEvent false
         }
         true
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(readerBackground(settings.theme)).then(pageKeys)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(readerBackground(look.theme)).then(pageKeys)) {
         val wide = maxWidth >= 840.dp
+        val screen = maxWidth to maxHeight
         val landscape = maxWidth > maxHeight
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (settings.textView) {
-                    PdfTextView(d, page, if (settings.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black, onPage = { p ->
+                    PdfTextView(d, page, if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black, onPage = { p ->
                         settings = settings.copy(textView = false)
                         scope.launch { kotlinx.coroutines.delay(300); go(p) }
                     }, modifier = Modifier.fillMaxSize().statusBarsPadding())
@@ -414,6 +456,33 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                             l.pdf.addSelectionMenuItemPreparer(object : PdfView.SelectionMenuItemPreparer {
                                 override fun onPrepareSelectionMenuItems(components: MutableList<androidx.pdf.selection.ContextMenuComponent>) { runCatching { components.clear() } }
                             })
+                            // One page at a time: a swipe up or down that ends between pages settles on the next or the last.
+                            l.pdf.addOnGestureStateChangedListener(object : PdfView.OnGestureStateChangedListener {
+                                override fun onGestureStateChanged(state: Int) {
+                                    if (currentLook.pdfLayout != "single" || currentLook.textView) return
+                                    when (state) {
+                                        PdfView.GESTURE_STATE_INTERACTING -> if (paging.start == null) {
+                                            val p = (l.pdf.firstVisiblePage..l.pdf.firstVisiblePage + 1).minByOrNull { kotlin.math.abs(l.pageTopOnScreen(it) ?: Float.MAX_VALUE) } ?: l.pdf.firstVisiblePage
+                                            paging.start = p
+                                            paging.top = l.pageTopOnScreen(p) ?: 0f
+                                        }
+                                        PdfView.GESTURE_STATE_IDLE -> {
+                                            val start = paging.start ?: return
+                                            paging.start = null
+                                            // Zoomed in to read closely: left where it is.
+                                            if (paging.fit > 0 && l.pdf.zoom > paging.fit * 1.08f) return
+                                            val height = l.pageHeightOnScreen(start) ?: return
+                                            val moved = paging.top - (l.pageTopOnScreen(start) ?: return)
+                                            val to = when {
+                                                moved > height * 0.12f -> start + 1
+                                                moved < -height * 0.12f -> start - 1
+                                                else -> start
+                                            }.coerceIn(0, d.pageCount - 1)
+                                            l.pdf.scrollToPage(to)
+                                        }
+                                    }
+                                }
+                            })
                             l.pdf.addOnSelectionChangedListener(object : PdfView.OnSelectionChangedListener {
                                 override fun onSelectionChanged(selection: androidx.pdf.selection.Selection?) {
                                     val text = (selection as? TextSelection)?.text?.toString()?.trim().orEmpty()
@@ -428,23 +497,36 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                             layer = l
                         }
                     },
-                    update = { l -> l.pdf.pagesPerRow = if (wide && landscape && settings.spread) 2 else 1 },
+                    update = { l -> l.pdf.pagesPerRow = if (look.pdfLayout == "two") 2 else 1 },
                 )
 
-                // Crop: the first page's text filling the width, zoomed from fit and slid to its left edge.
-                LaunchedEffect(settings.crop, layer, sizesKnown, settings.spread, landscape) {
+                // The zoom the layout asks for: the width filled, the whole page on the screen (always, one
+                // page at a time), or with the margins cropped, the text filling the width.
+                LaunchedEffect(layer, sizesKnown, look.pdfLayout, look.pdfFit, look.crop, landscape, screen) {
                     val l = layer ?: return@LaunchedEffect
-                    if (!settings.crop) return@LaunchedEffect
-                    repeat(20) {
-                        val lines = l.lines(page)
+                    repeat(30) {
                         val size = l.pageSize(page)
-                        if (lines.isNotEmpty() && size != null) {
-                            val left = lines.minOf { it.left }; val right = lines.maxOf { it.right }
-                            val share = (right - left + 16) / size.first
-                            if (share in 0.2f..0.95f) {
-                                l.pdf.zoom = l.pdf.zoom / share
-                                kotlinx.coroutines.delay(60)
-                                l.pdf.pdfToViewPoint(PdfPoint(page, left - 8, lines.minOf { it.top }))?.let { v -> l.pdf.scrollBy(v.x.toInt(), 0) }
+                        val a = l.pdf.pdfToViewPoint(PdfPoint(page, 0f, 0f))
+                        val b = size?.let { l.pdf.pdfToViewPoint(PdfPoint(page, it.first, it.second)) }
+                        if (size != null && a != null && b != null && l.pdf.width > 0 && b.x > a.x) {
+                            val perRow = if (look.pdfLayout == "two") 2 else 1
+                            val gap = l.pdf.horizontalPageSpacing.toFloat()
+                            val fitWidth = l.pdf.zoom * ((l.pdf.width - gap * (perRow + 1)) / perRow) / (b.x - a.x)
+                            val heightAtWidth = (b.y - a.y) * fitWidth / l.pdf.zoom
+                            val fitPage = fitWidth * minOf(1f, (l.pdf.height - 2 * l.pdf.verticalPageSpacing) / heightAtWidth)
+                            paging.fit = fitPage
+                            val lines = l.lines(page)
+                            when {
+                                look.crop && look.pdfLayout != "single" && lines.isNotEmpty() -> {
+                                    val left = lines.minOf { it.left }; val right = lines.maxOf { it.right }
+                                    val share = ((right - left + 16) / size.first).coerceIn(0.2f, 1f)
+                                    l.pdf.zoom = fitWidth / share
+                                    kotlinx.coroutines.delay(60)
+                                    l.pdf.pdfToViewPoint(PdfPoint(page, left - 8, lines.minOf { it.top }))?.let { v -> l.pdf.scrollBy(v.x.toInt(), 0) }
+                                }
+                                look.crop && look.pdfLayout != "single" -> { kotlinx.coroutines.delay(150); return@repeat }
+                                look.pdfLayout == "single" || look.pdfFit == "page" -> { l.pdf.zoom = fitPage; kotlinx.coroutines.delay(60); l.pdf.scrollToPage(page) }
+                                else -> l.pdf.zoom = fitWidth
                             }
                             return@LaunchedEffect
                         }
@@ -490,7 +572,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                 }
 
                 // The foot: the page, or with the bars up, a slider through the pages.
-                val ink = if (settings.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black
+                val ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black
                 if (chrome) {
                     var dragging by remember { mutableStateOf<Float?>(null) }
                     val paper = LocalPaper.current

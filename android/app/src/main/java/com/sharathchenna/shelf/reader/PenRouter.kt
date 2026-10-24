@@ -20,6 +20,9 @@ abstract class PenRouter(context: Context) : FrameLayout(context) {
     /** A hand's tap (a finger down and up without moving), before it reaches the page; true keeps it from the page. */
     protected open fun onHandTap(x: Float, y: Float): Boolean = false
 
+    /** A swipe by a hand (a finger down, moved, up), offered once it ends, in pixels; the page has had its moves. */
+    protected open fun onHandSwipe(dx: Float, dy: Float, millis: Long) {}
+
     /** The page beneath, as the event would have reached it. */
     protected fun page(e: MotionEvent): Boolean = super.dispatchTouchEvent(e)
 
@@ -114,7 +117,8 @@ abstract class PenRouter(context: Context) : FrameLayout(context) {
             MotionEvent.ACTION_DOWN -> { handX = e.x; handY = e.y; handMoved = false }
             MotionEvent.ACTION_MOVE -> if (kotlin.math.hypot(e.x - handX, e.y - handY) > slopPx) handMoved = true
             MotionEvent.ACTION_POINTER_DOWN -> handMoved = true
-            MotionEvent.ACTION_UP -> if (!handMoved && e.eventTime - e.downTime < 400 && onHandTap(e.x, e.y)) {
+            MotionEvent.ACTION_UP -> if (handMoved) onHandSwipe(e.x - handX, e.y - handY, e.eventTime - e.downTime)
+            else if (e.eventTime - e.downTime < 400 && onHandTap(e.x, e.y)) {
                 val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
                 super.dispatchTouchEvent(cancel)
                 cancel.recycle()

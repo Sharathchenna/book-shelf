@@ -116,9 +116,23 @@ data class ReaderSettings(
     val crop: Boolean = false,
     /** A PDF's text set as a column to read, rather than its pages. */
     val textView: Boolean = false,
+    /** Space between paragraphs (Readium's, in rem); null for the book's own. */
+    val paragraphSpacing: Double? = null,
+    /** The type's weight, 1 the book's own; null for the book's own. */
+    val fontWeight: Double? = null,
+    /** A PDF's pages: scroll (one after another), single (one at a time) or two (side by side). */
+    val pdfLayout: String = "scroll",
+    /** A PDF's page fitted to the width, or whole (page) on the screen. */
+    val pdfFit: String = "width",
 ) {
     /** Whether the book's own styles stand: anything chosen here overrides them. */
-    val ownStyles: Boolean get() = font == "original" && lineHeight == null && justify == null
+    val ownStyles: Boolean get() = font == "original" && lineHeight == null && justify == null && paragraphSpacing == null
+
+    /** The theme to show: "auto" follows the system's light or dark. */
+    fun resolve(systemDark: Boolean): ReaderSettings = if (theme == "auto") copy(theme = if (systemDark) "dark" else "light") else this
+
+    /** The look as the book first had it, keeping what isn't about the type. */
+    fun booksOwn(): ReaderSettings = copy(font = "original", fontSize = 1.0, lineHeight = null, justify = null, margins = 1.0, paragraphSpacing = null, fontWeight = null)
 
     fun epub(): EpubPreferences = EpubPreferences(
         theme = when (theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
@@ -132,6 +146,8 @@ data class ReaderSettings(
         pageMargins = margins,
         textAlign = when (justify) { true -> org.readium.r2.navigator.preferences.TextAlign.JUSTIFY; false -> org.readium.r2.navigator.preferences.TextAlign.START; null -> null },
         hyphens = justify,
+        paragraphSpacing = paragraphSpacing,
+        fontWeight = fontWeight,
     )
 
     companion object {
@@ -144,8 +160,8 @@ data class ReaderSettings(
             return ReaderSettings(
                 theme = p.getString("theme", "light")!!,
                 fontSize = p.getFloat("fontSize", 1f).toDouble(),
-                // Articles read as one long page, as on the site.
-                scroll = if (article) true else p.getBoolean("scroll", false),
+                // Articles read as one long page, as on the site, until set otherwise.
+                scroll = p.getBoolean("scroll", article),
                 spread = p.getBoolean("spread", true),
                 font = p.getString("font", "original")!!,
                 penHighlight = p.getBoolean("penHighlight", true),
@@ -155,6 +171,10 @@ data class ReaderSettings(
                 margins = p.getFloat("margins", 1f).toDouble(),
                 justify = if (p.contains("justify")) p.getBoolean("justify", false) else null,
                 crop = p.getBoolean("crop", false),
+                paragraphSpacing = p.getFloat("paragraphSpacing", -1f).takeIf { it >= 0 }?.toDouble(),
+                fontWeight = p.getFloat("fontWeight", 0f).takeIf { it > 0 }?.toDouble(),
+                pdfLayout = p.getString("pdfLayout", "scroll")!!,
+                pdfFit = p.getString("pdfFit", "width")!!,
             )
         }
     }
@@ -165,7 +185,9 @@ data class ReaderSettings(
             .putBoolean("penHighlight", penHighlight).putBoolean("penWrite", penWrite).putString("color", color)
             .putFloat("lineHeight", (lineHeight ?: 0.0).toFloat()).putFloat("margins", margins.toFloat()).putBoolean("crop", crop)
             .apply { if (justify == null) remove("justify") else putBoolean("justify", justify) }
-            .apply { if (!article) putBoolean("scroll", scroll) }
+            .putBoolean("scroll", scroll)
+            .putFloat("paragraphSpacing", (paragraphSpacing ?: -1.0).toFloat()).putFloat("fontWeight", (fontWeight ?: 0.0).toFloat())
+            .putString("pdfLayout", pdfLayout).putString("pdfFit", pdfFit)
             .apply()
     }
 }
@@ -239,12 +261,18 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     val ready by controller.ready.collectAsState()
     val notes by shelf.notes(file.id).collectAsState(initial = emptyList())
     var settings by remember { mutableStateOf(ReaderSettings.load(context, article)) }
+    val behaviour = rememberBehaviour()
+    ApplyBehaviour(behaviour)
+    // The look as shown: Auto's theme taken from the system.
+    val look = settings.resolve(androidx.compose.foundation.isSystemInDarkTheme())
+    controller.tapEdges = behaviour.tapEdges
+    controller.animate = behaviour.animate
     var chrome by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf<Panel?>(null) }
     var ai by remember { mutableStateOf<AiTask?>(null) }
     var editing by remember { mutableStateOf<NoteEdit?>(null) }
     var drawing by remember { mutableStateOf(false) }
-    var penMode by remember { mutableStateOf(PenMode.Read) }
+    var penMode by remember { mutableStateOf(behaviour.startMode()) }
     var written by remember { mutableStateOf<com.sharathchenna.shelf.data.InkStroke?>(null) }
     var penMenu by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var sketching by remember { mutableStateOf<Int?>(null) }
@@ -285,7 +313,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
         }
     }
 
-    LaunchedEffect(settings) { controller.epub?.submitPreferences(settings.epub()) }
+    LaunchedEffect(look) { controller.epub?.submitPreferences(look.epub()) }
 
     // The bars step out of the way of the page: a few seconds after showing, and on a page turn.
     LaunchedEffect(chrome, panel) {
@@ -391,12 +419,16 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     // The keyboard cover turns pages: arrows, Page Up/Down and Space (Shift+Space goes back),
     // ahead of Compose's own focus moving, and not while typing a question.
     val pageKeys = Modifier.onPreviewKeyEvent { event ->
-        if (event.type != KeyEventType.KeyDown || drawing || panel == Panel.Ai || editing != null) return@onPreviewKeyEvent false
+        if (drawing || panel == Panel.Ai || editing != null) return@onPreviewKeyEvent false
+        // The volume keys turn pages when asked to, the key's lifting kept from the system too.
+        val volume = behaviour.volumeKeys && (event.key == Key.VolumeDown || event.key == Key.VolumeUp)
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent volume
         val nav = controller.navigator as? org.readium.r2.navigator.OverflowableNavigator ?: return@onPreviewKeyEvent false
-        when (event.key) {
-            Key.DirectionRight, Key.PageDown -> nav.goForward(animated = true)
-            Key.DirectionLeft, Key.PageUp -> nav.goBackward(animated = true)
-            Key.Spacebar -> if (event.isShiftPressed) nav.goBackward(animated = true) else nav.goForward(animated = true)
+        val animated = behaviour.animate
+        when {
+            event.key == Key.DirectionRight || event.key == Key.PageDown || (volume && event.key == Key.VolumeDown) -> nav.goForward(animated = animated)
+            event.key == Key.DirectionLeft || event.key == Key.PageUp || (volume && event.key == Key.VolumeUp) -> nav.goBackward(animated = animated)
+            event.key == Key.Spacebar -> if (event.isShiftPressed) nav.goBackward(animated = animated) else nav.goForward(animated = animated)
             else -> return@onPreviewKeyEvent false
         }
         true
@@ -431,7 +463,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
         panel = Panel.Ai
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(readerBackground(settings.theme)).then(pageKeys)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(readerBackground(look.theme)).then(pageKeys)) {
         val wide = maxWidth >= 840.dp
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -439,7 +471,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     activity = activity,
                     book = book,
                     initial = initial,
-                    preferences = settings.epub(),
+                    preferences = look.epub(),
                     controller = controller,
                     onSelection = onSelection,
                     onTap = { chrome = !chrome },
@@ -504,7 +536,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                         chapter = locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
                         where = whereLabel(book, positions, locator),
                         progress = progress,
-                        ink = if (settings.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black,
+                        ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black,
                         modifier = Modifier.align(Alignment.BottomStart).padding(end = if (panel == null) 230.dp else 0.dp),
                     )
                 }

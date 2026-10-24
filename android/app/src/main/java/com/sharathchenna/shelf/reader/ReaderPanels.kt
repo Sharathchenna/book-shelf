@@ -384,103 +384,117 @@ fun NoteEditor(edit: NoteEdit, onSave: (Highlight) -> Unit, onRemove: (Highlight
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSettings) -> Unit, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val behaviour = rememberBehaviour()
+    var tab by remember { mutableStateOf(0) }
+    val muted = LocalPaper.current.muted
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("THEME", style = Eyebrow, color = LocalPaper.current.muted)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("light" to "Paper", "sepia" to "Sepia", "dark" to "Night").forEach { (k, label) ->
-                    FilterChip(selected = settings.theme == k, onClick = { onChange(settings.copy(theme = k)) }, label = { Text(label) })
-                }
+                FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text(if (isPdf) "Pages" else "Page and type") })
+                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Reading") })
+                FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("Pen") })
             }
-            if (!isPdf) {
-                Text("TYPE", style = Eyebrow, color = LocalPaper.current.muted)
-                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("original" to "Book's own", "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
-                        FilterChip(
-                            selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) },
-                            label = { Text(label, fontFamily = when (k) { "fraunces" -> Serif; "geist" -> com.sharathchenna.shelf.ui.theme.Sans; "serif" -> androidx.compose.ui.text.font.FontFamily.Serif; "sans" -> androidx.compose.ui.text.font.FontFamily.SansSerif; else -> null }) },
-                        )
-                    }
+            when (tab) {
+                0 -> {
+                    Text("THEME", style = Eyebrow, color = muted)
+                    Choices(listOf("auto" to "Auto", "light" to "Paper", "sepia" to "Sepia", "dark" to "Night"), settings.theme) { onChange(settings.copy(theme = it)) }
+                    if (isPdf) PdfLook(settings, onChange) else BookLook(settings, onChange)
                 }
-                Text("Size ${Math.round(settings.fontSize * 100)}%")
-                Slider(value = settings.fontSize.toFloat(), onValueChange = { onChange(settings.copy(fontSize = (Math.round(it * 20) / 20.0))) }, valueRange = 0.7f..2f)
-                Text("SPACING", style = Eyebrow, color = LocalPaper.current.muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(null to "Book's own", 1.3 to "Tight", 1.55 to "Normal", 1.85 to "Loose").forEach { (h, label) ->
-                        FilterChip(selected = settings.lineHeight == h, onClick = { onChange(settings.copy(lineHeight = h)) }, label = { Text(label) })
-                    }
-                }
-                Text("Margins")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0.5 to "Narrow", 1.0 to "Normal", 1.6 to "Wide", 2.2 to "Widest").forEach { (m, label) ->
-                        FilterChip(selected = settings.margins == m, onClick = { onChange(settings.copy(margins = m)) }, label = { Text(label) })
-                    }
-                }
-                Text("Alignment")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(null to "Book's own", false to "Ragged", true to "Justified").forEach { (j, label) ->
-                        FilterChip(selected = settings.justify == j, onClick = { onChange(settings.copy(justify = j)) }, label = { Text(label) })
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Scroll instead of turning pages", Modifier.weight(1f))
-                    Switch(settings.scroll, { onChange(settings.copy(scroll = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Two pages side by side when there's room", Modifier.weight(1f))
-                    Switch(settings.spread, { onChange(settings.copy(spread = it)) })
-                }
-            }
-            if (isPdf) {
-                Text("PAGES", style = Eyebrow, color = LocalPaper.current.muted)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Crop the margins")
-                        Text("The page's text fills the width; pinch to zoom out again.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
-                    }
-                    Switch(settings.crop, { onChange(settings.copy(crop = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Two pages side by side when there's room", Modifier.weight(1f))
-                    Switch(settings.spread, { onChange(settings.copy(spread = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Read as text")
-                        Text("The pages' text in one column, in the app's type. Figures and equations stay on the pages.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
-                    }
-                    Switch(settings.textView, { onChange(settings.copy(textView = it)) })
-                }
-            }
-            Text("HIGHLIGHTER", style = Eyebrow, color = LocalPaper.current.muted)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HIGHLIGHT_ARGB.forEach { (name, argb) ->
-                    Box(
-                        Modifier.size(34.dp).clip(CircleShape).then(if (settings.color == name) Modifier.border(2.dp, LocalPaper.current.fg, CircleShape) else Modifier)
-                            .clickable { onChange(settings.copy(color = name)) }.padding(5.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(argb)),
-                    )
-                }
-            }
-            run {
-                Text("PEN, IN MARK MODE", style = Eyebrow, color = LocalPaper.current.muted)
-                Text("The button at the bottom left switches the pen between Read (it scrolls and zooms, like a finger) and Mark.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Draw across text to highlight it")
-                        Text("Hold the pen's button to choose Explain, Ask and the rest instead; the eraser end rubs highlights out.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
-                    }
-                    Switch(settings.penHighlight, { onChange(settings.copy(penHighlight = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(if (isPdf) "Write on the page" else "Write in the margin to make a note")
-                        Text(if (isPdf) "Writing where there's no text is kept as ink on the page. A loop round something, or a bracket beside a passage, offers it to the menu." else "Writing where there's no text starts a drawing beside the nearest paragraph.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
-                    }
-                    Switch(settings.penWrite, { onChange(settings.copy(penWrite = it)) })
-                }
+                1 -> BehaviourControls(behaviour) { ReaderBehaviour.update(context, it) }
+                else -> PenSettings(settings, isPdf, onChange)
             }
         }
     }
+}
+
+/** A row of chips, one of them chosen. */
+@Composable
+private fun <T> Choices(options: List<Pair<T, String>>, chosen: T, onChoose: (T) -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (k, label) -> FilterChip(selected = chosen == k, onClick = { onChoose(k) }, label = { Text(label) }) }
+    }
+}
+
+@Composable
+private fun BookLook(settings: ReaderSettings, onChange: (ReaderSettings) -> Unit) {
+    val muted = LocalPaper.current.muted
+    Text("LAYOUT", style = Eyebrow, color = muted)
+    val layout = when { settings.scroll -> "scroll"; settings.spread -> "two"; else -> "single" }
+    Choices(listOf("single" to "Single page", "two" to "Two pages", "scroll" to "Scroll"), layout) {
+        onChange(settings.copy(scroll = it == "scroll", spread = it == "two"))
+    }
+    if (layout == "two") Text("Two pages show side by side when the screen is wide enough, as on the tablet in landscape.", style = MaterialTheme.typography.bodySmall, color = muted)
+    Text("TYPE", style = Eyebrow, color = muted)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("original" to "Book's own", "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
+            FilterChip(
+                selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) },
+                label = { Text(label, fontFamily = when (k) { "fraunces" -> Serif; "geist" -> com.sharathchenna.shelf.ui.theme.Sans; "serif" -> androidx.compose.ui.text.font.FontFamily.Serif; "sans" -> androidx.compose.ui.text.font.FontFamily.SansSerif; else -> null }) },
+            )
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Size ${Math.round(settings.fontSize * 100)}%", Modifier.weight(1f))
+        TextButton(onClick = { onChange(settings.copy(fontSize = (settings.fontSize - 0.05).coerceAtLeast(0.7))) }) { Text("A−") }
+        TextButton(onClick = { onChange(settings.copy(fontSize = (settings.fontSize + 0.05).coerceAtMost(2.5))) }) { Text("A+") }
+    }
+    Slider(value = settings.fontSize.toFloat(), onValueChange = { onChange(settings.copy(fontSize = (Math.round(it * 20) / 20.0))) }, valueRange = 0.7f..2.5f)
+    Text("Weight")
+    Choices(listOf(null to "Book's own", 0.8 to "Light", 1.25 to "Bold", 1.6 to "Bolder"), settings.fontWeight) { onChange(settings.copy(fontWeight = it)) }
+    Text("SPACING", style = Eyebrow, color = muted)
+    Text("Between lines")
+    Choices(listOf(null to "Book's own", 1.3 to "Tight", 1.55 to "Normal", 1.85 to "Loose", 2.1 to "Looser"), settings.lineHeight) { onChange(settings.copy(lineHeight = it)) }
+    Text("Between paragraphs")
+    Choices(listOf(null to "Book's own", 0.0 to "None", 0.6 to "Some", 1.2 to "More"), settings.paragraphSpacing) { onChange(settings.copy(paragraphSpacing = it)) }
+    Text("Margins")
+    Choices(listOf(0.5 to "Narrow", 1.0 to "Normal", 1.6 to "Wide", 2.2 to "Widest"), settings.margins) { onChange(settings.copy(margins = it)) }
+    Text("Alignment")
+    Choices(listOf(null to "Book's own", false to "Ragged", true to "Justified"), settings.justify) { onChange(settings.copy(justify = it)) }
+    TextButton(onClick = { onChange(settings.booksOwn()) }) { Text("Reset to the book's own") }
+}
+
+@Composable
+private fun PdfLook(settings: ReaderSettings, onChange: (ReaderSettings) -> Unit) {
+    val muted = LocalPaper.current.muted
+    Text("LAYOUT", style = Eyebrow, color = muted)
+    Choices(listOf("scroll" to "Scroll", "single" to "Single page", "two" to "Two pages"), settings.pdfLayout) { onChange(settings.copy(pdfLayout = it, textView = false)) }
+    Text(
+        when (settings.pdfLayout) {
+            "single" -> "One page at a time, fitted to the screen: swipe, tap an edge, or press a key to turn it. Pinch to look closer."
+            "two" -> "Two pages side by side, as a book opens."
+            else -> "The pages one after another, scrolled through."
+        },
+        style = MaterialTheme.typography.bodySmall, color = muted,
+    )
+    if (settings.pdfLayout != "single") {
+        Text("Fit")
+        Choices(listOf("width" to "Width", "page" to "Whole page"), settings.pdfFit) { onChange(settings.copy(pdfFit = it)) }
+    }
+    Toggle("Crop the margins", "The page's text fills the width; pinch to zoom out again.", settings.crop) { onChange(settings.copy(crop = it)) }
+    Toggle("Read as text", "The pages' text in one column, in the app's type. Figures and equations stay on the pages.", settings.textView) { onChange(settings.copy(textView = it)) }
+}
+
+@Composable
+private fun PenSettings(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSettings) -> Unit) {
+    val muted = LocalPaper.current.muted
+    Text("HIGHLIGHTER", style = Eyebrow, color = muted)
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        HIGHLIGHT_ARGB.forEach { (name, argb) ->
+            Box(
+                Modifier.size(34.dp).clip(CircleShape).then(if (settings.color == name) Modifier.border(2.dp, LocalPaper.current.fg, CircleShape) else Modifier)
+                    .clickable { onChange(settings.copy(color = name)) }.padding(5.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(argb)),
+            )
+        }
+    }
+    Text("IN MARK MODE", style = Eyebrow, color = muted)
+    Text("The button at the bottom left switches the pen between Read (it scrolls and zooms, like a finger) and Mark. Which it opens in is under Reading.", style = MaterialTheme.typography.bodySmall, color = muted)
+    Toggle("Draw across text to highlight it", "Hold the pen's button to choose Explain, Ask and the rest instead; the eraser end rubs highlights out.", settings.penHighlight) { onChange(settings.copy(penHighlight = it)) }
+    Toggle(
+        if (isPdf) "Write on the page" else "Write in the margin to make a note",
+        if (isPdf) "Writing where there's no text is kept as ink on the page. A loop round something, or a bracket beside a passage, offers it to the menu." else "Writing where there's no text starts a drawing beside the nearest paragraph.",
+        settings.penWrite,
+    ) { onChange(settings.copy(penWrite = it)) }
 }
 
 // ---- drawing in an EPUB's margin -------------------------------------------------------------
