@@ -41,7 +41,10 @@ abstract class PenRouter(context: Context) : FrameLayout(context) {
     private fun isPalm(e: MotionEvent, i: Int) =
         e.getTouchMajor(i) > 120 * density || e.flags and MotionEvent.FLAG_CANCELED != 0
 
-    private fun penNear(now: Long) = now - penAt < PEN_GRACE_MS
+    /** How long after the pen was last on or over the screen a touching hand is taken as resting. */
+    var graceMs = PEN_GRACE_MS
+
+    private fun penNear(now: Long) = now - penAt < graceMs
 
     /**
      * The hand and the pen, sorted. A hand on its own reads the page as ever, unless it touches as

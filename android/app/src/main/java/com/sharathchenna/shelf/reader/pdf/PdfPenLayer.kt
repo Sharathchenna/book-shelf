@@ -83,6 +83,8 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
     var write = true
     /** Whether the pen highlights text it's drawn across. */
     var highlight = true
+    /** Marking: the pen highlights, writes and gestures; otherwise it scrolls and zooms like a finger. */
+    var marking = false
     /** The eraser chosen in the toolbar: the pen rubs out wherever it goes. */
     var erasing = false
 
@@ -177,8 +179,8 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
         if (!taken) {
             val dx = e.x - downX; val dy = e.y - downY
             if (e.actionMasked == MotionEvent.ACTION_MOVE && hypot(dx, dy) > slop) {
-                if (kind == Kind.None || (kind == Kind.Text && !button && isVertical(dx, dy))) {
-                    // Up or down the text, or off the pages: the view scrolls, as under a finger.
+                if (kind == Kind.None) {
+                    // Reading, or off the pages: the view scrolls, as under a finger.
                     tracking = false
                     return page(e)
                 }
@@ -217,6 +219,7 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
         kind = when {
             p == null -> Kind.None
             e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER || erasing -> Kind.Erase
+            !marking -> Kind.None
             onText(p.pageNum, p) -> if (highlight || button) Kind.Text else Kind.None
             button -> Kind.Erase
             write -> Kind.Ink

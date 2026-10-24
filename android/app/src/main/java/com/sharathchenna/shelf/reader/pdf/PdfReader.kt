@@ -94,7 +94,10 @@ import com.sharathchenna.shelf.reader.NoteEdit
 import com.sharathchenna.shelf.reader.NoteEditor
 import com.sharathchenna.shelf.reader.NoteSheet
 import com.sharathchenna.shelf.reader.Panel
+import com.sharathchenna.shelf.reader.PenMode
+import com.sharathchenna.shelf.reader.PenModeToggle
 import com.sharathchenna.shelf.reader.PenTool
+import com.sharathchenna.shelf.reader.graceMs
 import com.sharathchenna.shelf.reader.PenTools
 import com.sharathchenna.shelf.reader.ReaderSettings
 import com.sharathchenna.shelf.reader.SelectionAction
@@ -156,6 +159,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     var jumpFrom by remember { mutableStateOf<Int?>(null) }
     var pinned by remember { mutableStateOf<Int?>(null) }
     var tools by remember { mutableStateOf(false) }
+    var penMode by remember { mutableStateOf(PenMode.Read) }
     var tool by remember { mutableStateOf(PenTool()) }
     var searchHits by remember { mutableStateOf<List<PdfHighlight>>(emptyList()) }
     var reference by remember { mutableStateOf<Reference?>(null) }
@@ -196,7 +200,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
         } + searchHits
         l.inks = live.filter { it.ink?.place == "page" }.map { pageOf(it) to it.ink!! }
     }
-    LaunchedEffect(layer, settings, tool, tools) {
+    LaunchedEffect(layer, settings, tool, tools, penMode) {
         val l = layer ?: return@LaunchedEffect
         l.tint(settings.theme)
         l.highlightColor = (HIGHLIGHT_ARGB[settings.color] ?: HIGHLIGHT_ARGB.getValue("yellow")) and 0x00FFFFFF or 0x66000000
@@ -205,6 +209,8 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
         l.penColor = tool.color
         l.penWidthDp = tool.width
         l.erasing = tools && tool.erasing
+        l.marking = penMode == PenMode.Mark || tools
+        l.graceMs = (if (tools) PenMode.Mark else penMode).graceMs
     }
 
     // The place, saved a moment after the reader settles on a page (not the page it opened at).
@@ -469,7 +475,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         },
                         onRecap = { ai = AiTask.Recap(page, 0.5); panel = PdfPanel.Ai },
                         onChat = { if (panel == PdfPanel.Ai && ai is AiTask.Chat) panel = null else { ai = AiTask.Chat(null); panel = PdfPanel.Ai } },
-                        onDraw = { tools = !tools },
+                        onDraw = { tools = !tools; if (tools) penMode = PenMode.Mark },
                         onSettings = { showSettings = true },
                         onListen = { onListen(page) },
                         searchable = true,
@@ -502,7 +508,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                     }
                 } else if (!settings.textView) {
                     Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(end = if (panel == null) 230.dp else 0.dp).navigationBarsPadding()) {
-                        Text("Page ${page + 1} of $count", fontFamily = Sans, fontSize = 11.5.sp, color = ink.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp))
+                        Text("Page ${page + 1} of $count", fontFamily = Sans, fontSize = 11.5.sp, color = ink.copy(alpha = 0.5f), modifier = Modifier.padding(start = 136.dp, end = 28.dp, top = 6.dp, bottom = 6.dp))
                     }
                 }
 
@@ -511,7 +517,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                     LaunchedEffect(from) { kotlinx.coroutines.delay(15000); if (jumpFrom == from) jumpFrom = null }
                     val paper = LocalPaper.current
                     Row(
-                        Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = 64.dp)
+                        Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = if (chrome) 150.dp else 76.dp)
                             .shadow(6.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(paper.raised)
                             .clickable { val to = from; jumpFrom = null; layer?.pdf?.scrollToPage(to) }
                             .padding(start = 12.dp, end = 16.dp, top = 9.dp, bottom = 9.dp),
@@ -521,6 +527,13 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         Text("  Back to page ${from + 1}", fontFamily = Sans, fontSize = 14.sp)
                     }
                 }
+
+                // The pen's mode: reading (it scrolls and zooms) or marking (it highlights, writes, gestures).
+                PenModeToggle(
+                    penMode,
+                    onToggle = { penMode = if (penMode == PenMode.Read) PenMode.Mark else PenMode.Read; if (penMode == PenMode.Read) tools = false },
+                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = if (chrome) 96.dp else 20.dp),
+                )
 
                 // The chat, a tap away while reading.
                 if (panel == null && !chrome && !tools) {

@@ -462,7 +462,8 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, onChange: (ReaderSet
                 }
             }
             run {
-                Text("PEN", style = Eyebrow, color = LocalPaper.current.muted)
+                Text("PEN, IN MARK MODE", style = Eyebrow, color = LocalPaper.current.muted)
+                Text("The button at the bottom left switches the pen between Read (it scrolls and zooms, like a finger) and Mark.", style = MaterialTheme.typography.bodySmall, color = LocalPaper.current.muted)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Draw across text to highlight it")

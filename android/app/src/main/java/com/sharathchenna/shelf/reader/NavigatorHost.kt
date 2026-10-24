@@ -130,6 +130,7 @@ fun NavigatorHost(
     penHighlight: Boolean,
     penWrite: Boolean,
     scrolling: Boolean,
+    graceMs: Long,
     /** For an article: the page's gutters (CSS px), so the text keeps to a readable measure. */
     gutter: Double? = null,
     modifier: Modifier = Modifier,
@@ -177,6 +178,7 @@ fun NavigatorHost(
             layer.highlight = penHighlight && !book.isPdf
             layer.write = penWrite && !book.isPdf
             layer.scrolling = scrolling
+            layer.graceMs = graceMs
         },
     )
     DisposableEffect(book) {

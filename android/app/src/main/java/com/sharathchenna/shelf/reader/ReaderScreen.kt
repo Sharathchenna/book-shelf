@@ -244,6 +244,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
     var ai by remember { mutableStateOf<AiTask?>(null) }
     var editing by remember { mutableStateOf<NoteEdit?>(null) }
     var drawing by remember { mutableStateOf(false) }
+    var penMode by remember { mutableStateOf(PenMode.Read) }
     var written by remember { mutableStateOf<com.sharathchenna.shelf.data.InkStroke?>(null) }
     var penMenu by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var sketching by remember { mutableStateOf<Int?>(null) }
@@ -444,9 +445,11 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     onTap = { chrome = !chrome },
                     onDecoration = { id -> notes.find { it.id == id }?.let { editing = NoteEdit(it) } },
                     pen = pen,
-                    penHighlight = settings.penHighlight && !drawing,
-                    penWrite = settings.penWrite && !drawing,
-                    scrolling = settings.scroll,
+                    penHighlight = penMode == PenMode.Mark && settings.penHighlight && !drawing,
+                    penWrite = penMode == PenMode.Mark && settings.penWrite && !drawing,
+                    // Marking, a stroke down the text marks it too; scrolling is the fingers' while marking.
+                    scrolling = false,
+                    graceMs = penMode.graceMs,
                     gutter = if (article) ((LocalConfiguration.current.screenWidthDp - 720) / 2.0).coerceAtLeast(24.0) else null,
                     modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = 22.dp),
                 )
@@ -516,6 +519,11 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, o
                     )
                 }
                 // The chat, always a tap away while reading, even with the bars tucked away.
+                if (!drawing) PenModeToggle(
+                    penMode,
+                    onToggle = { penMode = if (penMode == PenMode.Read) PenMode.Mark else PenMode.Read },
+                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = if (chrome) 112.dp else 28.dp),
+                )
                 if (panel == null && !drawing && !chrome) {
                     val paper = LocalPaper.current
                     Row(
