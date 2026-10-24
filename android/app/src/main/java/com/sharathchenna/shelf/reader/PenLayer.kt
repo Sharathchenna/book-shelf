@@ -40,6 +40,8 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
     var listener: PenListener? = null
     var highlight = true
     var write = true
+    /** The palette's eraser: every stroke rubs out, as the pen's eraser end does. */
+    var rubbing = false
 
     private enum class Mode { Unknown, Text, Blank }
 
@@ -107,7 +109,7 @@ class PenLayer(context: Context, private val webViews: () -> List<Pair<WebView, 
     private fun begin(e: MotionEvent) {
         downX = e.x; downY = e.y
         button = e.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY) != 0
-        eraser = e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
+        eraser = e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER || rubbing
         lifted = false
         pending = null
         points.clear(); path.reset()

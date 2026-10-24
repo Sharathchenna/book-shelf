@@ -22,15 +22,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.DownloadForOffline
-import androidx.compose.material.icons.filled.Newspaper
-import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.DownloadForOffline
-import androidx.compose.material.icons.outlined.Newspaper
-import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -56,9 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.sharathchenna.shelf.R
 import com.sharathchenna.shelf.ui.library.LibraryPane
-import com.sharathchenna.shelf.ui.screens.ClippingsScreen
-import com.sharathchenna.shelf.ui.screens.DownloadsScreen
-import com.sharathchenna.shelf.ui.screens.ReviewScreen
+import com.sharathchenna.shelf.ui.screens.HomeScreen
+import com.sharathchenna.shelf.ui.screens.NotesScreen
 import com.sharathchenna.shelf.ui.screens.SearchScreen
 import com.sharathchenna.shelf.ui.screens.SettingsScreen
 import com.sharathchenna.shelf.ui.theme.LocalPaper
@@ -66,13 +63,17 @@ import com.sharathchenna.shelf.ui.theme.PaperGrain
 import com.sharathchenna.shelf.ui.theme.Sans
 import com.sharathchenna.shelf.ui.theme.Serif
 
-private enum class Tab(val key: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+/**
+ * The app's places: Home (what you're reading, and what's saved to read), the Library (every book
+ * and clipping, on the shelves), Notes (the day's review and every highlight), Search, and
+ * Settings. `aliases` are the older tabs' keys, still sent by the launcher's shortcuts.
+ */
+private enum class Tab(val key: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector, val aliases: Set<String> = emptySet()) {
+    Home("home", "Home", Icons.Outlined.Home, Icons.Filled.Home, setOf("clippings")),
     Library("library", "Library", Icons.Outlined.AutoStories, Icons.Filled.AutoStories),
-    Clippings("clippings", "Clippings", Icons.Outlined.Newspaper, Icons.Filled.Newspaper),
+    Notes("notes", "Notes", Icons.Outlined.EditNote, Icons.Filled.EditNote, setOf("review")),
     Search("search", "Search", Icons.Outlined.Search, Icons.Filled.Search),
-    Review("review", "Review", Icons.Outlined.Replay, Icons.Filled.Replay),
-    Downloads("downloads", "Offline", Icons.Outlined.DownloadForOffline, Icons.Filled.DownloadForOffline),
-    Settings("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
+    Settings("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings, setOf("downloads")),
 }
 
 /**
@@ -82,7 +83,7 @@ private enum class Tab(val key: String, val label: String, val icon: ImageVector
  */
 @Composable
 fun MainScreen(nav: NavHostController, initialTab: String) {
-    var tab by rememberSaveable { mutableStateOf(Tab.entries.find { it.key == initialTab } ?: Tab.Library) }
+    var tab by rememberSaveable { mutableStateOf(Tab.entries.find { it.key == initialTab || initialTab in it.aliases } ?: Tab.Home) }
     val paper = LocalPaper.current
     var adding by remember { mutableStateOf(false) }
     if (adding) AddLinkSheet(onDismiss = { adding = false })
@@ -91,14 +92,13 @@ fun MainScreen(nav: NavHostController, initialTab: String) {
         val content: @Composable (Modifier) -> Unit = { modifier ->
             Box(modifier) {
                 when (tab) {
+                    Tab.Home -> HomeScreen(nav, onAdd = { adding = true }, onNotes = { tab = Tab.Notes })
                     Tab.Library -> LibraryPane(nav)
-                    Tab.Clippings -> ClippingsScreen(nav)
+                    Tab.Notes -> NotesScreen(nav)
                     Tab.Search -> SearchScreen(nav)
-                    Tab.Review -> ReviewScreen(nav)
-                    Tab.Downloads -> DownloadsScreen(nav)
-                    Tab.Settings -> SettingsScreen()
+                    Tab.Settings -> SettingsScreen(nav)
                 }
-                if (tab == Tab.Library || tab == Tab.Clippings) {
+                if (tab == Tab.Library) {
                     AddButton(onClick = { adding = true }, modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(24.dp))
                 }
             }

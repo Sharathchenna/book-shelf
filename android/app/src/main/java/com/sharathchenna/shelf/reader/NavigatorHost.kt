@@ -134,6 +134,8 @@ fun NavigatorHost(
     pen: PenListener,
     penHighlight: Boolean,
     penWrite: Boolean,
+    /** The palette's eraser is in hand. */
+    rubbing: Boolean,
     scrolling: Boolean,
     graceMs: Long,
     /** For an article: the page's gutters (CSS px), beside a column held to its measure (articleCss). */
@@ -188,6 +190,7 @@ fun NavigatorHost(
             layer.listener = pen
             layer.highlight = penHighlight && !book.isPdf
             layer.write = penWrite && !book.isPdf
+            layer.rubbing = rubbing && !book.isPdf
             layer.scrolling = scrolling
             layer.graceMs = graceMs
         },

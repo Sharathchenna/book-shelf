@@ -3,6 +3,7 @@ package com.sharathchenna.shelf.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -106,7 +107,7 @@ import java.util.Locale
 
 /** A page of its own, on the site's paper, at the site's reading width. */
 @Composable
-private fun Page(content: @Composable (side: androidx.compose.ui.unit.Dp) -> Unit) {
+internal fun Page(content: @Composable (side: androidx.compose.ui.unit.Dp) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         content(((maxWidth.value - maxWidth.value.coerceAtMost(1180f) + 64f) / 2).dp)
     }
@@ -114,7 +115,7 @@ private fun Page(content: @Composable (side: androidx.compose.ui.unit.Dp) -> Uni
 
 /** A section's title (with its count, small, as the site sets it) and a line about it. */
 @Composable
-private fun Heading(title: String, count: Int? = null, subtitle: String? = null) {
+internal fun Heading(title: String, count: Int? = null, subtitle: String? = null) {
     val paper = LocalPaper.current
     Column(Modifier.statusBarsPadding().padding(top = 36.dp, bottom = 24.dp)) {
         Text(
@@ -134,7 +135,7 @@ private fun Heading(title: String, count: Int? = null, subtitle: String? = null)
 // ---- clippings -------------------------------------------------------------------------------
 
 /** The site's clipping sections, in its order and words (lib/clippings.ts, app/components/clip-page.tsx). */
-private val SECTIONS = listOf(
+internal val SECTIONS = listOf(
     Triple("article", "Articles", "Essays and long reads from around the web, with notes in the margins."),
     Triple("paper", "Papers", "Research worth the close read: abstracts, authors and where each one appeared."),
     Triple("newsletter", "Newsletters", "Issues worth keeping from the newsletters in the inbox."),
@@ -142,64 +143,14 @@ private val SECTIONS = listOf(
 )
 
 private val monthYear = DateTimeFormatter.ofPattern("MMM yyyy", Locale.UK)
-private fun dateOf(iso: String?): String? = runCatching { LocalDate.parse(iso!!.take(10)).format(monthYear) }.getOrNull()
-
-/** The clippings, a section at a time, newest first, as cards in as many columns as fit. */
-@Composable
-fun ClippingsScreen(nav: NavHostController) {
-    val shelf = LocalShelf.current
-    val library by shelf.library.collectAsState()
-    val context = LocalContext.current
-    val paper = LocalPaper.current
-    val books = library?.books.orEmpty()
-    val present = SECTIONS.filter { (kind, _, _) -> books.any { it.kind == kind } }
-    var tab by rememberSaveable { mutableStateOf(0) }
-    Page { side ->
-        if (present.isEmpty()) {
-            Column(Modifier.padding(horizontal = side)) {
-                Heading("Clippings", subtitle = "Nothing clipped yet. Share a link to Shelf from any app, and it's saved here.")
-            }
-            return@Page
-        }
-        val selected = tab.coerceIn(0, present.lastIndex)
-        val (kind, label, blurb) = present[selected]
-        val items = books.filter { it.kind == kind }.sortedByDescending { it.added }
-        LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Adaptive(320.dp),
-            contentPadding = PaddingValues(start = side, end = side, bottom = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalItemSpacing = 20.dp,
-        ) {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                Column {
-                    Heading(label, count = items.size, subtitle = blurb)
-                    Row(Modifier.clip(CircleShape).background(paper.sunk.copy(alpha = 0.6f)).padding(4.dp).padding(bottom = 0.dp)) {
-                        present.forEachIndexed { i, (k, l, _) ->
-                            val on = i == selected
-                            Text(
-                                buildAnnotatedString {
-                                    append(l)
-                                    withStyle(SpanStyle(color = paper.faint)) { append("  ${books.count { it.kind == k }}") }
-                                },
-                                fontFamily = Sans, fontWeight = FontWeight(if (on) 500 else 400), fontSize = 13.5.sp, color = if (on) paper.fg else paper.muted,
-                                modifier = Modifier.clip(CircleShape).background(if (on) paper.raised else Color.Transparent).clickable { tab = i }.padding(horizontal = 14.dp, vertical = 8.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-            items(items, key = { it.id }) { b -> ClipCard(b, shelf.clip(b.id)) { openBook(context, nav, b) } }
-        }
-    }
-}
+internal fun dateOf(iso: String?): String? = runCatching { LocalDate.parse(iso!!.take(10)).format(monthYear) }.getOrNull()
 
 /** A clipping as the site's cards show it: its picture, where it's from and how long it takes, its title and summary, who and when. */
 @Composable
-private fun ClipCard(book: ShelfBook, clip: Clip?, onClick: () -> Unit) {
+internal fun ClipCard(book: ShelfBook, clip: Clip?, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val paper = LocalPaper.current
     val shape = RoundedCornerShape(20.dp)
-    Column(Modifier.clip(shape).background(paper.raised).border(1.dp, paper.rule, shape).clickable(onClick = onClick)) {
+    Column(Modifier.clip(shape).background(paper.raised).border(1.dp, paper.rule, shape).combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
         val tweet = clip?.tweet
         if (tweet == null) book.image?.let { AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1.9f)) }
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -324,13 +275,13 @@ fun SearchScreen(nav: NavHostController) {
 
 // ---- the daily review ------------------------------------------------------------------------
 
-private fun todayMs(): Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+internal fun todayMs(): Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
 private val HIGHLIGHTER = mapOf("yellow" to 0xFFFFD84D, "green" to 0xFF8BD17C, "blue" to 0xFF7CB8FF, "pink" to 0xFFFF8FB8)
 
-/** A few of your own highlights each day, one at a time (lib/review.ts), in the site's words. */
+/** A few of your own highlights each day, one at a time (lib/review.ts), in the site's words: the top of Notes. */
 @Composable
-fun ReviewScreen(nav: NavHostController) {
+fun ReviewDeck(nav: NavHostController) {
     val shelf = LocalShelf.current
     val paper = LocalPaper.current
     val scope = rememberCoroutineScope()
@@ -343,12 +294,8 @@ fun ReviewScreen(nav: NavHostController) {
             .onSuccess { deck = it.deck; done = it.done; total = it.total }
             .onFailure { error = it.message }
     }
-    Page { side ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = side)) {
-            Heading(
-                "Today, from your highlights",
-                subtitle = "A few of your highlights come back each day. Keep one and it returns in a few days, then less and less often.",
-            )
+    run {
+        Column {
             val card = deck?.firstOrNull()
             when {
                 error != null -> Text(error!!, fontFamily = Sans, color = paper.muted)
@@ -397,43 +344,35 @@ fun ReviewScreen(nav: NavHostController) {
 
 // ---- downloads -------------------------------------------------------------------------------
 
-/** The books kept on this device, to read without a connection. */
+/** The books kept on this device, to read without a connection: in Settings. */
 @Composable
-fun DownloadsScreen(nav: NavHostController) {
+private fun OfflineList(nav: NavHostController) {
     val shelf = LocalShelf.current
     val paper = LocalPaper.current
     val scope = rememberCoroutineScope()
     val downloads by shelf.downloads.collectAsState(initial = emptyMap())
     val library by shelf.library.collectAsState()
     val total = downloads.values.sumOf { it.bytes }
-    Page { side ->
-        LazyColumn(contentPadding = PaddingValues(start = side, end = side, bottom = 48.dp)) {
-            item {
-                Heading(
-                    "Offline",
-                    count = downloads.size.takeIf { it > 0 },
-                    subtitle = if (downloads.isEmpty()) "Nothing kept offline yet. Choose “Keep offline” on a book's card, and it opens here without a connection."
-                    else "These open without a connection, using ${mb(total)} on this device. Highlights and your place are sent when you're back online.",
-                )
+    Text(
+        if (downloads.isEmpty()) "Nothing kept offline yet. Long-press a book or article and choose “Keep offline”, and it opens without a connection."
+        else "These open without a connection, using ${mb(total)} on this device. Highlights and your place are sent when you're back online.",
+        fontFamily = Sans, fontSize = 14.sp, lineHeight = 20.sp, color = paper.muted,
+    )
+    downloads.values.forEach { d ->
+        val book = library?.books?.find { it.fileId == d.bookId }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { nav.navigate(Reader(d.bookId)) }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.size(34.dp, 50.dp).clip(RoundedCornerShape(3.dp)).background(book?.let { hex(it.look.color) } ?: paper.sunk)) {
+                (book?.photo ?: book?.image)?.let { AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
             }
-            items(downloads.values.toList(), key = { it.bookId }) { d ->
-                val book = library?.books?.find { it.fileId == d.bookId }
-                Row(
-                    Modifier.widthIn(max = 760.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { nav.navigate(Reader(d.bookId)) }.padding(vertical = 12.dp, horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Box(Modifier.size(40.dp, 58.dp).clip(RoundedCornerShape(3.dp)).background(book?.let { hex(it.look.color) } ?: paper.sunk)) {
-                        (book?.photo ?: book?.image)?.let { AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(d.title, fontFamily = Serif, fontSize = 18.sp, color = paper.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${d.format.uppercase()}  ·  ${mb(d.bytes)}", fontFamily = Sans, fontSize = 13.sp, color = paper.muted)
-                    }
-                    TextButton(onClick = { scope.launch { shelf.removeDownload(d.bookId) } }) { Text("Remove") }
-                }
-                HorizontalDivider(Modifier.widthIn(max = 760.dp), color = paper.rule)
+            Column(Modifier.weight(1f)) {
+                Text(d.title, fontFamily = Serif, fontSize = 17.sp, color = paper.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${d.format.uppercase()}  ·  ${mb(d.bytes)}", fontFamily = Sans, fontSize = 13.sp, color = paper.muted)
             }
+            TextButton(onClick = { scope.launch { shelf.removeDownload(d.bookId) } }) { Text("Remove") }
         }
     }
 }
@@ -455,7 +394,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(nav: NavHostController) {
     val shelf = LocalShelf.current
     val paper = LocalPaper.current
     val scope = rememberCoroutineScope()
@@ -487,6 +426,7 @@ fun SettingsScreen() {
                 com.sharathchenna.shelf.reader.BehaviourControls(com.sharathchenna.shelf.reader.rememberBehaviour()) { com.sharathchenna.shelf.reader.ReaderBehaviour.update(context, it) }
             }
             Section("Obsidian") { ObsidianSettings() }
+            Section("Kept offline") { OfflineList(nav) }
             Section("This device") {
                 Text("Signing out forgets this device's token, the books kept offline, and anything not yet sent to the site.", fontFamily = Sans, fontSize = 14.sp, color = paper.muted)
                 OutlinedButton(onClick = { confirm = true }) { Text("Sign out") }

@@ -23,8 +23,8 @@ import kotlinx.serialization.Serializable
 
 val LocalShelf = staticCompositionLocalOf<Shelf> { error("No shelf") }
 
-/** The app's places. The tabs (library, clippings, search, review, downloads) live inside Main. */
-@Serializable data class Main(val tab: String = "library")
+/** The app's places. The tabs (home, library, notes, search, settings) live inside Main. */
+@Serializable data class Main(val tab: String = "home")
 
 @Serializable data class Reader(val fileId: String, val at: String? = null)
 

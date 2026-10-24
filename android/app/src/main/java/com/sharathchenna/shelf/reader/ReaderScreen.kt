@@ -25,7 +25,9 @@ import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FormatSize
-import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -276,6 +278,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
     ApplyBehaviour(behaviour)
     // The look as shown: Auto's theme taken from the system.
     val look = settings.resolve(androidx.compose.foundation.isSystemInDarkTheme())
+    StatusBarFor(look.theme)
     controller.tapEdges = behaviour.tapEdges
     controller.animate = behaviour.animate
     var chrome by remember { mutableStateOf(true) }
@@ -283,7 +286,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
     var ai by remember { mutableStateOf<AiTask?>(null) }
     var editing by remember { mutableStateOf<NoteEdit?>(null) }
     var drawing by remember { mutableStateOf(false) }
-    var penMode by remember { mutableStateOf(behaviour.startMode()) }
+    var nib by remember { mutableStateOf(behaviour.startNib()) }
+    var folded by rememberPaletteFolded()
     var written by remember { mutableStateOf<com.sharathchenna.shelf.data.InkStroke?>(null) }
     var penMenu by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var sketching by remember { mutableStateOf<Int?>(null) }
@@ -519,13 +523,16 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     onTap = { point -> scope.launch { picture = controller.pictureAt(point, density) ?: run { chrome = !chrome; null } } },
                     onDecoration = { id -> notes.find { it.id == id }?.let { editing = NoteEdit(it) } },
                     pen = pen,
-                    penHighlight = penMode == PenMode.Mark && settings.penHighlight && !drawing,
-                    penWrite = penMode == PenMode.Mark && settings.penWrite && !drawing,
+                    penHighlight = (nib == Nib.Highlight || nib == Nib.Erase) && !drawing,
+                    penWrite = nib == Nib.Write && !drawing,
+                    rubbing = nib == Nib.Erase,
                     // Marking, a stroke down the text marks it too; scrolling is the fingers' while marking.
                     scrolling = false,
-                    graceMs = penMode.graceMs,
+                    graceMs = nib.mode.graceMs,
                     gutter = if (article) ARTICLE_GUTTER else null,
-                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = if (article && look.scroll) 0.dp else 22.dp),
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = if (article && look.scroll) 0.dp else 22.dp)
+                        // Pages laid out to the edge keep clear of the palette; a scroll's column is narrower than the gap.
+                        .padding(start = if (!folded && !drawing && !look.scroll) PaletteWidth else 0.dp),
                 )
                 if (drawing && !book.isPdf) {
                     MarginInk(
@@ -553,15 +560,12 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                         onBack = onBack,
                         onPanel = { panel = if (panel == it) null else it },
                         onRecap = { val (s, f) = here(); ai = AiTask.Recap(s, f); panel = Panel.Ai },
-                        onChat = {
-                            if (panel == Panel.Ai && ai is AiTask.Chat) panel = null
-                            else { ai = AiTask.Chat(null); panel = Panel.Ai }
-                        },
                         onDraw = {
                             if (book.isPdf) sketching = locator?.let(book::sectionOf) ?: 0 else drawing = true
                         },
                         onSettings = { showSettings = true },
-                        onListen = { onListen(locator?.let(book::sectionOf) ?: 0) },
+                        noun = if (article) "article" else "book",
+                        onOriginal = (file.clipId ?: file.paperId)?.let { id -> shelf.clip(id)?.url }?.let { url -> { com.sharathchenna.shelf.ui.openExternal(context, url) } },
                         isPdf = book.isPdf,
                         searchable = book.searchable(),
                         marked = marked,
@@ -601,25 +605,18 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 56.dp),
                     )
                 }
-                // The chat, always a tap away while reading, even with the bars tucked away.
-                if (!drawing) PenModeToggle(
-                    penMode,
-                    onToggle = { penMode = if (penMode == PenMode.Read) PenMode.Mark else PenMode.Read },
-                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = if (chrome) 112.dp else 28.dp),
+                // The pen's tools, Ask and Listen, down the page's left side.
+                if (!drawing) PenPalette(
+                    nib = nib,
+                    onNib = { nib = it },
+                    color = settings.color,
+                    onColor = { c -> settings = settings.copy(color = c); settings.save(context, article) },
+                    onAsk = { if (panel == Panel.Ai && ai is AiTask.Chat) panel = null else { ai = AiTask.Chat(null); panel = Panel.Ai } },
+                    onListen = { onListen(locator?.let(book::sectionOf) ?: 0) },
+                    folded = folded,
+                    onFold = { folded = it },
+                    modifier = Modifier.align(Alignment.CenterStart),
                 )
-                if (panel == null && !drawing && !chrome) {
-                    val paper = LocalPaper.current
-                    Row(
-                        Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp)
-                            .shadow(6.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(paper.fg)
-                            .clickable { ai = AiTask.Chat(null); panel = Panel.Ai }
-                            .padding(start = 14.dp, end = 18.dp, top = 11.dp, bottom = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(20.dp))
-                        Text(if (article) "  Ask about the article" else "  Ask about the book", color = paper.bg, style = MaterialTheme.typography.labelLarge)
-                    }
-                }
                 penMenu?.let { at ->
                     PenMenu(at, onAction = { penMenu = null; onSelection(it) }, onDismiss = { penMenu = null; controller.clearSelection() })
                 }
@@ -676,6 +673,10 @@ fun readerBackground(theme: String) = when (theme) {
     else -> androidx.compose.ui.graphics.Color(0xFFFFFFFF)
 }
 
+/**
+ * The reader's bar: back, where you are, and the three things reached for most (the contents,
+ * your highlights, and the page's look); the rest under ⋯. Ask and Listen are in the pen palette.
+ */
 @Composable
 internal fun TopBar(
     title: String,
@@ -685,43 +686,46 @@ internal fun TopBar(
     onBack: () -> Unit,
     onPanel: (Panel) -> Unit,
     onRecap: () -> Unit,
-    onChat: () -> Unit,
-    onDraw: () -> Unit,
     onSettings: () -> Unit,
-    onListen: () -> Unit,
     searchable: Boolean,
     marked: Boolean,
     onMark: () -> Unit,
     onBrief: (() -> Unit)? = null,
     contentsLabel: String = "Contents and bookmarks",
+    /** What's being read, for the menu's words: book, article or PDF. */
+    noun: String = if (isPdf) "PDF" else "book",
+    /** Drawing with a finger, for a book's margin (the pen draws with Write). */
+    onDraw: (() -> Unit)? = null,
+    onOriginal: (() -> Unit)? = null,
 ) {
     val paper = LocalPaper.current
+    var more by remember { mutableStateOf(false) }
     Row(
-        Modifier.statusBarsPadding().padding(12.dp).background(paper.raised.copy(alpha = 0.96f), RoundedCornerShape(20.dp)).padding(horizontal = 4.dp),
+        Modifier.statusBarsPadding().padding(12.dp).shadow(6.dp, RoundedCornerShape(22.dp)).background(paper.raised, RoundedCornerShape(22.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to the library") }
-        Column(Modifier.width(260.dp).padding(horizontal = 4.dp)) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+        Column(Modifier.widthIn(max = 340.dp).padding(start = 2.dp, end = 10.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("$percent% · $chapter", style = MaterialTheme.typography.labelSmall, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf("$percent%", chapter.takeIf { it != title }.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentsLabel) }
-        if (searchable) IconButton(onClick = { onPanel(Panel.Search) }) { Icon(Icons.Outlined.Search, "Search in the book") }
-        IconButton(onClick = onMark) { Icon(if (marked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, if (marked) "Remove the bookmark" else "Bookmark this page") }
         IconButton(onClick = { onPanel(Panel.Notes) }) { Icon(Icons.Outlined.EditNote, "Highlights and notes") }
-        onBrief?.let { TextButton(onClick = it) { Text("Brief") } } ?: TextButton(onClick = onRecap) { Text("Recap") }
-        // The chat, named as well as drawn: it's what the bar is most often opened for.
-        Row(
-            Modifier.padding(horizontal = 4.dp).clip(RoundedCornerShape(50)).background(paper.fg).clickable(onClick = onChat).padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(18.dp))
-            Text("  Chat", color = paper.bg, style = MaterialTheme.typography.labelLarge)
-        }
-        IconButton(onClick = onDraw) { Icon(Icons.Outlined.Draw, if (isPdf) "Pens and the eraser" else "Draw in the margin") }
-        IconButton(onClick = onListen) { Icon(Icons.Outlined.Headphones, "Listen") }
         IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, if (isPdf) "Page and layout" else "Text and layout") }
+        Box {
+            IconButton(onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, "More") }
+            androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                val item = @Composable { label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, leadingIcon = { Icon(icon, null) }, onClick = { more = false; onClick() })
+                }
+                if (searchable) item("Search in the $noun", Icons.Outlined.Search) { onPanel(Panel.Search) }
+                item(if (marked) "Remove the bookmark" else "Bookmark this page", if (marked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, onMark)
+                onBrief?.let { item("Brief", Icons.Outlined.AutoAwesome, it) } ?: item("Recap so far", Icons.Outlined.AutoAwesome, onRecap)
+                onDraw?.let { item("Draw in the margin", Icons.Outlined.Draw, it) }
+                onOriginal?.let { item("Open the original", Icons.AutoMirrored.Outlined.OpenInNew, it) }
+            }
+        }
     }
 }
 

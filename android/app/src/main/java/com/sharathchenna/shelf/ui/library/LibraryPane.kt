@@ -102,14 +102,24 @@ fun LibraryPane(nav: NavHostController) {
     val shelf = LocalShelf.current
     val library by shelf.library.collectAsState()
     var open by rememberSaveable { mutableStateOf<String?>(null) }
-    BackHandler(enabled = open != null) { open = null }
 
+    BookSheetHost(open, nav, onClose = { open = null }) {
+        Bookcase(library, selected = open, onOpen = { open = it })
+    }
+}
+
+/**
+ * A book or clipping taken down for its details (BookCard), over whatever's behind: a sheet from
+ * the side on the tablet, the whole screen on a phone.
+ */
+@Composable
+fun BookSheetHost(open: String?, nav: NavHostController, onClose: () -> Unit, content: @Composable () -> Unit) {
+    BackHandler(enabled = open != null) { onClose() }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp
-        Bookcase(library, selected = open, onOpen = { open = it })
-        // The book in your hands: a sheet from the side on the tablet, the whole screen on a phone.
+        content()
         AnimatedVisibility(open != null, enter = fadeIn(), exit = fadeOut()) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (wide) 0.18f else 0f)).clickable(remember { MutableInteractionSource() }, null) { open = null })
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (wide) 0.18f else 0f)).clickable(remember { MutableInteractionSource() }, null) { onClose() })
         }
         AnimatedVisibility(
             open != null,
@@ -122,7 +132,7 @@ fun LibraryPane(nav: NavHostController) {
                 if (wide) Modifier.fillMaxHeight().width(480.dp).statusBarsPadding().navigationBarsPadding().padding(12.dp).clip(RoundedCornerShape(24.dp))
                 else Modifier.fillMaxSize(),
             ) {
-                if (id != null) BookCard(id, nav, onClose = { open = null })
+                if (id != null) BookCard(id, nav, onClose = { onClose() })
             }
         }
     }

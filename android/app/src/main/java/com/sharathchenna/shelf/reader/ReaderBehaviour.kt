@@ -121,6 +121,19 @@ fun ApplyBehaviour(b: ReaderBehaviour) {
     }
 }
 
+/** The status bar's icons light on a night page and dark on paper, put back as the app has them when the reader closes. */
+@Composable
+fun StatusBarFor(theme: String) {
+    val activity = LocalActivity.current ?: return
+    val view = LocalView.current
+    DisposableEffect(theme) {
+        val bars = WindowCompat.getInsetsController(activity.window, view)
+        val before = bars.isAppearanceLightStatusBars
+        bars.isAppearanceLightStatusBars = theme != "dark"
+        onDispose { bars.isAppearanceLightStatusBars = before }
+    }
+}
+
 private fun setBrightness(activity: Activity, value: Float) {
     val attrs = activity.window.attributes
     attrs.screenBrightness = if (value < 0) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else value.coerceIn(0.02f, 1f)
@@ -150,9 +163,9 @@ fun BehaviourControls(b: ReaderBehaviour, onChange: (ReaderBehaviour) -> Unit) {
         Toggle("Tap the left and right edges", "A tap in the middle still shows the bars.", b.tapEdges) { onChange(b.copy(tapEdges = it)) }
         Toggle("Volume keys turn pages", "Down for the next page, up for the one before.", b.volumeKeys) { onChange(b.copy(volumeKeys = it)) }
         Toggle("Animate page turns", null, b.animate) { onChange(b.copy(animate = it)) }
-        Text("THE PEN ON OPENING", style = Eyebrow, color = muted)
+        Text("THE PEN'S TOOL ON OPENING", style = Eyebrow, color = muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("read" to "Read (it scrolls)", "mark" to "Mark (it highlights)").forEach { (k, label) ->
+            listOf("read" to "Read (it scrolls)", "mark" to "Highlight").forEach { (k, label) ->
                 FilterChip(selected = b.penStart == k, onClick = { onChange(b.copy(penStart = k)) }, label = { Text(label) })
             }
         }
@@ -170,5 +183,3 @@ internal fun Toggle(title: String, detail: String?, value: Boolean, onChange: (B
     }
 }
 
-/** The pen's mode a reader opens in. */
-fun ReaderBehaviour.startMode(): PenMode = if (penStart == "mark") PenMode.Mark else PenMode.Read

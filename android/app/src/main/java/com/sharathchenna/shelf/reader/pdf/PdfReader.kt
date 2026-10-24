@@ -97,8 +97,12 @@ import com.sharathchenna.shelf.reader.Panel
 import com.sharathchenna.shelf.reader.ApplyBehaviour
 import com.sharathchenna.shelf.reader.PenMode
 import com.sharathchenna.shelf.reader.rememberBehaviour
-import com.sharathchenna.shelf.reader.startMode
-import com.sharathchenna.shelf.reader.PenModeToggle
+import com.sharathchenna.shelf.reader.Nib
+import com.sharathchenna.shelf.reader.PaletteWidth
+import com.sharathchenna.shelf.reader.PenPalette
+import com.sharathchenna.shelf.reader.mode
+import com.sharathchenna.shelf.reader.rememberPaletteFolded
+import com.sharathchenna.shelf.reader.startNib
 import com.sharathchenna.shelf.reader.PenTool
 import com.sharathchenna.shelf.reader.graceMs
 import com.sharathchenna.shelf.reader.PenTools
@@ -162,6 +166,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     ApplyBehaviour(behaviour)
     // The look as shown: Auto's theme taken from the system.
     val look = settings.resolve(androidx.compose.foundation.isSystemInDarkTheme())
+    com.sharathchenna.shelf.reader.StatusBarFor(look.theme)
     val currentLook by rememberUpdatedState(look)
     val currentBehaviour by rememberUpdatedState(behaviour)
     var chrome by remember { mutableStateOf(true) }
@@ -174,8 +179,8 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     var marks by remember { mutableStateOf(PageMarks.load(context, file.id)) }
     var jumpFrom by remember { mutableStateOf<Int?>(null) }
     var pinned by remember { mutableStateOf<Int?>(null) }
-    var tools by remember { mutableStateOf(false) }
-    var penMode by remember { mutableStateOf(behaviour.startMode()) }
+    var nib by remember { mutableStateOf(behaviour.startNib()) }
+    var folded by rememberPaletteFolded()
     // Single page: where a swipe began, and the zoom at which a page fits the screen.
     val paging = remember { Paging() }
     var tool by remember { mutableStateOf(PenTool()) }
@@ -221,17 +226,18 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
         } + searchHits
         l.inks = live.filter { it.ink?.place == "page" }.map { pageOf(it) to it.ink!! }
     }
-    LaunchedEffect(layer, settings, look, tool, tools, penMode) {
+    // The palette's tool: Read leaves the pen to scroll; Highlight marks text; Write inks the page; Erase rubs out.
+    LaunchedEffect(layer, settings, look, tool, nib) {
         val l = layer ?: return@LaunchedEffect
         l.tint(look.theme)
         l.highlightColor = (HIGHLIGHT_ARGB[settings.color] ?: HIGHLIGHT_ARGB.getValue("yellow")) and 0x00FFFFFF or 0x66000000
-        l.highlight = settings.penHighlight
-        l.write = settings.penWrite
+        l.highlight = nib == Nib.Highlight
+        l.write = nib == Nib.Write
         l.penColor = tool.color
         l.penWidthDp = tool.width
-        l.erasing = tools && tool.erasing
-        l.marking = penMode == PenMode.Mark || tools
-        l.graceMs = (if (tools) PenMode.Mark else penMode).graceMs
+        l.erasing = nib == Nib.Erase
+        l.marking = nib != Nib.Read
+        l.graceMs = nib.mode.graceMs
     }
 
     // The place, saved a moment after the reader settles on a page (not the page it opened at).
@@ -241,18 +247,17 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
             shelf.saveProgress(file.id, Progress(cfi = "page:${p + 1}", fraction = if (count > 1) p.toDouble() / (count - 1) else 0.0, sectionIndex = p))
         }
     }
-    LaunchedEffect(chrome, panel, tools) {
-        if (chrome && panel == null && !tools) {
+    LaunchedEffect(chrome, panel) {
+        if (chrome && panel == null) {
             kotlinx.coroutines.delay(4000)
             chrome = false
         }
     }
 
-    BackHandler(enabled = panel != null || editing != null || choice != null || tools) {
+    BackHandler(enabled = panel != null || editing != null || choice != null) {
         when {
             choice != null -> choice = null
             editing != null -> editing = null
-            tools -> tools = false
             else -> panel = null
         }
     }
@@ -439,7 +444,8 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         scope.launch { kotlinx.coroutines.delay(300); go(p) }
                     }, modifier = Modifier.fillMaxSize().statusBarsPadding())
                 } else AndroidView(
-                    modifier = Modifier.fillMaxSize().statusBarsPadding(),
+                    // The pages keep clear of the pen palette at the left.
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().padding(start = if (folded) 0.dp else PaletteWidth),
                     factory = { ctx ->
                         PdfPenLayer(ctx).also { l ->
                             l.listener = listener
@@ -534,16 +540,6 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                     }
                 }
 
-                if (tools) Row(
-                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (chrome) 76.dp else 12.dp)
-                        .shadow(4.dp, RoundedCornerShape(24.dp)).background(LocalPaper.current.raised, RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    PenTools(tool, onTool = { tool = it }, onUndo = null)
-                    TextButton(onClick = { tools = false }) { Text("Done") }
-                }
-
                 if (chrome) Box(Modifier.align(Alignment.TopCenter)) {
                     TopBar(
                         title = file.title,
@@ -556,10 +552,8 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                             panel = if (panel == want) null else want
                         },
                         onRecap = { ai = AiTask.Recap(page, 0.5); panel = PdfPanel.Ai },
-                        onChat = { if (panel == PdfPanel.Ai && ai is AiTask.Chat) panel = null else { ai = AiTask.Chat(null); panel = PdfPanel.Ai } },
-                        onDraw = { tools = !tools; if (tools) penMode = PenMode.Mark },
                         onSettings = { showSettings = true },
-                        onListen = { onListen(page) },
+                        onOriginal = (file.paperId ?: file.clipId)?.let { id -> shelf.clip(id)?.url }?.let { url -> { com.sharathchenna.shelf.ui.openExternal(context, url) } },
                         searchable = true,
                         marked = page in marks,
                         onMark = {
@@ -610,27 +604,19 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                     }
                 }
 
-                // The pen's mode: reading (it scrolls and zooms) or marking (it highlights, writes, gestures).
-                PenModeToggle(
-                    penMode,
-                    onToggle = { penMode = if (penMode == PenMode.Read) PenMode.Mark else PenMode.Read; if (penMode == PenMode.Read) tools = false },
-                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 20.dp, bottom = if (chrome) 96.dp else 20.dp),
+                // The pen's tools, Ask and Listen, down the page's left side; Write chosen again offers the pen's colours and widths.
+                if (!settings.textView) PenPalette(
+                    nib = nib,
+                    onNib = { nib = it },
+                    color = settings.color,
+                    onColor = { c -> settings = settings.copy(color = c); settings.save(context, article = false) },
+                    onAsk = { if (panel == PdfPanel.Ai && ai is AiTask.Chat) panel = null else { ai = AiTask.Chat(null); panel = PdfPanel.Ai } },
+                    onListen = { onListen(page) },
+                    folded = folded,
+                    onFold = { folded = it },
+                    modifier = Modifier.align(Alignment.CenterStart),
+                    penOptions = { PenTools(tool, onTool = { tool = it }, onUndo = null, withEraser = false) },
                 )
-
-                // The chat, a tap away while reading.
-                if (panel == null && !chrome && !tools) {
-                    val paper = LocalPaper.current
-                    Row(
-                        Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp)
-                            .shadow(6.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(paper.fg)
-                            .clickable { ai = AiTask.Chat(null); panel = PdfPanel.Ai }
-                            .padding(start = 14.dp, end = 18.dp, top = 11.dp, bottom = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = paper.bg, modifier = Modifier.size(20.dp))
-                        Text(if (file.paperId != null) "  Ask about the paper" else "  Ask about it", color = paper.bg, style = MaterialTheme.typography.labelLarge)
-                    }
-                }
 
                 fresh?.let { n ->
                     LaunchedEffect(n.id) { kotlinx.coroutines.delay(5000); if (fresh?.id == n.id) fresh = null }
@@ -646,7 +632,9 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                     ReferenceCard(r, onGo = { reference = null; go(r.page, r.rects.firstOrNull()?.let { PdfPoint(r.page, it.left, it.top) }) }, onDismiss = { reference = null }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 48.dp))
                 }
 
-                choice?.let { c -> ChoiceMenu(c, onAction = { act(c, it) }, onDismiss = { choice = null; layer?.pdf?.clearCurrentSelection() }) }
+                // Placed in the page's own pixels, which start beside the palette.
+                val shift = with(LocalDensity.current) { (if (folded) 0.dp else PaletteWidth).toPx() }
+                choice?.let { c -> ChoiceMenu(c.copy(x = c.x + shift), onAction = { act(c, it) }, onDismiss = { choice = null; layer?.pdf?.clearCurrentSelection() }) }
 
                 message?.let {
                     LaunchedEffect(it) { kotlinx.coroutines.delay(3000); message = null }

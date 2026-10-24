@@ -497,14 +497,13 @@ private fun PenSettings(settings: ReaderSettings, isPdf: Boolean, onChange: (Rea
             )
         }
     }
-    Text("IN MARK MODE", style = Eyebrow, color = muted)
-    Text("The button at the bottom left switches the pen between Read (it scrolls and zooms, like a finger) and Mark. Which it opens in is under Reading.", style = MaterialTheme.typography.bodySmall, color = muted)
-    Toggle("Draw across text to highlight it", "Hold the pen's button to choose Explain, Ask and the rest instead; the eraser end rubs highlights out.", settings.penHighlight) { onChange(settings.copy(penHighlight = it)) }
-    Toggle(
-        if (isPdf) "Write on the page" else "Write in the margin to make a note",
-        if (isPdf) "Writing where there's no text is kept as ink on the page. A loop round something, or a bracket beside a passage, offers it to the menu." else "Writing where there's no text starts a drawing beside the nearest paragraph.",
-        settings.penWrite,
-    ) { onChange(settings.copy(penWrite = it)) }
+    Text("THE PALETTE", style = Eyebrow, color = muted)
+    Text(
+        "The tools down the page's left side choose what the pen does: Read (it scrolls and zooms, like a finger), Highlight (drawn across text), " +
+            (if (isPdf) "Write (ink on the page; a loop round something, or a bracket beside a passage, offers it to the menu)" else "Write (a note beside the nearest paragraph)") +
+            " and Erase. Tap the highlighter again for its colours. Holding the pen's button selects for Explain, Ask and the rest; its eraser end rubs out. Which tool a book opens with is under Reading.",
+        style = MaterialTheme.typography.bodySmall, color = muted,
+    )
 }
 
 // ---- drawing in an EPUB's margin -------------------------------------------------------------
@@ -630,7 +629,7 @@ private val WIDTHS = listOf(1.4f to "Fine", 2.2f to "Pen", 4f to "Bold")
 
 /** The pens (four colours, three widths), the eraser and undo, as the drawing sheets share them. */
 @Composable
-internal fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: (() -> Unit)?) {
+internal fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: (() -> Unit)?, withEraser: Boolean = true) {
     val paper = LocalPaper.current
     PENS.forEach { c ->
         val chosen = c == tool.color && !tool.erasing
@@ -646,8 +645,8 @@ internal fun PenTools(tool: PenTool, onTool: (PenTool) -> Unit, onUndo: (() -> U
             contentAlignment = Alignment.Center,
         ) { Box(Modifier.size((w * 2.4f).dp).clip(CircleShape).background(if (chosen) paper.fg else paper.muted)) }
     }
-    Box(Modifier.size(1.dp, 24.dp).background(paper.rule))
-    IconButton(onClick = { onTool(tool.copy(erasing = !tool.erasing)) }, modifier = Modifier.clip(CircleShape).background(if (tool.erasing) paper.fg else androidx.compose.ui.graphics.Color.Transparent)) {
+    if (withEraser) Box(Modifier.size(1.dp, 24.dp).background(paper.rule))
+    if (withEraser) IconButton(onClick = { onTool(tool.copy(erasing = !tool.erasing)) }, modifier = Modifier.clip(CircleShape).background(if (tool.erasing) paper.fg else androidx.compose.ui.graphics.Color.Transparent)) {
         Icon(Icons.Outlined.AutoFixNormal, "Eraser (or the pen's eraser end, or its button held)", tint = if (tool.erasing) paper.bg else paper.fg)
     }
     onUndo?.let { IconButton(onClick = it) { Icon(Icons.AutoMirrored.Outlined.Undo, "Undo") } }

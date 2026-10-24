@@ -237,8 +237,8 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
             p == null -> Kind.None
             e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER || erasing -> Kind.Erase
             !marking -> Kind.None
-            onText(p.pageNum, p) -> if (highlight || button) Kind.Text else Kind.None
-            button -> Kind.Erase
+            button -> if (onText(p.pageNum, p)) Kind.Text else Kind.Erase
+            highlight && onText(p.pageNum, p) -> Kind.Text
             write -> Kind.Ink
             else -> Kind.None
         }
