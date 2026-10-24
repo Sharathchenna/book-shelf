@@ -532,7 +532,8 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     gutter = if (article) ARTICLE_GUTTER else null,
                     modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 8.dp, bottom = if (article && look.scroll) 0.dp else 22.dp)
                         // Pages laid out to the edge keep clear of the palette; a scroll's column is narrower than the gap.
-                        .padding(start = if (!folded && !drawing && !look.scroll) PaletteWidth else 0.dp),
+                        // Not changed while writing: the page would reflow under the ink.
+                        .padding(start = if (!folded && !look.scroll) PaletteWidth else 0.dp),
                 )
                 if (drawing && !book.isPdf) {
                     MarginInk(

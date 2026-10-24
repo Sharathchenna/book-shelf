@@ -58,7 +58,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
     /** Loads the copy on the device, so the shelf shows at once. */
     suspend fun loadCached() = withContext(Dispatchers.IO) {
         if (_library.value == null && libraryFile.exists()) {
-            _library.value = runCatching { ShelfJson.decodeFromString<Library>(libraryFile.readText()) }.getOrNull()
+            _library.value = runCatching { ShelfJson.decodeFromString<Library>(libraryFile.readText()).tidied() }.getOrNull()
         }
     }
 
@@ -68,7 +68,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         val etag = if (_library.value != null) tokens.libraryEtag() else null
         val fresh = api.library(etag) ?: return@withContext
         val (json, tag) = fresh
-        _library.value = ShelfJson.decodeFromString<Library>(json)
+        _library.value = ShelfJson.decodeFromString<Library>(json).tidied()
         libraryFile.writeText(json)
         tokens.setLibraryEtag(tag)
     }
@@ -205,5 +205,25 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
             refreshLibrary()
             com.sharathchenna.shelf.widget.ReadingWidget.refresh(context)
         }
+    }
+}
+
+/**
+ * The library with its titles mended: one cut short by the site can end halfway through a
+ * character drawn from two (a tweet's bold letters, an emoji), which shows as a broken glyph.
+ */
+private fun Library.tidied(): Library = copy(books = books.map { b -> b.copy(title = b.title.withoutBrokenPairs()) })
+
+private fun String.withoutBrokenPairs(): String = buildString {
+    val s = this@withoutBrokenPairs
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        when {
+            c.isHighSurrogate() && i + 1 < s.length && s[i + 1].isLowSurrogate() -> { append(c); append(s[i + 1]); i++ }
+            c.isSurrogate() || c == '\uFFFD' -> Unit
+            else -> append(c)
+        }
+        i++
     }
 }

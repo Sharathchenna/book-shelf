@@ -12,13 +12,15 @@ import java.util.Locale
  * each run of books, and the tags to filter by.
  */
 
-enum class Sort(val label: String) { Topic("Topic"), Recent("Recent"), Colour("Colour"), Length("Length") }
+enum class Sort(val label: String) { Recent("Recent"), Title("Title"), Author("Author"), Topic("Topic"), Length("Length"), Colour("Colour") }
 
 fun sortBooks(books: List<ShelfBook>, sort: Sort, topics: List<Topic>): List<ShelfBook> {
     val order = topics.withIndex().associate { (i, t) -> t.key to i }
     return when (sort) {
         Sort.Topic -> books.sortedWith(compareBy({ order[it.topic] ?: 99 }, { it.added }))
         Sort.Recent -> books.sortedByDescending { it.added }
+        Sort.Title -> books.sortedBy { titleKey(it.title) }
+        Sort.Author -> books.sortedWith(compareBy({ lastName(it.author).lowercase() }, { titleKey(it.title) }))
         Sort.Colour -> books.sortedWith(compareBy({ it.look.hue }, { it.look.h }))
         Sort.Length -> books.sortedBy { it.minutes }
     }
@@ -26,12 +28,20 @@ fun sortBooks(books: List<ShelfBook>, sort: Sort, topics: List<Topic>): List<She
 
 data class Group(val key: String, val label: String, val icon: String? = null)
 
+/** A title as it's alphabetised: without a leading "The", "A" or "An". */
+private fun titleKey(title: String) = title.trim().lowercase().removePrefix("the ").removePrefix("a ").removePrefix("an ")
+
+/** The letter a run of titles or names files under; "#" for anything not a letter. */
+private fun initial(s: String) = s.trim().firstOrNull()?.uppercaseChar()?.takeIf { it.isLetter() }?.toString() ?: "#"
+
 private val month = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.UK).withZone(ZoneId.systemDefault())
 
 /** The label over a run of books: a topic, a month or a length; none when sorted by colour. */
 fun groupOf(book: ShelfBook, sort: Sort, topics: Map<String, Topic>): Group? = when (sort) {
     Sort.Topic -> Group(book.topic, topics[book.topic]?.name ?: book.topic, book.topic)
     Sort.Recent -> month.format(Instant.ofEpochMilli(book.added)).let { Group(it, it) }
+    Sort.Title -> initial(titleKey(book.title)).let { Group(it, it) }
+    Sort.Author -> initial(lastName(book.author)).let { Group(it, it) }
     Sort.Length -> when {
         book.minutes < 10 -> Group("quick", "Under 10 min", "quick")
         book.minutes < 30 -> Group("sitting", "One sitting")
