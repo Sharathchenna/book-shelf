@@ -26,16 +26,17 @@ export async function GET(request: Request) {
     highlightCounts(),
   ]);
 
+  // An article's copy from an older conversion is made again when next opened (/api/books/clips),
+  // its highlights carried over, so the app goes to the opener rather than to it.
+  const stale = new Set(files.filter((file) => file.clipId && (file.build ?? 1) < ARTICLE_EPUB_BUILD).map((file) => file.id));
   const fileOf = new Map<string, string>();
   for (const file of files) {
-    // An article's copy from an older conversion is made again when next opened (/api/books/clips),
-    // its highlights carried over, so the app goes to the opener rather than to it.
-    if (file.clipId && (file.build ?? 1) < ARTICLE_EPUB_BUILD) continue;
+    if (stale.has(file.id)) continue;
     const of = file.paperId ?? file.clipId ?? shelfItemFor(file, items);
     if (of && !fileOf.has(of)) fileOf.set(of, file.id);
   }
   const shelf = books.map((b) => {
-    const fileId = fileOf.get(b.id) ?? b.fileId;
+    const fileId = fileOf.get(b.id) ?? (b.fileId && !stale.has(b.fileId) ? b.fileId : undefined);
     const fraction = fileId ? (progress.get(fileId)?.fraction ?? 0) : 0;
     // The owner's own place in a book wins over its Goodreads shelf, unless that says it's read.
     const measured = Boolean(fileId && fraction > 0 && b.pct < 1);
