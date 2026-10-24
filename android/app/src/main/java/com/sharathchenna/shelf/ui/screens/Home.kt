@@ -157,7 +157,7 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
                                     fontFamily = Serif, fontWeight = FontWeight(420), fontSize = 46.sp, lineHeight = 50.sp, letterSpacing = (-0.03).em, color = paper.fg,
                                 )
                             }
-                            Pill("Add a link", Icons.Outlined.Add, dark = true, onClick = onAdd)
+                            Pill("Add", Icons.Outlined.Add, dark = true, onClick = onAdd)
                         }
                     }
                     item(key = "reading", span = StaggeredGridItemSpan.FullLine) {
@@ -177,7 +177,7 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
                     }
                     if (shown.isEmpty()) item(key = "none", span = StaggeredGridItemSpan.FullLine) {
                         Text(
-                            "Nothing waiting. Share a link to Shelf from any app, or tap Add a link, and it's saved here.",
+                            "Nothing waiting. Share a link to Shelf from any app, or tap Add, and it's saved here.",
                             fontFamily = Sans, fontSize = 15.sp, color = paper.muted,
                         )
                     }
@@ -222,15 +222,9 @@ private fun Reading(
     }
 }
 
-/** "Book · Chapter 7 of 12", or an article's site. */
-private fun eyebrow(r: InProgress, source: String?): String {
-    val kind = KIND_LABEL[r.book.kind] ?: "Book"
-    val sections = r.file.sections.size
-    return when {
-        r.book.kind == "book" && sections > 1 -> "$kind · Chapter ${r.progress.sectionIndex + 1} of $sections"
-        else -> listOfNotNull(kind, source).joinToString(" · ")
-    }
-}
+/** "Book · Sebastian Raschka", or an article's site. (Not "chapter 7 of 12": a book's sections count its front matter too.) */
+private fun eyebrow(r: InProgress, source: String?): String =
+    listOfNotNull(KIND_LABEL[r.book.kind] ?: "Book", (if (r.book.kind == "book") r.book.author else source)?.takeIf { it.isNotBlank() }).joinToString(" · ")
 
 /** The chapter, and the time left in the whole. */
 private fun whereLine(r: InProgress): String {

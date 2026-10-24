@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.HttpRequestBuilder
@@ -26,6 +27,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.readAvailable
+import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -121,6 +123,63 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
             }
         }
         if (!part.renameTo(into)) throw ApiException(0, "Couldn't save the file.")
+    }
+
+    // ---- adding a file ---------------------------------------------------------------------
+
+    @Serializable
+    private data class UploadRequest(val bytes: Long, val name: String)
+
+    /** Where to send a file: its new id, whether it's an EPUB or a PDF, and a short-lived storage URL. */
+    @Serializable
+    data class UploadStart(val id: String, val format: String, val uploadUrl: String, val contentType: String)
+
+    /** A PDF's page as the site keeps it: a title ("Page 4") and its text. */
+    @Serializable
+    data class PdfPage(val title: String, val text: String)
+
+    /** What finishing an upload sends: nothing for an EPUB (the site reads it); a PDF's pages, title and cover. */
+    @Serializable
+    data class Finish(val format: String? = null, val title: String? = null, val pages: List<PdfPage>? = null, val cover: String? = null)
+
+    /** Starts adding an EPUB or PDF (POST /api/books), as the site's upload does. */
+    suspend fun startUpload(bytes: Long, name: String): UploadStart =
+        check(http.post("/api/books") { auth(); contentType(ContentType.Application.Json); setBody(UploadRequest(bytes, name)) }).body()
+
+    /** Sends the file straight to storage, reporting progress from 0 to 1. */
+    suspend fun sendFile(url: String, file: File, type: String, progress: (Float) -> Unit) {
+        val total = file.length()
+        val res = http.put(url) {
+            timeout { requestTimeoutMillis = 30 * 60_000L }
+            setBody(object : io.ktor.http.content.OutgoingContent.WriteChannelContent() {
+                override val contentType = ContentType.parse(type)
+                override val contentLength = total
+                override suspend fun writeTo(channel: io.ktor.utils.io.ByteWriteChannel) {
+                    val buffer = ByteArray(64 * 1024)
+                    var sent = 0L
+                    file.inputStream().use { input ->
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            channel.writeFully(buffer, 0, n)
+                            sent += n
+                            progress((sent.toFloat() / total).coerceIn(0f, 1f))
+                        }
+                    }
+                }
+            })
+        }
+        if (!res.status.isSuccess()) throw ApiException(res.status.value, "Storage turned the file down (error ${res.status.value}).")
+    }
+
+    /** Removes a file from the library, with its highlights, place and narration (DELETE /api/books/[id]). */
+    suspend fun removeBook(id: String) {
+        check(http.delete("/api/books/$id") { auth() })
+    }
+
+    /** Finishes adding a file: the site reads an EPUB itself, and files a PDF with the pages sent. */
+    suspend fun finishUpload(id: String, finish: Finish) {
+        check(http.post("/api/books/$id/finalize") { auth(); contentType(ContentType.Application.Json); setBody(finish) })
     }
 
     // ---- highlights and progress -----------------------------------------------------------

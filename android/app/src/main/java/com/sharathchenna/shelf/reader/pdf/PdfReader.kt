@@ -189,13 +189,25 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
     var message by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
 
+    // The sandbox the system's PDF service reads in, kept for as long as the reader's open: without
+    // this hold, the service goes as soon as the document has opened, and the pages have nothing to
+    // be drawn by.
+    DisposableEffect(Unit) {
+        val sandbox = SandboxedPdfLoader.startInitialization(context)
+        onDispose { runCatching { sandbox.close() } }
+    }
     // The document, opened by the system's PDF service in its sandbox, and closed with the reader.
     LaunchedEffect(opened.path) {
         runCatching { SandboxedPdfLoader(context, Dispatchers.IO).openDocument(Uri.fromFile(opened.path), null) }
             .onSuccess { doc = it }
             .onFailure { failed = it.message ?: "This PDF wouldn't open here." }
     }
-    DisposableEffect(doc) { onDispose { runCatching { doc?.close() } } }
+    // The document this effect was made for: `doc` read when it's disposed would be the one just
+    // opened (its change from nothing is what disposes the effect), closed as soon as it arrived.
+    DisposableEffect(doc) {
+        val opened = doc
+        onDispose { runCatching { opened?.close() } }
+    }
 
     val count = doc?.pageCount ?: 0
     val first = remember(file.id) {

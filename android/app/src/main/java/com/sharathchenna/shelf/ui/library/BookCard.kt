@@ -35,6 +35,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -207,6 +208,28 @@ fun BookCard(id: String, nav: NavHostController, onClose: () -> Unit) {
                         Text("  $label")
                     }
                 }
+            }
+            // A file can be taken out of the library. One on no shelf is a book of its own (its id is the
+            // file's) and goes entirely; otherwise the EPUB or PDF goes and the book or clipping stays.
+            book.fileId?.let { fileId ->
+                var asking by remember(id) { mutableStateOf(false) }
+                TextButton(onClick = { asking = true }) { Text(if (book.id == fileId) "Remove from the library" else "Remove the file", color = MaterialTheme.colorScheme.error) }
+                if (asking) androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { asking = false },
+                    title = { Text("Remove “${book.title}”?") },
+                    text = { Text("Its file goes from the library on the site and every device, with its highlights, notes, drawings and your place. This can't be undone.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            asking = false
+                            scope.launch {
+                                runCatching { shelf.api.removeBook(fileId); shelf.removeDownload(fileId); shelf.refreshLibrary() }
+                                    .onSuccess { onClose() }
+                                    .onFailure { error = it.message ?: "Couldn't remove it." }
+                            }
+                        }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                    },
+                    dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+                )
             }
             if (book.kind == "book" && book.fileId == null) {
                 Text("No EPUB or PDF of this one yet. Add a file from its card on the site, and it opens here.", fontFamily = Sans, fontSize = 13.sp, color = paper.muted)

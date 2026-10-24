@@ -86,7 +86,7 @@ fun MainScreen(nav: NavHostController, initialTab: String) {
     var tab by rememberSaveable { mutableStateOf(Tab.entries.find { it.key == initialTab || initialTab in it.aliases } ?: Tab.Home) }
     val paper = LocalPaper.current
     var adding by remember { mutableStateOf(false) }
-    if (adding) AddLinkSheet(onDismiss = { adding = false })
+    if (adding) AddLinkSheet(onDismiss = { adding = false }, onOpen = { nav.navigate(Reader(it)) })
     BoxWithConstraints(Modifier.fillMaxSize().background(paper.bg)) {
         PaperGrain()
         val content: @Composable (Modifier) -> Unit = { modifier ->

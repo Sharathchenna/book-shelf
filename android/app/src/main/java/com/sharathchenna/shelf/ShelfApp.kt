@@ -15,6 +15,10 @@ class ShelfApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The system's PDF engine reads documents in a sandboxed process of the app's own, which
+        // starts here too; WorkManager isn't there, and asking for it ended that process before any
+        // PDF could open. Only the app's own process schedules the sync.
+        if (getProcessName() != packageName) return
         Sync.schedule(this)
     }
 }
