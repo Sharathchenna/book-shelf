@@ -76,27 +76,29 @@ export async function POST(request: Request) {
     return { id, kind, title, subtitle, image, href, paperId, articleId };
   };
 
-  if (!jevEnabled() && near) {
-    // Nearest first, with the cosine similarity as the match.
-    const found = near.filter((n) => byDocId.has(n.id)).slice(0, RESULTS);
-    return Response.json({ results: found.map((n) => ({ ...strip(byDocId.get(n.id)!), match: Math.max(0, Math.min(1, n.score)) })), ranked: true });
-  }
-  if (!jevEnabled()) {
-    // Only what contains a search word, scored against the best match.
+  /** Nearest first, with the cosine similarity as the match. */
+  const byMeaning = (found: NonNullable<typeof near>) =>
+    found.filter((n) => byDocId.has(n.id)).slice(0, RESULTS).map((n) => ({ ...strip(byDocId.get(n.id)!), match: Math.max(0, Math.min(1, n.score)) }));
+  /** Only what contains a search word, scored against the best match. */
+  const byKeyword = () => {
     const scored = keywords(RESULTS).filter((s) => s.score > 0);
     const best = scored[0]?.score ?? 1;
-    const results = scored.map(({ item, score }) => ({ ...strip(item), match: score / best }));
-    return Response.json({ results, ranked: false });
-  }
+    return scored.map(({ item, score }) => ({ ...strip(item), match: score / best }));
+  };
+
+  if (!jevEnabled() && near) return Response.json({ results: byMeaning(near), ranked: true });
+  if (!jevEnabled()) return Response.json({ results: byKeyword(), ranked: false });
 
   const started = performance.now();
   let ranked;
   try {
     ranked = await rankForSearch(pool.map((d) => ({ id: d.id, card: d.card })), query);
   } catch (error) {
-    console.error("Search ranking failed", error);
-    const status = error instanceof APIError && error.status === 429 ? 429 : 502;
-    return Response.json({ error: "Search is having a moment. Try again shortly." }, { status });
+    // Jev being down (or out of quota) shouldn't take search with it: the vector index answers
+    // alone, or failing that the keywords.
+    console.error("Search ranking failed; answering without it", error instanceof APIError ? error.status : error);
+    const found = near ?? (await nearest(query, CANDIDATES).catch(() => null));
+    return Response.json(found ? { results: byMeaning(found), ranked: true } : { results: byKeyword(), ranked: false });
   }
   const byId = new Map(pool.map((d) => [d.id, d]));
   const top = ranked.slice(0, RESULTS);
