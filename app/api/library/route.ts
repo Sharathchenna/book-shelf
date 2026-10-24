@@ -2,6 +2,7 @@ import { requireOwner } from "@/lib/auth/session";
 import { lookOf, TOPICS, type ShelfBook } from "@/lib/bookcase";
 import { getClippings, getShelf } from "@/lib/data";
 import { allProgress, highlightCounts, listFiles, shelfItemFor } from "@/lib/library";
+import { ARTICLE_EPUB_BUILD } from "@/lib/library-types";
 import { shelfBooks } from "@/lib/shelving";
 import { shelfConfig } from "@/shelf.config";
 
@@ -27,6 +28,9 @@ export async function GET(request: Request) {
 
   const fileOf = new Map<string, string>();
   for (const file of files) {
+    // An article's copy from an older conversion, with nothing highlighted in it, is made again
+    // when next opened (/api/books/clips), so the app goes to the opener rather than to it.
+    if (file.clipId && (file.build ?? 1) < ARTICLE_EPUB_BUILD && !(marks.get(file.id) ?? 0)) continue;
     const of = file.paperId ?? file.clipId ?? shelfItemFor(file, items);
     if (of && !fileOf.has(of)) fileOf.set(of, file.id);
   }

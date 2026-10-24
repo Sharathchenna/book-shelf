@@ -74,6 +74,19 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
     }
   };
 
+  /**
+   * A picture's own address. An image resizer's (Next.js's /_next/image, Vercel's /_vercel/image)
+   * names the original in its `url`, which the original's CDN serves without the site's bot
+   * checks, at full size.
+   */
+  const picture = (href: string | null) => {
+    const src = abs(href);
+    if (!src) return undefined;
+    const url = new URL(src);
+    const original = /\/_(next|vercel)\/image\/?$/.test(url.pathname) ? url.searchParams.get("url") : null;
+    return (original && abs(original)) || src;
+  };
+
   const walk = (el: Element, depth = 0) => {
     // Loose text and inline elements between blocks (pages set as text with <br><br> between
     // paragraphs, like Paul Graham's) make paragraphs together, broken at a blank line.
@@ -108,6 +121,11 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
       if (node.nodeType !== 1) continue;
       const child = node as Element;
       const tag = child.tagName.toUpperCase();
+      if (tag === "VIDEO") {
+        flush();
+        video(child);
+        continue;
+      }
       if (SKIP.has(tag)) continue;
       if (tag === "BR") {
         const last = run.findLast((n) => n.nodeType !== 3 || n.textContent?.trim());
@@ -137,7 +155,12 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
         for (const p of paras) push("blockquote", inline([p], abs));
       } else if (tag === "PRE") out.push({ type: "atomic", text: "", depth: 0, styles: [], links: [], code: child.textContent ?? "" });
       else if (tag === "HR") out.push({ type: "atomic", text: "", depth: 0, styles: [], links: [], divider: true });
-      else if (tag === "FIGURE" || tag === "PICTURE") figure(Array.from(child.querySelectorAll("img")), child.querySelector("figcaption"));
+      else if (tag === "FIGURE" || tag === "PICTURE") {
+        const imgs = Array.from(child.querySelectorAll("img"));
+        const clip = child.querySelector("video");
+        if (!imgs.length && clip) video(clip);
+        figure(imgs, child.querySelector("figcaption"));
+      }
       else if (tag === "IMG") figure([child], null);
       else if (tag === "TABLE") table(child);
       else if (child.querySelector(BLOCKS)) walk(child, depth);
@@ -167,7 +190,7 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
       const raw = [img.getAttribute("src"), img.getAttribute("data-src"), img.getAttribute("data-lazy-src"), firstSrcset(img.getAttribute("srcset"))].find(
         (v) => v && !v.startsWith("data:"),
       );
-      const src = abs(raw ?? null);
+      const src = picture(raw ?? null);
       const width = Number(img.getAttribute("width")) || undefined;
       // Tracking pixels and spacers.
       if (!src || (width !== undefined && width < 8)) return [];
@@ -179,6 +202,19 @@ function toBlocks(root: Element, base: string): ArticleBlock[] {
       run.styles.push({ offset: 0, length: run.text.length, style: "Italic" });
       push("unstyled", run);
     }
+  };
+
+  /**
+   * A video can't play in the ebook: its still (the poster) stands in for it if it has one, with
+   * a link that plays it.
+   */
+  const video = (el: Element) => {
+    const poster = picture(el.getAttribute("poster"));
+    if (poster) out.push({ type: "atomic", text: "", depth: 0, styles: [], links: [], media: [{ src: poster }] });
+    const src = abs(el.getAttribute("src") ?? el.querySelector("source[src]")?.getAttribute("src") ?? null);
+    if (!src) return;
+    const text = "▶ Play the video";
+    out.push({ type: "unstyled", text, depth: 0, styles: [], links: [{ offset: 0, length: text.length, url: src }] });
   };
 
   const table = (el: Element) => {
