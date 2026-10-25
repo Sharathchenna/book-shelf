@@ -8,8 +8,11 @@ export type LibrarySection = { title: string; chars: number };
  */
 export const ARXIV_EPUB_BUILD = 2;
 
-/** The version of the article-to-EPUB conversion (x-article-epub.ts: X Articles and web articles); older ones are rebuilt when opened. */
-export const ARTICLE_EPUB_BUILD = 4;
+/**
+ * The version of the article-to-EPUB conversion (x-article-epub.ts: X Articles and web articles); older ones are rebuilt when opened.
+ * 5: videos, audio and players (YouTube, Vimeo, Spotify…) play in place, posts on X as cards, equations, code in colour, tables with their links.
+ */
+export const ARTICLE_EPUB_BUILD = 5;
 
 export type BookFormat = "epub" | "pdf";
 

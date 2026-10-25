@@ -88,7 +88,8 @@ function guardPaginatorRender() {
 /**
  * EPUBs can carry JavaScript, and foliate's iframes must allow scripts (a WebKit limitation),
  * so every document is cleaned before it renders: no <script>, no inline event handlers,
- * no javascript: URLs, no nested frames. The /reader CSP blocks any script from elsewhere.
+ * no javascript: URLs, no nested frames but the players an article keeps (PLAYERS). The /reader
+ * CSP blocks any script from elsewhere.
  */
 export function sanitizeBook(transformTarget: EventTarget | undefined) {
   transformTarget?.addEventListener("data", (event) => {
@@ -98,6 +99,9 @@ export function sanitizeBook(transformTarget: EventTarget | undefined) {
     detail.data = Promise.resolve(detail.data).then((data) => (typeof data === "string" ? sanitize(data, type) : data));
   });
 }
+
+/** The players an article's ebook embeds (web-article.ts player()), also allowed by the /reader CSP's frame-src. */
+const PLAYERS = /^https:\/\/(www\.youtube-nocookie\.com\/embed\/|player\.vimeo\.com\/video\/|www\.loom\.com\/embed\/|open\.spotify\.com\/embed\/|embed\.podcasts\.apple\.com\/|w\.soundcloud\.com\/player\/)/;
 
 function sanitize(source: string, type: string): string {
   const mime = type.includes("svg") ? "image/svg+xml" : type.includes("xhtml") ? "application/xhtml+xml" : "text/html";
@@ -109,7 +113,12 @@ function sanitize(source: string, type: string): string {
       .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
       .replace(/javascript:/gi, "");
   }
-  doc.querySelectorAll("script, iframe, object, embed, frame, frameset, form").forEach((el) => el.remove());
+  doc.querySelectorAll("script, object, embed, frame, frameset, form").forEach((el) => el.remove());
+  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
+    if (!PLAYERS.test(frame.getAttribute("src") ?? "")) frame.remove();
+    // Cross-origin, and kept from the book's page: no navigating it, no forms.
+    else frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-presentation");
+  }
   for (const el of doc.querySelectorAll("*")) {
     for (const attr of [...el.attributes]) {
       const name = attr.name.toLowerCase();

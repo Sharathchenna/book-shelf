@@ -22,6 +22,7 @@
     "@opennextjs/cloudflare": "1.20.10",
     "@typesafe-ai/sdk": "^0.6.0",
     "foliate-js": "^1.0.1",
+    "highlight.js": "^11.12.0",
     "jose": "^6.2.12",
     "jpeg-js": "^0.4.4",
     "jszip": "^3.10.2",
@@ -30,7 +31,8 @@
     "pdfjs-dist": "^6.4.299",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "temml": "^0.14.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

@@ -6,11 +6,15 @@
  * byline, with the pictures fetched through the site (the reader's pages can't load them from
  * other sites). Its blocks (lib/x-article-types.ts) map onto plain XHTML.
  */
-import { articleMinutes, type XArticle, type XArticleBlock } from "@/lib/x-article-types";
+import { articleMinutes, type ArticleEmbed, type ArticleVideo, type XArticle, type XArticleBlock, type XArticlePost } from "@/lib/x-article-types";
 import { webArticle, type WebPage } from "./web-article";
 
 /** The page, and its headings for the contents: the top level the article uses, and those under it. */
-type Page = { title: string; html: string[]; headings: { id: string; label: string; sub: boolean }[]; lede: boolean };
+type Page = { title: string; html: string[]; headings: { id: string; label: string; sub: boolean }[]; lede: boolean; highlight: Highlighter };
+/** Code set in colour, by its language or (failing that) a confident guess, with the language's name if it was named; null when there's no code. */
+type Highlighter = ((code: string, lang?: string) => { html: string; name?: string }) | null;
+/** Text with its styles, links and equations: a block's, or a table cell's. */
+type Run = Pick<XArticleBlock, "text" | "styles" | "links" | "maths">;
 type Image = { path: string; data: Blob; cover?: boolean };
 
 const XHTML = "http://www.w3.org/1999/xhtml";
@@ -30,8 +34,35 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   if ("error" in article) throw new Error(article.error);
   if (!article.blocks) throw new Error("Couldn't fetch the article.");
 
+  // ---- posts on X the page only had the words of: who, when, and their pictures and videos ----
+  const posts = article.blocks.filter((b) => b.post && !b.post.date);
+  if (posts.length) onProgress("Fetching the posts it quotes…");
+  await pool(posts.slice(0, 40), 4, async (b) => {
+    const id = /\/status\/(\d+)/.exec(b.post!.url)?.[1];
+    const res = id ? await fetch(`/api/books/clips/post?id=${id}`).catch(() => null) : null;
+    const post = res?.ok ? ((await res.json().catch(() => null)) as XArticlePost | null) : null;
+    if (post?.handle) b.post = { ...post, text: post.text ?? b.post!.text };
+  });
+
+  // ---- equations and code, set by their libraries, loaded only for an article that has them ----
+  const runs: Run[] = article.blocks.flatMap((b) => [b, ...(b.table ?? []).flatMap((row) => row.cells)]);
+  if (runs.some((r) => r.maths?.some((m) => !m.mathml && m.tex))) {
+    const { default: temml } = await import("temml");
+    for (const math of runs.flatMap((r) => r.maths ?? [])) {
+      if (math.mathml || !math.tex) continue;
+      try {
+        const made = new DOMParser().parseFromString(temml.renderToString(math.tex, { displayMode: math.display, throwOnError: true }), "text/html").querySelector("math");
+        if (made) math.mathml = new XMLSerializer().serializeToString(made);
+      } catch {
+        // Left as its TeX, in code type.
+      }
+    }
+  }
+  const highlight = article.blocks.some((b) => b.code !== undefined || b.type === "code-block") ? await highlighter() : null;
+
   // ---- pictures, fetched first so the pages can point at them ----
-  const sources = [article.cover, ...article.blocks.flatMap((b) => (b.media ?? []).map((m) => m.src))].filter((s): s is string => Boolean(s));
+  const stills = article.blocks.flatMap((b) => [...(b.media ?? []), ...(b.post?.media ?? []), ...(b.video?.poster ? [{ src: b.video.poster }] : [])].map((m) => m.src));
+  const sources = [article.cover, ...stills].filter((s): s is string => Boolean(s));
   const wanted = [...new Set(sources)].slice(0, MAX_IMAGES);
   const images: Image[] = [];
   const pathOf = new Map<string, string>();
@@ -52,7 +83,7 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   onProgress("Setting the page…");
   // The contents list the top level of headings the article uses, with the next level under each.
   const top = HEADINGS.find((t) => article.blocks.some((b) => b.type === t && b.text.trim()));
-  const page: Page = { title: article.title.trim(), html: [masthead(article, pathOf)], headings: [], lede: false };
+  const page: Page = { title: article.title.trim(), html: [masthead(article, pathOf)], headings: [], lede: false, highlight };
   const blocks = article.blocks;
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -67,7 +98,7 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
     if (block.type === "code-block") {
       let end = i;
       while (end + 1 < blocks.length && blocks[end + 1].type === "code-block") end++;
-      page.html.push(`<pre><code>${esc(blocks.slice(i, end + 1).map((b) => b.text).join("\n"))}</code></pre>`);
+      page.html.push(codeHtml(blocks.slice(i, end + 1).map((b) => b.text).join("\n"), undefined, highlight));
       i = end;
       continue;
     }
@@ -85,12 +116,13 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   const oebps = zip.folder("OEBPS")!;
   oebps.file("style.css", STYLE);
   for (const image of images) oebps.file(image.path, image.data);
+  const body = page.html.join("\n");
   oebps.file(
     FILE,
-    `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body class="xarticle">${page.html.join("\n")}</body></html>`,
+    `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body class="xarticle">${body}</body></html>`,
   );
   oebps.file("nav.xhtml", nav(page, article.title));
-  oebps.file("content.opf", opf(article, images));
+  oebps.file("content.opf", opf(article, images, body));
   return zip.generateAsync({ type: "blob", mimeType: "application/epub+zip", compression: "DEFLATE" });
 }
 
@@ -151,17 +183,19 @@ function blockHtml(block: XArticleBlock, page: Page, top: string | undefined, pa
           .map((path) => `<figure><img src="${path}" alt=""/></figure>`)
           .join("");
       }
-      if (block.post) {
-        const { post } = block;
-        const by = post.handle ? `${esc(post.name ?? post.handle)} (@${esc(post.handle)})` : "A post on X";
-        return `<blockquote class="post">${post.text ? `<p>${esc(post.text).replace(/\n/g, "<br/>")}</p>` : ""}<p class="post-by">— <a href="${esc(post.url)}">${by}</a></p></blockquote>`;
-      }
-      if (block.code !== undefined) return `<pre><code>${esc(block.code.replace(/^```[^\n]*\n?/, "").replace(/\n?```\s*$/, ""))}</code></pre>`;
+      if (block.video) return `<figure class="video">${videoHtml(block.video, pathOf)}</figure>`;
+      if (block.audio) return `<figure class="audio"><audio src="${esc(block.audio.src)}" controls="controls" preload="metadata"><a href="${esc(block.audio.src)}">Listen ↗</a></audio></figure>`;
+      if (block.embed) return embedHtml(block.embed);
+      if (block.post) return postHtml(block.post, pathOf);
+      if (block.code !== undefined) return codeHtml(block.code.replace(/^```[^\n]*\n?/, "").replace(/\n?```\s*$/, ""), block.lang, page.highlight);
       if (block.divider) return `<hr/>`;
       if (block.table) {
-        const [head, ...rows] = block.table;
-        const row = (cells: string[], tag: string) => `<tr>${cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join("")}</tr>`;
-        return `<table><thead>${row(head, "th")}</thead><tbody>${rows.map((r) => row(r, "td")).join("")}</tbody></table>`;
+        // Heading rows at the top make the table's head; any further down are headings among the rows.
+        const lead = block.table.findIndex((r) => !r.head);
+        const split = lead === -1 ? block.table.length : lead;
+        const row = (r: (typeof block.table)[number]) => `<tr>${r.cells.map((c) => (r.head ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`)).join("")}</tr>`;
+        const head = block.table.slice(0, split).map(row).join("");
+        return `<div class="table"><table>${head ? `<thead>${head}</thead>` : ""}<tbody>${block.table.slice(split).map(row).join("")}</tbody></table></div>`;
       }
       return "";
     default: {
@@ -199,11 +233,12 @@ function list(items: XArticleBlock[]): string {
 
 const TAGS: Record<string, string> = { Bold: "strong", Italic: "em", Strikethrough: "s", Code: "code" };
 
-/** A block's text with its bold, italic and links: split wherever a style or link starts or ends. */
-function inline(block: XArticleBlock): string {
+/** A block's text with its bold, italic, links and equations: split wherever one starts or ends. */
+function inline(block: Run): string {
   const { text } = block;
+  const maths = block.maths ?? [];
   const cuts = new Set([0, text.length]);
-  for (const r of [...block.styles, ...block.links]) {
+  for (const r of [...block.styles, ...block.links, ...maths]) {
     cuts.add(Math.max(0, r.offset));
     cuts.add(Math.min(text.length, r.offset + r.length));
   }
@@ -212,8 +247,14 @@ function inline(block: XArticleBlock): string {
   for (let i = 0; i < points.length - 1; i++) {
     const [from, to] = [points[i], points[i + 1]];
     if (from === to) continue;
-    let piece = esc(text.slice(from, to)).replace(/\n/g, "<br/>");
     const covers = (r: { offset: number; length: number }) => r.offset <= from && r.offset + r.length >= to;
+    // An equation is drawn whole, where it starts; its TeX stands in if it couldn't be made.
+    const math = maths.find(covers);
+    if (math) {
+      if (from === math.offset) html += math.mathml ?? `<code class="tex">${esc(text.slice(math.offset, math.offset + math.length))}</code>`;
+      continue;
+    }
+    let piece = esc(text.slice(from, to)).replace(/\n/g, "<br/>");
     for (const style of block.styles.filter(covers)) {
       const tag = TAGS[style.style];
       if (tag) piece = `<${tag}>${piece}</${tag}>`;
@@ -223,6 +264,80 @@ function inline(block: XArticleBlock): string {
     html += piece;
   }
   return html;
+}
+
+/** highlight.js with its common languages, and a guess only when it's a confident one. */
+async function highlighter(): Promise<Highlighter> {
+  const { default: hljs } = await import("highlight.js/lib/common");
+  return (code, lang) => {
+    try {
+      const known = lang ? hljs.getLanguage(lang) : undefined;
+      if (lang && known) return { html: hljs.highlight(code, { language: lang, ignoreIllegals: true }).value, name: known.name };
+      if (!lang && code.length < 20_000) {
+        const guess = hljs.highlightAuto(code);
+        if (guess.relevance >= 10) return { html: guess.value };
+      }
+    } catch {
+      // Plain, below.
+    }
+    return { html: esc(code) };
+  };
+}
+
+/** A code block: set in colour, its language named over it (one the highlighter knows), scrolled sideways rather than wrapped. */
+function codeHtml(code: string, lang: string | undefined, highlight: Highlighter): string {
+  const { html, name } = highlight ? highlight(code, lang) : { html: esc(code), name: undefined };
+  return `<pre${name ? ` data-lang="${esc(name)}"` : ""}><code>${html}</code></pre>`;
+}
+
+/** A video, played from the page's site: its still until it plays, or playing by itself, silent and looping, as a GIF would. */
+function videoHtml(video: ArticleVideo, pathOf: Map<string, string>): string {
+  const poster = video.poster && pathOf.get(video.poster);
+  const shape = video.width && video.height ? ` style="aspect-ratio: ${video.width} / ${video.height}"` : "";
+  const flags = video.loop ? ` autoplay="autoplay" muted="muted" loop="loop"` : "";
+  return `<video src="${esc(video.src)}" controls="controls" preload="metadata" playsinline="playsinline"${flags}${poster ? ` poster="${poster}"` : ""}${shape}><a href="${esc(video.src)}">Play the video ↗</a></video>`;
+}
+
+const PLAYERS: Record<ArticleEmbed["kind"], string> = {
+  youtube: "YouTube", vimeo: "Vimeo", loom: "Loom", spotify: "Spotify", apple: "Apple Podcasts", soundcloud: "SoundCloud", interactive: "",
+};
+
+/**
+ * Another site's player where the page had it, with a line under it to its page there (for when
+ * there's no connection, or to watch it on its own). An interactive chart or sandbox is a link.
+ */
+function embedHtml(embed: ArticleEmbed): string {
+  const name = PLAYERS[embed.kind];
+  if (embed.kind === "interactive") {
+    const host = new URL(embed.url).hostname.replace(/^www\./, "");
+    return `<p class="interactive"><a href="${esc(embed.url)}"><span class="what">Interactive</span> ${esc(embed.title ?? host)} ↗</a></p>`;
+  }
+  const shape = embed.height ? `height: ${embed.height}px` : `aspect-ratio: ${embed.aspect ?? 16 / 9}`;
+  const frame = `<iframe src="${esc(embed.player)}" title="${esc(embed.title ?? name)}" allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write" allowfullscreen="allowfullscreen" referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe>`;
+  return `<figure class="embed ${embed.kind}"><div class="frame" style="${shape}">${frame}</div><figcaption><a href="${esc(embed.url)}">${embed.title ? `${esc(embed.title)} · ` : ""}${name} ↗</a></figcaption></figure>`;
+}
+
+const shortDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
+
+/** A post on X as a card: who and when, what it says, its pictures and videos, and a link to it. */
+function postHtml(post: XArticlePost, pathOf: Map<string, string>): string {
+  const date = post.date ? shortDate.format(new Date(`${post.date}T00:00:00Z`)) : "";
+  const head = post.handle
+    ? `<p class="post-head"><span class="post-name">${esc(post.name ?? post.handle)}</span> <span class="post-meta">@${esc(post.handle)}${date ? ` · ${esc(date)}` : ""}</span></p>`
+    : "";
+  const media = (post.media ?? []).flatMap((m) => {
+    const still = pathOf.get(m.src);
+    if (m.video) return [videoHtml({ src: m.video, ...(m.src ? { poster: m.src } : {}), ...(m.width && m.height ? { width: m.width, height: m.height } : {}), ...(m.loop ? { loop: true } : {}) }, pathOf)];
+    return still ? [`<img src="${still}" alt=""/>`] : [];
+  });
+  return [
+    `<blockquote class="post">`,
+    head,
+    post.text ? `<p>${esc(post.text).replace(/\n/g, "<br/>")}</p>` : "",
+    media.length ? `<div class="post-media${media.length > 1 ? " grid" : ""}">${media.join("")}</div>` : "",
+    `<p class="post-by"><a href="${esc(post.url)}">${post.handle ? "View on X" : "A post on X"} ↗</a></p>`,
+    `</blockquote>`,
+  ].join("");
 }
 
 /** Escaped for XHTML, without the control characters XML doesn't allow. */
@@ -245,7 +360,9 @@ function nav(page: Page, title: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(title)}</title></head><body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol><li><a href="${FILE}">${esc(title)}</a></li>${items.join("")}</ol></nav></body></html>`;
 }
 
-function opf(article: XArticle, images: Image[]): string {
+function opf(article: XArticle, images: Image[], page: string): string {
+  // What the page holds that readers may want warning of: equations, and what plays from the web.
+  const properties = [/<math\b/.test(page) && "mathml", /<(video|audio|iframe)\b/.test(page) && "remote-resources"].filter(Boolean).join(" ");
   const mime = (path: string) => ({ jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[path.split(".").pop()!] ?? "image/png";
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" xml:lang="en">
@@ -260,7 +377,7 @@ function opf(article: XArticle, images: Image[]): string {
 <manifest>
 <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 <item id="css" href="style.css" media-type="text/css"/>
-<item id="page" href="${FILE}" media-type="application/xhtml+xml"/>
+<item id="page" href="${FILE}" media-type="application/xhtml+xml"${properties ? ` properties="${properties}"` : ""}/>
 ${images.map((img, i) => `<item id="i${i}" href="${img.path}" media-type="${mime(img.path)}"${img.cover ? ' properties="cover-image"' : ""}/>`).join("\n")}
 </manifest>
 <spine><itemref idref="page"/></spine>
@@ -316,17 +433,49 @@ const STYLE = `
 .xarticle figure img { display: block; max-width: 100%; height: auto; max-height: 640px; margin: 0 auto; border-radius: 6px; }
 .xarticle img { max-width: 100%; height: auto; }
 .xarticle blockquote { margin: 1.2em 0; padding-left: 1.1em; border-left: 2px solid var(--rule-c); font-style: italic; opacity: .85; }
-.xarticle blockquote.post { font-style: normal; border: 1px solid var(--rule-c); border-radius: 10px; padding: .9em 1.1em; }
-.xarticle .post-by { font-size: .82em; margin: .4em 0 0; }
-.xarticle pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; font-size: .74em; line-height: 1.6; white-space: pre-wrap; padding: 1em 1.2em; border-radius: 8px; background: rgba(127,127,127,.1); }
+.xarticle blockquote.post { font-style: normal; opacity: 1; border: 1px solid var(--rule-c); border-radius: 12px; padding: 1em 1.15em; margin: 1.6em 0; }
+.xarticle blockquote.post p { margin: 0 0 .6em; }
+.xarticle .post-head, .xarticle .post-by { font-family: system-ui, -apple-system, sans-serif !important; text-align: start !important; }
+.xarticle .post-head * { font-family: inherit !important; }
+.xarticle .post-head { font-size: .78em; line-height: 1.35 !important; }
+.xarticle .post-name { font-weight: 600; }
+.xarticle .post-meta { color: var(--muted-c); }
+.xarticle .post-media { display: grid; gap: 4px; margin: .8em 0 .6em; border-radius: 10px; overflow: hidden; }
+.xarticle .post-media.grid { grid-template-columns: 1fr 1fr; }
+.xarticle .post-media img, .xarticle .post-media video { display: block; width: 100%; height: 100%; max-height: 520px; object-fit: cover; border-radius: 0; margin: 0; }
+.xarticle .post-by { font-size: .72em; margin: .2em 0 0 !important; }
+.xarticle .post-by a { color: var(--muted-c) !important; text-decoration: none; }
+.xarticle figure.video video { display: block; width: 100%; height: auto; max-height: 640px; border-radius: 8px; background: rgba(127,127,127,.12); }
+.xarticle figure.audio audio { display: block; width: 100%; }
+.xarticle figure.embed .frame { width: 100%; border-radius: 10px; overflow: hidden; background: rgba(127,127,127,.12); }
+.xarticle figure.embed iframe { display: block; width: 100%; height: 100%; border: 0; }
+.xarticle figure.embed figcaption { margin-top: .55em; font: .66em/1.4 system-ui, -apple-system, sans-serif; text-align: start; }
+.xarticle figure.embed figcaption a, .xarticle .interactive a { color: var(--muted-c) !important; text-decoration: none; }
+.xarticle .interactive a { display: block; padding: .85em 1.1em; border: 1px solid var(--rule-c); border-radius: 10px; font: .78em/1.4 system-ui, -apple-system, sans-serif; color: inherit !important; }
+.xarticle .interactive .what { color: var(--rubric-c); font-weight: 600; margin-right: .4em; }
+.xarticle math[display="block"] { display: block math; margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
+.xarticle math { font-size: 1.05em; }
+.xarticle code.tex { white-space: pre-wrap; }
+.xarticle pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; font-size: .74em; line-height: 1.6; white-space: pre !important; overflow-x: auto; tab-size: 4; text-align: start !important; hyphens: none !important; padding: 1em 1.2em; border-radius: 8px; background: rgba(127,127,127,.1); }
+.xarticle pre[data-lang]::before { content: attr(data-lang); display: block; margin: -.2em 0 .6em; font: 600 .78em/1 system-ui, -apple-system, sans-serif; letter-spacing: .02em; color: var(--muted-c); }
 .xarticle pre *, .xarticle code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; }
 .xarticle code { font-size: .82em; padding: .1em .3em; border-radius: 4px; background: rgba(127,127,127,.1); }
-.xarticle pre code { padding: 0; background: none; font-size: 1em; }
+.xarticle pre code { padding: 0; background: none; font-size: 1em; white-space: inherit !important; }
+.xarticle .hljs-keyword, .xarticle .hljs-built_in, .xarticle .hljs-meta, .xarticle .hljs-selector-tag, .xarticle .hljs-doctag { color: color-mix(in srgb, #b4235a 70%, currentColor); }
+.xarticle .hljs-string, .xarticle .hljs-regexp, .xarticle .hljs-addition, .xarticle .hljs-meta .hljs-string { color: color-mix(in srgb, #2f8a3e 70%, currentColor); }
+.xarticle .hljs-number, .xarticle .hljs-literal, .xarticle .hljs-symbol, .xarticle .hljs-variable.language_ { color: color-mix(in srgb, #c46a10 70%, currentColor); }
+.xarticle .hljs-title, .xarticle .hljs-title.function_, .xarticle .hljs-section, .xarticle .hljs-selector-id, .xarticle .hljs-selector-class { color: color-mix(in srgb, #2b6cc4 70%, currentColor); }
+.xarticle .hljs-type, .xarticle .hljs-title.class_, .xarticle .hljs-attr, .xarticle .hljs-attribute, .xarticle .hljs-property, .xarticle .hljs-name { color: color-mix(in srgb, #8a4fc2 70%, currentColor); }
+.xarticle .hljs-comment, .xarticle .hljs-quote, .xarticle .hljs-deletion { color: var(--muted-c); font-style: italic; }
+.xarticle .hljs-emphasis { font-style: italic; }
+.xarticle .hljs-strong { font-weight: 600; }
 .xarticle ul, .xarticle ol { padding-left: 1.3em; margin: 0 0 .95em; }
 .xarticle li { margin: 0 0 .4em; }
 .xarticle li::marker { color: var(--muted-c); }
-.xarticle table { border-collapse: collapse; font-family: system-ui, -apple-system, sans-serif; font-size: .74em; margin: 1.4em 0; width: 100%; }
-.xarticle th, .xarticle td { border-bottom: 1px solid var(--rule-c); padding: .45em .6em; text-align: left; vertical-align: top; font-family: inherit !important; }
+.xarticle div.table { overflow-x: auto; margin: 1.4em 0; }
+.xarticle table { border-collapse: collapse; font-family: system-ui, -apple-system, sans-serif; font-size: .74em; margin: 0; min-width: 100%; }
+.xarticle th, .xarticle td { border-bottom: 1px solid var(--rule-c); padding: .45em .6em; text-align: left !important; vertical-align: top; font-family: inherit !important; min-width: 6em; max-width: 26em; hyphens: none !important; }
+.xarticle th code, .xarticle td code { font-size: .92em; }
 .xarticle th { font-weight: 600; }
 .xarticle hr { border: 0; text-align: center; margin: 2.2em 0; }
 .xarticle hr::after { content: "· · ·"; letter-spacing: .5em; color: var(--muted-c); }

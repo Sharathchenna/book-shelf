@@ -15,19 +15,66 @@ export type XArticleBlock = {
   /** Bold, Italic, Strikethrough, Code; offsets and lengths in UTF-16 units, as in `text`. */
   styles: { offset: number; length: number; style: string }[];
   links: { offset: number; length: number; url: string }[];
+  /**
+   * Equations in the text (web articles): the range holds the equation's TeX (or its words), for
+   * search and quotes, and the page shows it as MathML, made from the TeX when the page had no
+   * MathML of its own.
+   */
+  maths?: ArticleMath[];
   /** What an atomic block holds. */
   media?: { src: string; width?: number; height?: number }[];
   post?: XArticlePost;
   code?: string;
+  /** The code's language, as the page named it (`js`, `python`). */
+  lang?: string;
   divider?: boolean;
-  /** A data table's cells, row by row (web articles). */
-  table?: string[][];
+  /** A data table's rows, each cell with its own bold, italic and links (web articles). */
+  table?: { head: boolean; cells: Pick<XArticleBlock, "text" | "styles" | "links">[] }[];
+  /** A video file, played from where the page has it. */
+  video?: ArticleVideo;
+  /** An audio file, played from where the page has it. */
+  audio?: { src: string };
+  /** A player from another site, in place (YouTube, Vimeo, Spotify…), or a link to an interactive one. */
+  embed?: ArticleEmbed;
+};
+
+export type ArticleMath = { offset: number; length: number; display: boolean; mathml?: string; tex?: string };
+
+export type ArticleVideo = {
+  src: string;
+  poster?: string;
+  width?: number;
+  height?: number;
+  /** A clip that plays by itself, silent and on a loop, as a GIF would: so it does in the ebook. */
+  loop?: boolean;
+};
+
+export type ArticleEmbed = {
+  /** The player the page embedded. `interactive` is a chart, notebook or sandbox, linked rather than shown. */
+  kind: "youtube" | "vimeo" | "loom" | "spotify" | "apple" | "soundcloud" | "interactive";
+  /** The player's address, set to play in the ebook. */
+  player: string;
+  /** Where to watch or listen to it on its own site. */
+  url: string;
+  title?: string;
+  /** Its height in CSS px, for an audio player; videos are 16:9 unless the page said otherwise. */
+  height?: number;
+  aspect?: number;
 };
 
 export type ArticleBlock = XArticleBlock;
 
 /** A post the article embeds. */
-export type XArticlePost = { url: string; name?: string; handle?: string; text?: string };
+export type XArticlePost = {
+  url: string;
+  name?: string;
+  handle?: string;
+  text?: string;
+  /** ISO date. */
+  date?: string;
+  /** Its pictures, and its videos as their stills with the file to play. */
+  media?: { src: string; video?: string; loop?: boolean; width?: number; height?: number }[];
+};
 
 export type XArticle = {
   /** The post an X Article was published as, or a web article's clipping id. */

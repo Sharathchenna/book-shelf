@@ -196,7 +196,10 @@ fun NavigatorHost(
         },
     )
     DisposableEffect(book) {
+        // An article's videos and players load from the web (a PDF has no web pages).
+        val media = if (book.isPdf) null else WebMedia(activity)
         onDispose {
+            media?.close()
             val fm = activity.supportFragmentManager
             fm.findFragmentByTag(tag)?.let { fm.beginTransaction().remove(it).commitNowAllowingStateLoss() }
             controller.navigator = null

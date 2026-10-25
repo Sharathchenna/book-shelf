@@ -94,13 +94,38 @@ async function fetchTweet(id: string): Promise<RawTweet | null> {
 /** X's largest size that isn't the original: plenty for a page, and a fraction of the bytes. */
 const large = (src: string) => (/^https:\/\/pbs\.twimg\.com\/media\//.test(src) && !src.includes("?") ? `${src}?name=large` : src);
 
-/** A post an article embeds, by FxTwitter: who wrote it and what it says. */
-async function embeddedPost(id: string): Promise<XArticlePost> {
+type FxMedia = { type?: string; url?: string; thumbnail_url?: string; width?: number; height?: number; formats?: { url?: string; container?: string; bitrate?: number }[] };
+
+/** A video's file at about 720p, which streams well on a tablet; X's best (often 1080p) when it offers no other. */
+const playable = (m: FxMedia) =>
+  (m.formats ?? [])
+    .filter((f) => f.container === "mp4" && f.url && (f.bitrate ?? 0) <= 2_500_000)
+    .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0]?.url ?? m.url;
+
+/** A post an article embeds, by FxTwitter: who wrote it, when, what it says and its pictures and videos. */
+export async function embeddedPost(id: string): Promise<XArticlePost> {
   const url = `https://x.com/i/status/${id}`;
   const res = await fetch(`https://api.fxtwitter.com/status/${id}`, { signal: AbortSignal.timeout(6000) }).catch(() => null);
-  const post = res?.ok ? ((await res.json()) as { tweet?: { text?: string; author?: { name?: string; screen_name?: string } } }).tweet : undefined;
+  const post = res?.ok
+    ? ((await res.json()) as { tweet?: { text?: string; created_timestamp?: number; author?: { name?: string; screen_name?: string }; media?: { all?: FxMedia[] } } }).tweet
+    : undefined;
   if (!post?.author?.screen_name) return { url };
-  return { url: `https://x.com/${post.author.screen_name}/status/${id}`, name: post.author.name, handle: post.author.screen_name, text: post.text };
+  const media = (post.media?.all ?? []).flatMap((m) => {
+    const size = { ...(m.width ? { width: m.width } : {}), ...(m.height ? { height: m.height } : {}) };
+    if (m.type === "photo" && m.url) return [{ src: large(m.url), ...size }];
+    // A video's still, with its file; a "GIF" is a silent video on a loop.
+    const video = playable(m);
+    if ((m.type === "video" || m.type === "gif") && m.thumbnail_url && video) return [{ src: m.thumbnail_url, video, ...(m.type === "gif" ? { loop: true } : {}), ...size }];
+    return [];
+  });
+  return {
+    url: `https://x.com/${post.author.screen_name}/status/${id}`,
+    name: post.author.name,
+    handle: post.author.screen_name,
+    text: post.text,
+    ...(post.created_timestamp ? { date: new Date(post.created_timestamp * 1000).toISOString().slice(0, 10) } : {}),
+    ...(media.length ? { media } : {}),
+  };
 }
 
 /** The article published as post `tweetId`, or null when there's none or X won't say. */

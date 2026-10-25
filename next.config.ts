@@ -18,11 +18,12 @@ const readerCsp = [
   "style-src 'self' 'unsafe-inline' blob:",
   "img-src 'self' blob: data: https://*.r2.cloudflarestorage.com https://covers.openlibrary.org",
   "font-src 'self' blob: data:",
-  // Narrated chapters stream straight from R2.
-  "media-src 'self' blob: https://*.r2.cloudflarestorage.com",
+  // Narrated chapters stream straight from R2; an article's videos and audio play from their own sites.
+  "media-src 'self' blob: https:",
   // The narrator's voice model (Kokoro) downloads from Hugging Face once, then stays in the browser's cache.
   "connect-src 'self' blob: https://*.r2.cloudflarestorage.com https://huggingface.co https://*.huggingface.co https://*.hf.co",
-  "frame-src 'self' blob:",
+  // An article's players, where the page had them (web-article.ts player()); foliate.ts lets only these through.
+  "frame-src 'self' blob: https://www.youtube-nocookie.com https://player.vimeo.com https://www.loom.com https://open.spotify.com https://embed.podcasts.apple.com https://w.soundcloud.com",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
