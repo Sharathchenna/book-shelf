@@ -42,6 +42,7 @@ function readPage({ html, url: base, clip }: WebPage, minWords: number): XArticl
   // Parsed inert: nothing in it runs or loads. The <base> makes its links and pictures absolute.
   const doc = new DOMParser().parseFromString(`<base href="${base.replace(/"/g, "&quot;")}">${html}`, "text/html");
   revealStreamed(doc);
+  absolutize(doc, base);
   const kept = setAside(doc, html, base);
   const parsed = new Readability(doc, { keepClasses: false }).parse();
   if (!parsed?.content) return { error: "Couldn't find an article on that page." };
@@ -54,13 +55,15 @@ function readPage({ html, url: base, clip }: WebPage, minWords: number): XArticl
   const title = clip.title ?? parsed.title?.trim() ?? clip.url;
   // The title Readability leaves at the top would repeat the book's own title page.
   if (blocks[0] && /^header/.test(blocks[0].type) && same(blocks[0].text, title)) blocks.shift();
-  const pictured = blocks.some((b) => b.media?.length);
+  // The lead picture (the one the feed or the share card shows) heads the article, unless it's one of the article's own.
+  const pictures = blocks.flatMap((b) => b.media ?? []).map((m) => pictureKey(m.src));
+  const lead = clip.image && !BLANK.test(clip.image) && !pictures.includes(pictureKey(clip.image)) ? clip.image : undefined;
   return {
     id: clip.id,
     url: clip.url,
     title,
     preview: clip.excerpt ?? parsed.excerpt ?? "",
-    ...(clip.image && !pictured && !BLANK.test(clip.image) ? { cover: clip.image } : {}),
+    ...(lead ? { cover: lead } : {}),
     ...(clip.published ? { published: clip.published.slice(0, 10) } : {}),
     author: { name: clip.author ?? parsed.byline?.trim() ?? clip.source },
     site: parsed.siteName?.trim() || clip.source,
@@ -68,8 +71,54 @@ function readPage({ html, url: base, clip }: WebPage, minWords: number): XArticl
   };
 }
 
+/**
+ * Every address in the page made absolute against the article's own. Readability does this too,
+ * but against the document's base, which in the browser can be the page doing the reading (this
+ * site), not the <base> given it: a picture at "/_image?…" was asked of this site, and missed.
+ */
+function absolutize(doc: Document, base: string) {
+  const fix = (v: string) => {
+    if (/^(#|data:|blob:|javascript:|mailto:)/i.test(v.trim())) return v;
+    try {
+      return new URL(v.trim(), base).href;
+    } catch {
+      return v;
+    }
+  };
+  for (const attr of ["src", "data-src", "data-lazy-src", "href", "poster", "data-poster"]) {
+    for (const el of Array.from(doc.querySelectorAll(`[${attr}]`))) {
+      if (el.tagName.toUpperCase() === "BASE") continue;
+      el.setAttribute(attr, fix(el.getAttribute(attr)!));
+    }
+  }
+  for (const attr of ["srcset", "data-srcset"]) {
+    for (const el of Array.from(doc.querySelectorAll(`[${attr}]`))) {
+      // Candidates part at a comma and a space: an image CDN's own addresses have commas in them (Substack's "w_1456,c_limit").
+      const set = el.getAttribute(attr)!.split(/,\s+/).map((part) => {
+        const [url, ...rest] = part.trim().split(/\s+/);
+        return url ? [fix(url), ...rest].join(" ") : "";
+      });
+      el.setAttribute(attr, set.filter(Boolean).join(", "));
+    }
+  }
+}
+
 /** Placeholder pictures some sites (WordPress) give as their share image. */
 const BLANK = /\/blank\.(jpe?g|png|gif)\b/i;
+
+/**
+ * What picture an address is, whatever size or format it's asked for in: the name of the file
+ * behind an image CDN's or resizer's address (Substack's, Astro's /_image, Next's), which carry
+ * the original's address inside their own.
+ */
+function pictureKey(src: string): string {
+  let text = src;
+  try {
+    text = decodeURIComponent(src);
+  } catch {}
+  const files = [...text.matchAll(/([\w.-]{6,})\.(?:png|jpe?g|webp|gif|avif|svg)\b/gi)];
+  return files.at(-1)?.[1].toLowerCase() ?? src;
+}
 
 const same = (a: string, b: string) => a.toLowerCase().replace(/\W+/g, "") === b.toLowerCase().replace(/\W+/g, "");
 
@@ -258,7 +307,7 @@ function toBlocks(root: Element, base: string, kept: Kept): ArticleBlock[] {
 const BLOCKS = "p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, figure, img, table, hr, div, section";
 const INLINE = new Set(["A", "ABBR", "B", "BIG", "CITE", "CODE", "DEL", "DFN", "EM", "FONT", "I", "INS", "KBD", "MARK", "Q", "S", "SAMP", "SMALL", "SPAN", "STRIKE", "STRONG", "SUB", "SUP", "TIME", "TT", "U", "VAR"]);
 
-const firstSrcset = (srcset: string | null) => srcset?.split(",")[0]?.trim().split(/\s+/)[0] ?? null;
+const firstSrcset = (srcset: string | null) => srcset?.split(/,\s+/)[0]?.trim().split(/\s+/)[0] ?? null;
 
 type Inline = Pick<ArticleBlock, "text" | "styles" | "links" | "maths">;
 

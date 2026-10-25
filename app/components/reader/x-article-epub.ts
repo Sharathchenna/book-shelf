@@ -106,12 +106,20 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   const pathOf = new Map<string, string>();
   let done = 0;
   await pool(wanted, 4, async (src) => {
-    const res = await fetch(`/api/books/clips/asset?url=${encodeURIComponent(src)}`).catch(() => null);
+    // Tried again after a moment: a site's picture server can turn a request away now and then (a 5xx, a timeout).
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 3 && !res?.ok; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 800 * attempt));
+      res = await fetch(`/api/books/clips/asset?url=${encodeURIComponent(src)}`).catch(() => null);
+      if (res && [403, 404, 413, 415].includes(res.status)) break;
+    }
     if (res?.ok) {
       const type = res.headers.get("content-type") ?? "image/jpeg";
       const ext = type.includes("png") ? "png" : type.includes("gif") ? "gif" : type.includes("webp") ? "webp" : "jpg";
-      const path = `images/p${images.length + 1}.${ext}`;
-      images.push({ path, data: await res.blob(), cover: src === article.cover });
+      // Named by its place in the list, not by how many have arrived: four come at once, and two named alike would be one file.
+      const path = `images/p${wanted.indexOf(src) + 1}.${ext}`;
+      const data = await res.blob();
+      images.push({ path, data, cover: src === article.cover });
       pathOf.set(src, path);
     }
     onProgress(`Fetching pictures ${++done} of ${wanted.length}…`);
