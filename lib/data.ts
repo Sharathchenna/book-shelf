@@ -55,10 +55,10 @@ export async function replaceShelf(books: StoredBook[], updatedAt: string) {
 
 // ---- clippings ---------------------------------------------------------------------------------
 
-/** Leaves out what the owner has put in the Trash (lib/triage.ts). */
-const NOT_TRASHED = "id NOT IN (SELECT id FROM triage WHERE trashed_at IS NOT NULL)";
+/** Leaves out what the owner has put in the Trash, and what they only opened from their Feed (lib/triage.ts). */
+const NOT_TRASHED = "id NOT IN (SELECT id FROM triage WHERE trashed_at IS NOT NULL OR place = 'feed')";
 
-/** Newest first, or only one kind; what's in the Trash only when asked for. */
+/** Newest first, or only one kind; what's in the Trash (or only in the Feed) only when asked for. */
 export async function getClippings(kind?: ClipKind, { trashed = false } = {}): Promise<ClippingsData> {
   const database = await db();
   const where = [kind ? "kind = ?1" : "", trashed ? "" : NOT_TRASHED].filter(Boolean).join(" AND ");

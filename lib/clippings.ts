@@ -10,6 +10,9 @@ export const CLIP_LABEL: Record<ClipKind, string> = {
   paper: "Papers",
   newsletter: "Newsletters",
   tweet: "Tweets",
+  // Read in the app (lib/media.ts); the site has no page of them yet.
+  video: "Videos",
+  podcast: "Podcasts",
 };
 
 /** `present` (kinds with at least one clipping) in page order. Kinds without any get no page or link. */
@@ -17,5 +20,6 @@ export const inPageOrder = (present: ClipKind[]) => CLIP_KINDS.filter((kind) => 
 
 export const clipPath = (kind: ClipKind) => `/${CLIP_LABEL[kind].toLowerCase()}`;
 
-/** Clippings the owner reads in the site's reader as an ebook: X Articles, and articles and newsletter issues from anywhere. */
-export const readableClip = (clip: Pick<Clip, "kind" | "xArticle">) => Boolean(clip.xArticle) || clip.kind === "article" || clip.kind === "newsletter";
+/** Clippings the owner reads in the reader as an ebook: X Articles, articles and newsletter issues from anywhere, and videos and episodes (their transcripts). */
+export const readableClip = (clip: Pick<Clip, "kind" | "xArticle">) =>
+  Boolean(clip.xArticle) || clip.kind === "article" || clip.kind === "newsletter" || clip.kind === "video" || clip.kind === "podcast";

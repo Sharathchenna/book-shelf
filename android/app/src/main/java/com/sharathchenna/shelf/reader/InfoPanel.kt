@@ -95,6 +95,25 @@ fun InfoPanel(fileId: String, onSummarize: (() -> Unit)?) {
             }
         }
 
+        // Subscribe to where it's from, as Reader's Info offers: the site's feed, found for you.
+        val host = hostOf(book?.url)?.takeIf { book?.kind != "book" && book?.kind != "tweet" }
+        if (host != null) {
+            val feeds by shelf.feed.collectAsState()
+            val following = feeds?.feeds.orEmpty().any { f -> hostOf(f.site ?: f.url)?.removePrefix("www.") == host || hostOf(f.url) == host }
+            var subscribing by remember { mutableStateOf(false) }
+            var said by remember { mutableStateOf<String?>(null) }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(enabled = !following && !subscribing, onClick = {
+                    subscribing = true
+                    scope.launch {
+                        said = runCatching { shelf.subscribe(book!!.url!!) }.fold({ "Subscribed to ${it.title}: its new posts come to the Feed." }, { it.message ?: "Couldn't find its feed." })
+                        subscribing = false
+                    }
+                }) { Text(if (following) "Subscribed to $host" else if (subscribing) "Finding its feed…" else "Subscribe to $host") }
+                said?.let { Text(it, fontFamily = Sans, fontSize = 13.sp, color = paper.muted) }
+            }
+        }
+
         val about = book?.dek ?: clip?.excerpt ?: clip?.enriched?.summary
         if (about != null || onSummarize != null) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

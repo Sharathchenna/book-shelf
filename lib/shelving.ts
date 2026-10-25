@@ -9,9 +9,9 @@ import { listFiles, shelfItemFor } from "./library";
 import type { LibraryBook } from "./library-types";
 import type { Clip, Item } from "./types";
 
-/** The books and clippings in the owner's Trash (lib/triage.ts). */
+/** The books and clippings in the owner's Trash, or only opened from their Feed (lib/triage.ts). */
 async function trashedIds(): Promise<Set<string>> {
-  const { results } = await (await db()).prepare("SELECT id FROM triage WHERE trashed_at IS NOT NULL").all<{ id: string }>();
+  const { results } = await (await db()).prepare("SELECT id FROM triage WHERE trashed_at IS NOT NULL OR place = 'feed'").all<{ id: string }>();
   return new Set(results.map((r) => r.id));
 }
 
@@ -112,7 +112,7 @@ function bookAbout(item: Item): Shelvable {
 }
 
 function clipAbout(clip: Clip): Shelvable {
-  const what = { article: "Article", paper: "Research paper", newsletter: "Newsletter issue", tweet: "Post on X" }[clip.kind];
+  const what = { article: "Article", paper: "Research paper", newsletter: "Newsletter issue", tweet: "Post on X", video: "Video", podcast: "Podcast episode" }[clip.kind];
   return {
     id: clip.id,
     about: [
@@ -135,7 +135,8 @@ const CHARS_PER_MINUTE = 1150;
 
 /**
  * Everything on the bookcase, for anyone: no reading progress, which the owner's browser adds
- * (/api/me); and nothing the owner has put in the Trash, unless asked for (the app's Trash).
+ * (/api/me); and nothing the owner has put in the Trash or only opened from their Feed, unless
+ * asked for (the app, which has its Trash and its Feed).
  */
 export async function shelfBooks({ trashed = false } = {}): Promise<{ books: ShelfBook[]; unsorted: number }> {
   const [{ items: shelved }, { items: clips }, placed, files, hidden] = await Promise.all([

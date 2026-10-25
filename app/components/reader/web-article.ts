@@ -18,12 +18,27 @@ export type WebPage = {
   /** Where the page ended up, after redirects. */
   url: string;
   clip: { id: string; url: string; title?: string; author?: string; source: string; excerpt?: string; image?: string; published?: string };
+  /** The post as its feed carried it (lib/feeds.ts), read instead when the page has too little on it. */
+  fallback?: string;
 };
 
 /** Fewer words than this is a page whose article never reached the HTML (a script shell). */
 const MIN_WORDS = 80;
 
-export function webArticle({ html, url: base, clip }: WebPage): XArticle | { error: string } {
+export function webArticle(page: WebPage): XArticle | { error: string } {
+  const read = readPage(page, MIN_WORDS);
+  // Too little on the page (a short post, or one its scripts fill in): the feed's own copy, short or not.
+  if ("error" in read && page.fallback) {
+    const fed = readPage({ ...page, html: `<html><head><title>${(page.clip.title ?? "").replace(/</g, "&lt;")}</title></head><body><article>${page.fallback}</article></body></html>` }, FEED_MIN_WORDS);
+    if (!("error" in fed)) return fed;
+  }
+  return read;
+}
+
+/** A post from a feed is read however short it is, as long as it says something. */
+const FEED_MIN_WORDS = 8;
+
+function readPage({ html, url: base, clip }: WebPage, minWords: number): XArticle | { error: string } {
   // Parsed inert: nothing in it runs or loads. The <base> makes its links and pictures absolute.
   const doc = new DOMParser().parseFromString(`<base href="${base.replace(/"/g, "&quot;")}">${html}`, "text/html");
   revealStreamed(doc);
@@ -34,7 +49,7 @@ export function webArticle({ html, url: base, clip }: WebPage): XArticle | { err
   const body = new DOMParser().parseFromString(`<base href="${base.replace(/"/g, "&quot;")}"><body>${parsed.content}</body>`, "text/html").body;
   const blocks = toBlocks(body, base, kept);
   const words = blocks.reduce((n, b) => n + (b.text.match(/\S+/g)?.length ?? 0), 0);
-  if (words < MIN_WORDS) return { error: "The page has too little text to read: its article may load with scripts, or sit behind a login." };
+  if (words < minWords) return { error: "The page has too little text to read: its article may load with scripts, or sit behind a login." };
 
   const title = clip.title ?? parsed.title?.trim() ?? clip.url;
   // The title Readability leaves at the top would repeat the book's own title page.

@@ -23,6 +23,44 @@ const MAX_IMAGES = 150;
 const HEADINGS = ["header-one", "header-two", "header-three"];
 const fullDate = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
 
+/**
+ * A transcript's script (lib/media.ts): a paragraph's time plays the video (YouTube's player, by
+ * its messages) or the episode's audio from there, and the paragraph being said is marked as it
+ * plays. In CDATA, as the page is XHTML; the web reader leaves scripts out, so there it's text.
+ */
+const TRANSCRIPT_SCRIPT = `<script type="text/javascript">//<![CDATA[
+(function () {
+  var frame = document.querySelector('iframe[src*="youtube"]');
+  var audio = document.querySelector('audio');
+  var cues = Array.prototype.slice.call(document.querySelectorAll('p.cue'));
+  function send(func, args) { if (frame && frame.contentWindow) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: func, args: args || [] }), '*'); }
+  function seek(t) {
+    if (audio) { audio.currentTime = t; audio.play(); }
+    else if (frame) { send('seekTo', [t, true]); send('playVideo'); }
+  }
+  function mark(t) {
+    var now = null;
+    for (var i = 0; i < cues.length; i++) { if (parseFloat(cues[i].getAttribute('data-t')) <= t + 0.5) now = cues[i]; else break; }
+    for (var j = 0; j < cues.length; j++) { if (cues[j] === now) cues[j].classList.add('now'); else cues[j].classList.remove('now'); }
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('button.ts') : null;
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    seek(parseFloat(b.getAttribute('data-t')));
+  }, true);
+  if (audio) audio.addEventListener('timeupdate', function () { mark(audio.currentTime); });
+  if (frame) {
+    var listen = function () { if (frame.contentWindow) frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'shelf', channel: 'widget' }), '*'); };
+    frame.addEventListener('load', listen);
+    setTimeout(listen, 1500);
+    window.addEventListener('message', function (e) {
+      try { var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; if (d && d.info && typeof d.info.currentTime === 'number') mark(d.info.currentTime); } catch (err) {}
+    });
+  }
+})();
+//]]></script>`;
+
 export async function buildArticleEpub(clipId: string, onProgress: (label: string) => void): Promise<Blob> {
   onProgress("Fetching the article…");
   const res = await fetch(`/api/books/clips/source?clipId=${encodeURIComponent(clipId)}`);
@@ -116,7 +154,8 @@ export async function buildArticleEpub(clipId: string, onProgress: (label: strin
   const oebps = zip.folder("OEBPS")!;
   oebps.file("style.css", STYLE);
   for (const image of images) oebps.file(image.path, image.data);
-  const body = page.html.join("\n");
+  // A transcript's times play the video or episode from there, and the paragraph playing is marked.
+  const body = page.html.join("\n") + (blocks.some((b) => b.cue !== undefined) ? TRANSCRIPT_SCRIPT : "");
   oebps.file(
     FILE,
     `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="${XHTML}" xmlns:epub="http://www.idpf.org/2007/ops" lang="en"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body class="xarticle">${body}</body></html>`,
@@ -158,6 +197,10 @@ function masthead(article: XArticle, pathOf: Map<string, string>): string {
 }
 
 function blockHtml(block: XArticleBlock, page: Page, top: string | undefined, pathOf: Map<string, string>): string {
+  if (block.cue !== undefined) {
+    const t = Math.max(0, Math.floor(block.cue));
+    return `<p class="cue" id="t${t}" data-t="${t}"><button class="ts" type="button" data-t="${t}">${esc(block.cueLabel ?? "")}</button> ${inline(block)}</p>`;
+  }
   switch (block.type) {
     case "header-one":
     case "header-two":
@@ -362,7 +405,7 @@ function nav(page: Page, title: string): string {
 
 function opf(article: XArticle, images: Image[], page: string): string {
   // What the page holds that readers may want warning of: equations, and what plays from the web.
-  const properties = [/<math\b/.test(page) && "mathml", /<(video|audio|iframe)\b/.test(page) && "remote-resources"].filter(Boolean).join(" ");
+  const properties = [/<math\b/.test(page) && "mathml", /<(video|audio|iframe)\b/.test(page) && "remote-resources", /<script\b/.test(page) && "scripted"].filter(Boolean).join(" ");
   const mime = (path: string) => ({ jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[path.split(".").pop()!] ?? "image/png";
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" xml:lang="en">
@@ -447,6 +490,10 @@ const STYLE = `
 .xarticle .post-by a { color: var(--muted-c) !important; text-decoration: none; }
 .xarticle figure.video video { display: block; width: 100%; height: auto; max-height: 640px; border-radius: 8px; background: rgba(127,127,127,.12); }
 .xarticle figure.audio audio { display: block; width: 100%; }
+/* A transcript (lib/media.ts): each paragraph's time in the margin's small type, the one being said marked. */
+.xarticle p.cue { border-radius: 6px; transition: background .3s; }
+.xarticle p.cue.now { background: rgba(255, 216, 77, .2); }
+.xarticle p.cue button.ts { font: 600 .68em/1 system-ui, -apple-system, sans-serif !important; color: var(--rubric, #1e7a58) !important; background: none !important; border: 0; padding: .2em .55em .2em 0; margin: 0; cursor: pointer; font-variant-numeric: tabular-nums; vertical-align: .1em; }
 .xarticle figure.embed .frame { width: 100%; border-radius: 10px; overflow: hidden; background: rgba(127,127,127,.12); }
 .xarticle figure.embed iframe { display: block; width: 100%; height: 100%; border: 0; }
 .xarticle figure.embed figcaption { margin-top: .55em; font: .66em/1.4 system-ui, -apple-system, sans-serif; text-align: start; }

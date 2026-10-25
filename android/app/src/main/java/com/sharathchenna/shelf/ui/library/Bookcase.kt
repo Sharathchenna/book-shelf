@@ -61,6 +61,8 @@ enum class Tag(val label: String, val icon: String?, val test: (ShelfBook) -> Bo
     Papers("Papers", null, { it.kind == "paper" }),
     Articles("Articles", null, { it.kind == "article" || it.kind == "newsletter" }),
     Posts("Tweets", null, { it.kind == "tweet" }),
+    Videos("Videos", null, { it.kind == "video" }),
+    Podcasts("Podcasts", null, { it.kind == "podcast" }),
 }
 
 /** Whether a book matches every word typed, against its title, author, topic, tags and year. */
@@ -77,4 +79,4 @@ fun fmtMinutes(m: Int): String = when {
     else -> "${Math.round(m / 60.0)} h"
 }
 
-val KIND_LABEL = mapOf("book" to "Book", "article" to "Article", "paper" to "Paper", "newsletter" to "Newsletter", "tweet" to "Tweet")
+val KIND_LABEL = mapOf("book" to "Book", "article" to "Article", "paper" to "Paper", "newsletter" to "Newsletter", "tweet" to "Tweet", "video" to "Video", "podcast" to "Podcast")

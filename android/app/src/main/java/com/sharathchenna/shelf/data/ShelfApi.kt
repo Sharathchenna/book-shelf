@@ -151,6 +151,58 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
         check(http.patch("/api/docs/$id") { auth(); contentType(ContentType.Application.Json); setBody(edit) })
     }
 
+    /** Sends a video's captions, fetched on the tablet, for the site to keep (/api/media/[id]). */
+    suspend fun sendCaptions(clipId: String, text: VideoText) {
+        check(http.post("/api/media/$clipId") { auth(); contentType(ContentType.Application.Json); setBody(text) })
+    }
+
+    // ---- the Feed --------------------------------------------------------------------------
+
+    suspend fun feed(): FeedData = check(http.get("/api/feeds") { auth() }).body()
+
+    @Serializable
+    private data class Url(val url: String)
+
+    @Serializable
+    private data class Subscribed(val feed: Feed)
+
+    /** Subscribes to a site (its own feed found) or a feed's link. */
+    suspend fun subscribe(url: String): Feed =
+        check(http.post("/api/feeds") { auth(); contentType(ContentType.Application.Json); setBody(Url(url)) }).body<Subscribed>().feed
+
+    @Serializable
+    private data class Id(val id: String)
+
+    suspend fun unsubscribe(id: String) {
+        check(http.delete("/api/feeds") { auth(); contentType(ContentType.Application.Json); setBody(Id(id)) })
+    }
+
+    /** Checks the feeds for new items. */
+    suspend fun refreshFeeds() {
+        check(http.post("/api/feeds/refresh") { auth() })
+    }
+
+    @Serializable
+    private data class Seen(val ids: List<String>? = null, val seen: Boolean? = null, val all: Boolean? = null)
+
+    suspend fun markFeed(ids: List<String>, seen: Boolean) {
+        check(http.post("/api/feeds/items") { auth(); contentType(ContentType.Application.Json); setBody(Seen(ids, seen)) })
+    }
+
+    suspend fun markFeedAllSeen() {
+        check(http.post("/api/feeds/items") { auth(); contentType(ContentType.Application.Json); setBody(Seen(all = true)) })
+    }
+
+    @Serializable
+    private data class PlaceBody(val place: String)
+
+    @Serializable
+    private data class Placed(val clipId: String)
+
+    /** A Feed item opened ("feed") or saved (inbox, later, archive): answers with its clipping's id. */
+    suspend fun placeFeedItem(id: String, place: String): String =
+        check(http.post("/api/feeds/items/$id") { auth(); contentType(ContentType.Application.Json); setBody(PlaceBody(place)) }).body<Placed>().clipId
+
     // ---- adding a file ---------------------------------------------------------------------
 
     @Serializable

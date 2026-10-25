@@ -13,7 +13,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +35,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sharathchenna.shelf.BuildConfig
+
+/** A clipping's id in its opener's address, /reader/clip/<id>. */
+private val CLIP_PATH = Regex("^/reader/clip/([\\w.:-]+)$")
 
 /** A book's id in the site's reader address, /reader/<id>. */
 private val BOOK_PATH = Regex("^/reader/([a-z0-9]{8,32})$")
@@ -54,12 +59,21 @@ fun WebScreen(path: String, title: String, onBack: () -> Unit, onBook: ((String)
     var pageTitle by remember { mutableStateOf(title) }
     var token by remember { mutableStateOf<String?>(null) }
     var pendingFiles by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var preparing by remember { mutableStateOf<String?>(null) }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         pendingFiles?.onReceiveValue(uri?.let { arrayOf(it) } ?: emptyArray())
         pendingFiles = null
     }
     val site = Uri.parse(BuildConfig.SITE_URL)
-    LaunchedEffect(Unit) { token = shelf.tokens.token() }
+    LaunchedEffect(Unit) {
+        // A video's opener waits for its captions, fetched here if the site couldn't (Shelf.ensureCaptions).
+        CLIP_PATH.find(path)?.groupValues?.get(1)?.takeIf { onBook != null && shelf.clip(it)?.media?.let { m -> m.kind == "youtube" && !m.transcript } == true }?.let { clipId ->
+            preparing = "Fetching the video's captions…"
+            shelf.ensureCaptions(clipId)
+            preparing = null
+        }
+        token = shelf.tokens.token()
+    }
 
     BackHandler { if (web?.canGoBack() == true && onBook == null) web?.goBack() else onBack() }
 
@@ -69,6 +83,7 @@ fun WebScreen(path: String, title: String, onBack: () -> Unit, onBook: ((String)
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
         )
         if (progress < 1f) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        preparing?.let { Text(it, modifier = Modifier.fillMaxWidth().padding(24.dp), color = com.sharathchenna.shelf.ui.theme.LocalPaper.current.muted) }
         val t = token ?: return@Column
         AndroidView(
             modifier = Modifier.fillMaxSize(),

@@ -158,7 +158,7 @@ private enum class View(val label: String, val icon: ImageVector) {
 }
 
 /** The filters by kind, and those by where you are with a thing. */
-private val KINDS = listOf(Tag.Books, Tag.Articles, Tag.Papers, Tag.Posts)
+private val KINDS = listOf(Tag.Books, Tag.Articles, Tag.Papers, Tag.Posts, Tag.Videos, Tag.Podcasts)
 private val STATES = listOf(Tag.Reading, Tag.Finished, Tag.Favourite, Tag.Quick)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -182,7 +182,8 @@ private fun Bookcase(library: Library?, selected: String?, nav: NavHostControlle
     var query by rememberSaveable { mutableStateOf("") }
 
     val everything = library?.books.orEmpty()
-    val kept = remember(everything) { everything.filter { it.trashed == null } }
+    // Not what's in the Trash, nor what was only opened from the Feed.
+    val kept = remember(everything) { everything.filter { it.trashed == null && it.place != "feed" } }
     val placeCounts = remember(everything) { Place.entries.associateWith { p -> everything.count { p.holds(it) } } }
     // The shelves and the topics show the whole library; the rows, one place at a time.
     val books = remember(everything, place, view) { if (view == View.List) everything.filter { place.holds(it) } else kept }

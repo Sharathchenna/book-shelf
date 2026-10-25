@@ -75,7 +75,7 @@ fun AddButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * Adding to the library: a link (an article, a paper, a newsletter issue or a tweet) clipped as the
+ * Adding to the library: a link (an article, a paper, a newsletter issue, a post, a video or an episode) clipped as the
  * share sheet does, the one on the clipboard offered first; or an EPUB or PDF from the tablet,
  * uploaded as the site's upload does. The new thing shows once the library is fetched again.
  */
@@ -124,7 +124,7 @@ fun AddLinkSheet(onDismiss: () -> Unit, onOpen: (fileId: String) -> Unit = {}) {
 
             Text("A LINK", style = Eyebrow, color = paper.faint, modifier = Modifier.padding(top = 4.dp))
             Text(
-                "An article, a paper, a newsletter issue or a tweet. Shelf reads its details and files it with the clippings.",
+                "An article, a paper, a newsletter issue, a post, a YouTube video or a podcast episode. Shelf reads its details and files it in your Inbox.",
                 fontFamily = Sans, fontSize = 14.5.sp, lineHeight = 21.sp, color = paper.muted,
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

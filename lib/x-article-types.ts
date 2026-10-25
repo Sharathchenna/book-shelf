@@ -36,6 +36,9 @@ export type XArticleBlock = {
   audio?: { src: string };
   /** A player from another site, in place (YouTube, Vimeo, Spotify…), or a link to an interactive one. */
   embed?: ArticleEmbed;
+  /** A transcript's paragraph (lib/media.ts): the moment it starts in the video or episode, in seconds, and that time as shown ("12:03"). */
+  cue?: number;
+  cueLabel?: string;
 };
 
 export type ArticleMath = { offset: number; length: number; display: boolean; mathml?: string; tex?: string };

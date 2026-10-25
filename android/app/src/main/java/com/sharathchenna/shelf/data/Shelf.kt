@@ -22,6 +22,11 @@ import java.time.Instant
 class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenStore, private val db: LocalDb) {
     private val libraryFile = File(context.filesDir, "library.json")
     private val pendingTriageFile = File(context.filesDir, "triage-pending.json")
+    private val feedFile = File(context.filesDir, "feed.json")
+    private val _feed = MutableStateFlow<FeedData?>(null)
+
+    /** The Feed as last fetched (kept on the device), or null before the first fetch. */
+    val feed: StateFlow<FeedData?> = _feed.asStateFlow()
     private val _library = MutableStateFlow<Library?>(null)
 
     /** The library as last fetched (kept on the device), or null before the first fetch. */
@@ -51,6 +56,8 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         db.clearAllTables()
         libraryFile.delete()
         pendingTriageFile.delete()
+        feedFile.delete()
+        _feed.value = null
         File(context.filesDir, "books").deleteRecursively()
         _library.value = null
     }
@@ -122,6 +129,60 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
     private suspend fun queueTriage(change: TriageChange) = withContext(Dispatchers.IO) {
         pendingTriageFile.writeText(ShelfJson.encodeToString(pendingTriage() + change))
         Sync.soon(context)
+    }
+
+    /**
+     * A YouTube video's captions, made sure of before it's opened: when the site couldn't fetch
+     * them, the tablet does and sends them. Quietly does nothing if YouTube has none to give.
+     */
+    suspend fun ensureCaptions(clipId: String) = withContext(Dispatchers.IO) {
+        val media = clip(clipId)?.media ?: return@withContext
+        if (media.kind != "youtube" || media.transcript || media.id == null) return@withContext
+        val text = runCatching { youtubeCaptions(api.http, media.id) }.getOrNull() ?: return@withContext
+        if (text.transcript.isEmpty()) return@withContext
+        runCatching { api.sendCaptions(clipId, text) }.onSuccess { runCatching { refreshLibrary() } }
+    }
+
+    // ---- the Feed --------------------------------------------------------------------------
+
+    /** The Feed: the copy on the device at once, then the site's; with `check`, the feeds are checked for new items first. */
+    suspend fun loadFeed(check: Boolean = false) = withContext(Dispatchers.IO) {
+        if (_feed.value == null && feedFile.exists()) _feed.value = runCatching { ShelfJson.decodeFromString<FeedData>(feedFile.readText()) }.getOrNull()
+        if (check) runCatching { api.refreshFeeds() }
+        val fresh = api.feed()
+        _feed.value = fresh
+        feedFile.writeText(ShelfJson.encodeToString(FeedData.serializer(), fresh))
+    }
+
+    /** Marks Feed items seen or unseen, here at once. */
+    suspend fun markFeed(ids: List<String>, seen: Boolean) {
+        val set = ids.toSet()
+        _feed.value = _feed.value?.let { f -> f.copy(items = f.items.map { if (it.id in set) it.copy(seen = seen) else it }) }
+        runCatching { api.markFeed(ids, seen) }
+    }
+
+    suspend fun markFeedAllSeen() {
+        _feed.value = _feed.value?.let { f -> f.copy(items = f.items.map { it.copy(seen = true) }) }
+        runCatching { api.markFeedAllSeen() }
+    }
+
+    /** A Feed item opened or saved: its clipping made and placed, the library fetched again. Returns the clipping's id. */
+    suspend fun placeFeedItem(item: FeedItem, place: String): String {
+        val clipId = api.placeFeedItem(item.id, place)
+        _feed.value = _feed.value?.let { f -> f.copy(items = f.items.map { if (it.id == item.id) it.copy(seen = true, clipId = clipId) else it }) }
+        runCatching { refreshLibrary() }
+        return clipId
+    }
+
+    suspend fun subscribe(url: String): Feed {
+        val feed = api.subscribe(url)
+        runCatching { loadFeed() }
+        return feed
+    }
+
+    suspend fun unsubscribe(id: String) {
+        api.unsubscribe(id)
+        runCatching { loadFeed() }
     }
 
     // ---- opening a book --------------------------------------------------------------------

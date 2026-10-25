@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { appleEpisodeId, audioEpisode, fetchAppleEpisode, fetchYouTube, isAudioFile, putMediaText, youtubeId } from "./media";
 import { pwcByArxiv } from "./pwc";
 import type { Clip, ClipKind, PaperCode, QuotedPost } from "./types";
 import { fetchXArticle } from "./x-article";
@@ -35,7 +36,21 @@ const NEWSLETTER_HOSTS = [
 /** Substack and beehiiv on custom domains still load their own assets. (Not signup forms: blogs embed those too.) */
 const NEWSLETTER_MARKERS = /substackcdn\.com|media\.beehiiv\.com/;
 
-export type ClipOptions = { kind?: ClipKind; note?: string; tags?: string[]; via?: Clip["via"] };
+export type ClipOptions = {
+  kind?: ClipKind;
+  note?: string;
+  tags?: string[];
+  via?: Clip["via"];
+  /** What its feed said of it (lib/feeds.ts): the page's own details win, these fill in when it gives none or can't be read. */
+  feedItem?: {
+    title?: string;
+    author?: string;
+    summary?: string;
+    image?: string;
+    published?: string;
+    audio?: { url: string; seconds?: number; transcript?: { url: string; type?: string } };
+  };
+};
 
 /**
  * Fetches and describes a link (or "arxiv:<id>", or a bare DOI). Clipping one that's already
@@ -45,13 +60,37 @@ export type ClipOptions = { kind?: ClipKind; note?: string; tags?: string[]; via
 export async function clipLink(input: string, options: ClipOptions, existing?: Clip | null): Promise<Clip> {
   const url = expand(input.trim());
   if (!/^https?:\/\//i.test(url)) throw new Error("That doesn't look like a link.");
-  const fetched = tweetId(url)
+  const fed = options.feedItem;
+  // A video or an episode: its details, with its description and transcript kept beside it (lib/media.ts).
+  const media = youtubeId(url)
+    ? await fetchYouTube(youtubeId(url)!)
+    : appleEpisodeId(url)
+      ? await fetchAppleEpisode(url)
+      : fed?.audio
+        ? await audioEpisode(url, fed.audio, { ...fed, source: undefined })
+        : isAudioFile(url)
+          ? await audioEpisode(url, { url }, {})
+          : null;
+  const fetched: Fetched = media
+    ? media.clip
+    : tweetId(url)
     ? await fetchTweet(url)
     : arxivId(url)
       ? await fetchArxiv(arxivId(url)!)
       : doiOf(url)
         ? await fetchCrossref(doiOf(url)!)
-        : await fetchPage(url, options.kind);
+        : await fetchPage(url, options.kind).catch((error: Error) => {
+            // A feed's item whose page turns the clipper away is kept as its feed described it.
+            if (!fed?.title) throw error;
+            const kept: Fetched = { kind: "article", url, title: fed.title, source: new URL(url).host.replace(/^www\./, "") };
+            return kept;
+          });
+  if (fed) {
+    fetched.author ??= fed.author;
+    fetched.excerpt ??= fed.summary;
+    fetched.image ??= fed.image;
+    fetched.published ??= fed.published?.slice(0, 10);
+  }
   if (fetched.paper) await fillFromSemanticScholar(fetched);
   if (fetched.paper?.arxiv) fetched.paper.pwc = (await paperCode(fetched.paper.arxiv)) ?? existing?.paper?.pwc;
 
@@ -66,6 +105,7 @@ export async function clipLink(input: string, options: ClipOptions, existing?: C
   };
   if (!clip.note) delete clip.note;
   if (!clip.via) delete clip.via;
+  if (media) await putMediaText(clip.id, media.text);
   return clip;
 }
 
@@ -83,6 +123,10 @@ export function expand(arg: string): string {
 
 /** Stable id from the URL without tracking parameters, fragment or trailing slash. */
 export function clipId(url: string): string {
+  const video = youtubeId(url);
+  if (video) return `yt-${video}`;
+  const episode = appleEpisodeId(url);
+  if (episode) return `apple-${episode}`;
   const tweet = tweetId(url);
   if (tweet) return `tweet-${tweet}`;
   const arxiv = arxivId(url);

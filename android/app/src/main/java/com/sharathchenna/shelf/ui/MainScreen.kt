@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoStories
@@ -65,12 +67,14 @@ import com.sharathchenna.shelf.ui.theme.Serif
 
 /**
  * The app's places: Home (what you're reading, and what's saved to read), the Library (every book
- * and clipping, on the shelves), Notes (the day's review and every highlight), Search, and
+ * and clipping, in its Inbox, Later and Archive, or on the shelves), the Feed (what the sites
+ * subscribed to have published), Notes (the day's review and every highlight), Search, and
  * Settings. `aliases` are the older tabs' keys, still sent by the launcher's shortcuts.
  */
 private enum class Tab(val key: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector, val aliases: Set<String> = emptySet()) {
     Home("home", "Home", Icons.Outlined.Home, Icons.Filled.Home, setOf("clippings")),
     Library("library", "Library", Icons.Outlined.AutoStories, Icons.Filled.AutoStories),
+    Feed("feed", "Feed", Icons.Outlined.RssFeed, Icons.Filled.RssFeed),
     Notes("notes", "Notes", Icons.Outlined.EditNote, Icons.Filled.EditNote, setOf("review")),
     Search("search", "Search", Icons.Outlined.Search, Icons.Filled.Search),
     Settings("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings, setOf("downloads")),
@@ -94,6 +98,7 @@ fun MainScreen(nav: NavHostController, initialTab: String) {
                 when (tab) {
                     Tab.Home -> HomeScreen(nav, onAdd = { adding = true }, onNotes = { tab = Tab.Notes })
                     Tab.Library -> LibraryPane(nav)
+                    Tab.Feed -> com.sharathchenna.shelf.ui.screens.FeedScreen(nav)
                     Tab.Notes -> NotesScreen(nav)
                     Tab.Search -> SearchScreen(nav)
                     Tab.Settings -> SettingsScreen(nav)

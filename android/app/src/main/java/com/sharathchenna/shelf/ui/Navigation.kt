@@ -30,6 +30,9 @@ val LocalShelf = staticCompositionLocalOf<Shelf> { error("No shelf") }
 
 @Serializable data class Listen(val fileId: String, val section: Int = -1)
 
+/** The Daily Digest: what's new, a card at a time (ui/screens/Digest.kt). */
+@Serializable data object Digest
+
 /**
  * A page of the site in the app's web view, signed in as this device. With `prepare`, it's an
  * article's or paper's opener (/reader/clip/…, /reader/paper/…), which builds the ebook in the
@@ -75,6 +78,7 @@ private fun SignedIn(launchTarget: MutableStateFlow<String?>) {
                 onOpenNext = { next -> nav.popBackStack(); openBook(context, nav, next) },
             )
         }
+        composable<Digest> { com.sharathchenna.shelf.ui.screens.DigestScreen(nav, onExit = { nav.popBackStack() }) }
         composable<Listen> { entry ->
             val route = entry.toRoute<Listen>()
             ListenScreen(route.fileId, startSection = route.section, onBack = { nav.popBackStack() })

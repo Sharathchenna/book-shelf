@@ -22,6 +22,9 @@ const LAYOUT: Record<ClipKind, { list: string; Card: (props: { clip: Clip; reada
   // An even grid, so the letter-style cards and their postmarks line up.
   newsletter: { list: "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>li>a:first-child]:h-full", Card: NewsletterCard },
   tweet: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: TweetCard },
+  // Videos and episodes look like the articles they're read as.
+  video: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: ArticleCard },
+  podcast: { list: "columns-1 gap-4 sm:columns-2 lg:columns-3 [&>li]:mb-4 [&>li]:break-inside-avoid", Card: ArticleCard },
 };
 
 /** Every clipping of one kind, each with that kind's card. */

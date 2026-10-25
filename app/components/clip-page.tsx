@@ -15,6 +15,8 @@ const BLURB: Record<ClipKind, string> = {
   paper: "Research worth the close read: abstracts, authors and where each one appeared.",
   newsletter: "Issues worth keeping from the newsletters in the inbox.",
   tweet: "Posts that stuck, kept here in case they disappear.",
+  video: "Videos worth watching, read by their transcripts.",
+  podcast: "Episodes worth hearing, with their transcripts.",
 };
 
 export function clipMetadata(kind: ClipKind): Metadata {

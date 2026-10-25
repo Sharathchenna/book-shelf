@@ -114,7 +114,12 @@ data class Clip(
     val tweet: Tweet? = null,
     val xArticle: XArticle? = null,
     val enriched: Enrichment? = null,
+    val media: Media? = null,
 ) {
+    /** A video or podcast episode (lib/media.ts): YouTube's id or the audio file, how long, and whether its transcript is in. */
+    @Serializable
+    data class Media(val kind: String, val id: String? = null, val audio: String? = null, val seconds: Int? = null, val channel: String? = null, val transcript: Boolean = false)
+
     @Serializable
     data class Paper(val authors: List<String> = emptyList(), val year: Int? = null, val arxiv: String? = null, val doi: String? = null, val pdf: String? = null)
 
@@ -128,7 +133,7 @@ data class Clip(
     data class Enrichment(val summary: String, val topics: List<String> = emptyList())
 
     /** What the site's reader can open (lib/clippings.ts readableClip). */
-    val readable: Boolean get() = xArticle != null || kind == "article" || kind == "newsletter" || (kind == "paper" && paper?.pdf != null)
+    val readable: Boolean get() = xArticle != null || kind == "article" || kind == "newsletter" || kind == "video" || kind == "podcast" || (kind == "paper" && paper?.pdf != null)
 }
 
 /** A file in the reader: an EPUB or PDF, with where the owner is in it. */
@@ -295,3 +300,38 @@ data class StoredBrief(val version: Int = 1, val at: String = "", val brief: Bri
 /** A change to where things stand (/api/triage): only what's set is changed. */
 @Serializable
 data class TriageChange(val ids: List<String>, val place: String? = null, val seen: Boolean? = null, val trashed: Boolean? = null)
+
+/** A site subscribed to by its feed (lib/feeds.ts). */
+@Serializable
+data class Feed(
+    val id: String,
+    val url: String,
+    val title: String,
+    val site: String? = null,
+    val icon: String? = null,
+    val description: String? = null,
+    val error: String? = null,
+    val checked: String? = null,
+)
+
+/** Something a feed published: seen or not, and once opened or saved, its clipping. */
+@Serializable
+data class FeedItem(
+    val id: String,
+    val feedId: String,
+    val url: String,
+    val title: String,
+    val author: String? = null,
+    val summary: String? = null,
+    val image: String? = null,
+    val published: String,
+    val audio: FeedAudio? = null,
+    val seen: Boolean = false,
+    val clipId: String? = null,
+)
+
+@Serializable
+data class FeedAudio(val url: String, val type: String? = null, val seconds: Int? = null)
+
+@Serializable
+data class FeedData(val feeds: List<Feed> = emptyList(), val items: List<FeedItem> = emptyList())

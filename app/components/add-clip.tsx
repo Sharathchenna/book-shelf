@@ -8,7 +8,7 @@ import type { Clip, ClipKind } from "@/lib/types";
 import { CaptureSetup } from "./capture-setup";
 import { useMe, useOwner } from "./use-owner";
 
-const KIND_NAME: Record<ClipKind, string> = { article: "Article", paper: "Paper", newsletter: "Newsletter", tweet: "Tweet" };
+const KIND_NAME: Record<ClipKind, string> = { article: "Article", paper: "Paper", newsletter: "Newsletter", tweet: "Tweet", video: "Video", podcast: "Podcast" };
 
 /** The bookmarklet opens Add in a window with this name, which closes itself after saving. */
 const POPUP = "shelf-add";

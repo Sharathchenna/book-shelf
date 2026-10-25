@@ -36,7 +36,7 @@ export type ShelfData = {
   items: Item[];
 };
 
-export type ClipKind = "article" | "paper" | "newsletter" | "tweet";
+export type ClipKind = "article" | "paper" | "newsletter" | "tweet" | "video" | "podcast";
 
 /** Something read on the web: an article, a paper, a newsletter issue or a post. Added with the site's Add button. */
 export type Clip = {
@@ -58,8 +58,8 @@ export type Clip = {
   minutes?: number;
   /** The reader's own note on it. */
   note?: string;
-  /** How it was saved, when not with Add on the site: the phone shortcut, or an agent (/mcp). */
-  via?: "phone" | "agent";
+  /** How it was saved, when not with Add on the site: the phone shortcut, an agent (/mcp), or from a feed (lib/feeds.ts). */
+  via?: "phone" | "agent" | "feed";
   tags: string[];
   paper?: {
     authors: string[];
@@ -89,6 +89,11 @@ export type Clip = {
   xArticle?: { handle: string; avatar?: string };
   /** Added when it's saved (lib/enrich.ts), so search finds it by what it's about. */
   enriched?: Enrichment;
+  /**
+   * A video or podcast episode (lib/media.ts): YouTube's id, or the episode's audio file; how long
+   * it runs; and whether it has a transcript (kept beside it in storage, with its description).
+   */
+  media?: { kind: "youtube" | "audio"; id?: string; audio?: string; seconds?: number; channel?: string; transcript?: boolean };
 };
 
 /** A paper's code and where it stands in its field, from Papers with Code. */

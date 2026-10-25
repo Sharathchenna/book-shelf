@@ -12,7 +12,8 @@ import { getStorage } from "./storage";
  * Things can be put in the Trash (and taken out again) before they're deleted for good.
  */
 
-export const PLACES = ["inbox", "later", "archive"] as const;
+/** "feed": opened from the Feed (lib/feeds.ts) and not saved to the library. */
+export const PLACES = ["inbox", "later", "archive", "feed"] as const;
 export type Place = (typeof PLACES)[number];
 export const isPlace = (v: unknown): v is Place => typeof v === "string" && (PLACES as readonly string[]).includes(v);
 
@@ -70,6 +71,8 @@ export async function purge(ids: string[]): Promise<string[]> {
     for (const file of own) await removeBook(file.id);
     if (clip) {
       await deleteClipping(id);
+      // What's kept beside it: a video's or episode's transcript, a feed item's post (lib/media.ts, lib/feeds.ts).
+      await Promise.all([`media/${id}.json`, `feed/${id}.html`].map((key) => getStorage().delete(key).catch(() => {})));
       await removeShelving(id).catch(() => {});
       await removeDocs([`clip:${id}`]).catch((error) => console.error("Removing from the search index failed", id, error));
     }
@@ -77,7 +80,7 @@ export async function purge(ids: string[]): Promise<string[]> {
   }
   if (gone.length) {
     const database = await db();
-    await batched(database, gone.map((id) => database.prepare("DELETE FROM triage WHERE id = ?1").bind(id)));
+    await batched(database, gone.flatMap((id) => [database.prepare("DELETE FROM triage WHERE id = ?1").bind(id), database.prepare("DELETE FROM feed_items WHERE clip_id = ?1").bind(id)]));
   }
   return gone;
 }

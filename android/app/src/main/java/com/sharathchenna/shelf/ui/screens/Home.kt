@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -128,7 +129,10 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
     val topics = library?.topics.orEmpty()
     val reading = remember(library) { inProgress(library) }
     val started = remember(reading) { reading.map { it.book.id }.toSet() }
-    val shelves = remember(books, started) { homeShelves(books, started) }
+    val feed by shelf.feed.collectAsState()
+    LaunchedEffect(Unit) { runCatching { shelf.loadFeed() } }
+    val shelves = remember(books, started, feed) { homeShelves(books, started) + listOfNotNull(newInFeed(feed)) }
+    val digest = remember(library, feed) { digestCards(library, feed).size }
     val details: (ShelfBook) -> Unit = { open = it.id }
     val read: (ShelfBook) -> Unit = { b ->
         if (!b.seen) scope.launch { runCatching { shelf.triage(TriageChange(listOf(b.id), seen = true)) } }
@@ -161,6 +165,9 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
                             Pill("Add", Icons.Outlined.Add, dark = true, onClick = onAdd)
                         }
                     }
+                    if (digest > 0) item(key = "digest", span = StaggeredGridItemSpan.FullLine) {
+                        DigestPrompt(digest) { nav.navigate(com.sharathchenna.shelf.ui.Digest) }
+                    }
                     item(key = "reading", span = StaggeredGridItemSpan.FullLine) {
                         when {
                             library == null -> Text("Taking the books out…", fontFamily = Sans, color = paper.muted)
@@ -175,7 +182,15 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
                     }
                     shelves.forEach { row ->
                         item(key = "shelf-${row.key}", span = StaggeredGridItemSpan.FullLine) {
-                            HomeShelf(row, topics, onOpen = read, onDetails = details)
+                            if (row.items != null) FeedShelf(row, onOpen = { item ->
+                                scope.launch {
+                                    runCatching { shelf.placeFeedItem(item, "feed") }.onSuccess { clipId ->
+                                        val book = shelf.book(clipId)
+                                        if (book != null) openBook(context, nav, book) else nav.navigate(com.sharathchenna.shelf.ui.Web("/reader/clip/$clipId", item.title, prepare = true))
+                                    }
+                                }
+                            })
+                            else HomeShelf(row, topics, onOpen = read, onDetails = details)
                         }
                     }
                 }
@@ -362,10 +377,44 @@ internal fun Choice(label: String, count: Int?, on: Boolean, onClick: () -> Unit
 }
 
 /** A row of things on Home, as Reader's home has them: what's new, what's quick, what's long, what's saved for later. */
-internal data class HomeRow(val key: String, val title: String, val icon: String, val books: List<ShelfBook>)
+internal data class HomeRow(val key: String, val title: String, val icon: String, val books: List<ShelfBook>, val items: List<com.sharathchenna.shelf.data.FeedItem>? = null)
+
+/** The Feed's newest unseen items, as Reader's "New in feed". */
+internal fun newInFeed(feed: com.sharathchenna.shelf.data.FeedData?): HomeRow? =
+    feed?.items.orEmpty().filter { !it.seen }.take(20).takeIf { it.isNotEmpty() }?.let { HomeRow("feed", "New in feed", "agent", emptyList(), it) }
+
+/** The Feed's row on Home: each item's picture, title and when. */
+@Composable
+private fun FeedShelf(row: HomeRow, onOpen: (com.sharathchenna.shelf.data.FeedItem) -> Unit) {
+    val paper = LocalPaper.current
+    val shelf = LocalShelf.current
+    val feed by shelf.feed.collectAsState()
+    Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(androidx.compose.material.icons.Icons.Outlined.RssFeed, null, tint = paper.accent, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(row.title, fontFamily = Serif, fontWeight = FontWeight(450), fontSize = 24.sp, color = paper.fg)
+            Text("  ${row.items!!.size}", fontFamily = Sans, fontSize = 14.sp, color = paper.faint)
+        }
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            items(row.items!!.size, key = { row.items[it].id }) { i ->
+                val item = row.items[i]
+                val source = feed?.feeds?.find { it.id == item.feedId }?.title ?: hostOf(item.url)
+                Column(Modifier.width(158.dp).clip(RoundedCornerShape(14.dp)).clickable { onOpen(item) }.padding(4.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Box(Modifier.size(150.dp).clip(RoundedCornerShape(12.dp)).background(paper.sunk), contentAlignment = Alignment.Center) {
+                        if (item.image != null) AsyncImage(item.image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else Text(item.title.take(1), fontFamily = Serif, fontSize = 44.sp, color = paper.muted)
+                    }
+                    Text(item.title, fontFamily = Serif, fontWeight = FontWeight(500), fontSize = 15.sp, lineHeight = 19.sp, color = paper.fg, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(source, ago(item.published)).joinToString(" · "), fontFamily = Sans, fontSize = 12.5.sp, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
 
 internal fun homeShelves(books: List<ShelfBook>, started: Set<String>): List<HomeRow> {
-    val live = books.filter { it.trashed == null && it.pct < 1 && it.id !in started }
+    val live = books.filter { it.trashed == null && it.place != "feed" && it.pct < 1 && it.id !in started }
     val toRead = live.filter { it.place != "archive" && (it.kind != "book" || it.fileId != null) }
     return listOf(
         HomeRow("new", "Recently added", "agent", live.filter { it.place == "inbox" }.sortedByDescending { it.added }),

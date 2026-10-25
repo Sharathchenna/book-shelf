@@ -349,4 +349,4 @@ export function BookOpen({
   );
 }
 
-const KIND = { book: "Book", paper: "Paper", article: "Article", newsletter: "Newsletter", tweet: "Post" } as const;
+const KIND = { book: "Book", paper: "Paper", article: "Article", newsletter: "Newsletter", tweet: "Post", video: "Video", podcast: "Podcast" } as const;
