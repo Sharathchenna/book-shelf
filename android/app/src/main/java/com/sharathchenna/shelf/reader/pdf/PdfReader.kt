@@ -149,7 +149,7 @@ private fun newId() = UUID.randomUUID().toString().replace("-", "").take(16)
  */
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
-fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: (Int) -> Unit, onFallback: () -> Unit) {
+fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: (Int) -> Unit, onFallback: () -> Unit, onOpenNext: (com.sharathchenna.shelf.data.ShelfBook) -> Unit = {}) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -616,6 +616,13 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         Text("  Back to page ${from + 1}", fontFamily = Sans, fontSize = 14.sp)
                     }
                 }
+
+                // At the last page: archived (or offered to be), and the next thing a tap away.
+                val here = remember(shelf.library.collectAsState().value, file.id) { shelf.library.value?.books?.find { it.fileId == file.id || it.id == file.id } }
+                com.sharathchenna.shelf.reader.AtTheEnd(
+                    here, if (count > 1) page.toDouble() / (count - 1) else 0.0, show = jumpFrom == null && nib == Nib.Read, onOpenNext = onOpenNext, onBack = onBack,
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
+                )
 
                 // The pen's tools, Ask and Listen, down the page's left side; Write chosen again offers the pen's colours and widths.
                 if (!settings.textView) PenPalette(

@@ -259,7 +259,7 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
         is Phase.Ready -> {
             Reading(p.opened, p.book, p.initial, p.restore, onBack, onListen, onOpenNext)
         }
-        is Phase.Pdf -> com.sharathchenna.shelf.reader.pdf.PdfReading(p.opened, at, onBack, onListen, onFallback = { simplePdf = true })
+        is Phase.Pdf -> com.sharathchenna.shelf.reader.pdf.PdfReading(p.opened, at, onBack, onListen, onFallback = { simplePdf = true }, onOpenNext = onOpenNext)
     }
 }
 
@@ -735,23 +735,12 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
                     )
                 }
-                // At the end: Archive and open the next thing, as Reader offers.
+                // At the end: archived (or offered to be), and the next thing a tap away, as Reader does.
                 val here = remember(shelf.library.collectAsState().value, file.id) { shelf.library.value?.books?.find { it.fileId == file.id || it.id == file.id } }
-                if (here != null && here.trashed == null && here.place != "archive" && progressNow >= 0.985 && lookup == null && returnTo == null && !drawing) {
-                    val next = remember(here.id) {
-                        shelf.library.value?.books.orEmpty()
-                            .filter { it.id != here.id && it.trashed == null && it.place == here.place && it.pct < 1 && (it.fileId != null || it.readable) }
-                            .sortedByDescending { it.added }.firstOrNull()
-                    }
-                    ArchiveAndNext(
-                        next?.title,
-                        onArchive = {
-                            scope.launch { runCatching { shelf.triage(com.sharathchenna.shelf.data.TriageChange(listOf(here.id), place = "archive")) } }
-                            if (next != null) onOpenNext(next) else onBack()
-                        },
-                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
-                    )
-                }
+                AtTheEnd(
+                    here, progressNow, show = lookup == null && returnTo == null && !drawing, onOpenNext = onOpenNext, onBack = onBack,
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
+                )
                 // The pen's tools, Ask and Listen, down the page's left side.
                 if (!drawing) PenPalette(
                     nib = nib,
@@ -949,19 +938,67 @@ internal fun ReturnPill(percent: Int, onReturn: () -> Unit, onDismiss: () -> Uni
     }
 }
 
-/** At the end of something in the Inbox or Later: archive it, and open the next thing there. */
+/**
+ * At the end of something in the Inbox or Later, as Readwise Reader's auto-archive: a moment after
+ * reaching it, it goes to the Archive by itself (unless the reader's set not to), and a pill offers
+ * the next thing from where it was, and Undo. Set not to, the pill archives it and opens the next.
+ */
 @Composable
-internal fun ArchiveAndNext(next: String?, onArchive: () -> Unit, modifier: Modifier = Modifier) {
+internal fun AtTheEnd(
+    here: com.sharathchenna.shelf.data.ShelfBook?,
+    progress: Double,
+    show: Boolean,
+    onOpenNext: (com.sharathchenna.shelf.data.ShelfBook) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shelf = LocalShelf.current
+    val behaviour = rememberBehaviour()
+    val scope = rememberCoroutineScope()
+    // Where it was before this reading archived it, and whether that was undone (not archived again).
+    var archivedFrom by remember(here?.id) { mutableStateOf<String?>(null) }
+    var undone by remember(here?.id) { mutableStateOf(false) }
+    here ?: return
+    val atEnd = progress >= 0.985
+    val waiting = here.trashed == null && here.place in setOf("inbox", "later")
+    fun move(place: String) = scope.launch { runCatching { shelf.triage(com.sharathchenna.shelf.data.TriageChange(listOf(here.id), place = place)) } }
+    LaunchedEffect(atEnd, waiting, behaviour.archiveAtEnd) {
+        if (!atEnd || !waiting || !behaviour.archiveAtEnd || undone) return@LaunchedEffect
+        // Not on a pass through the end (the scrubber dragged by it), only when the reading stays there.
+        kotlinx.coroutines.delay(1500)
+        archivedFrom = here.place
+        move("archive")
+    }
+    val from = archivedFrom?.takeIf { here.place == "archive" }
+    if (!show || !atEnd || (!waiting && from == null)) return
+    val next = remember(here.id, from) {
+        shelf.library.value?.books.orEmpty()
+            .filter { it.id != here.id && it.trashed == null && it.place == (from ?: here.place) && it.pct < 1 && (it.fileId != null || it.readable) }
+            .sortedByDescending { it.added }.firstOrNull()
+    }
     val paper = LocalPaper.current
     Row(
-        modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.fg, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).clickable(onClick = onArchive)
-            .padding(horizontal = 20.dp, vertical = 12.dp).widthIn(max = 520.dp),
+        modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.fg, RoundedCornerShape(50)).clip(RoundedCornerShape(50))
+            .clickable {
+                if (from == null) move("archive")
+                if (next != null) onOpenNext(next) else onBack()
+            }
+            .padding(start = 20.dp, end = if (from != null) 8.dp else 20.dp, top = 12.dp, bottom = 12.dp).widthIn(max = 560.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Archive, null, Modifier.size(18.dp), tint = paper.bg)
-        Column(Modifier.padding(start = 10.dp)) {
-            Text(if (next != null) "Archive and open the next" else "Archive it", style = MaterialTheme.typography.labelLarge, color = paper.bg)
-            next?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = paper.bg.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        Column(Modifier.padding(start = 10.dp).weight(1f, fill = false)) {
+            Text(
+                when {
+                    from != null && next != null -> "Archived · Open the next"
+                    from != null -> "Archived · Back to the library"
+                    next != null -> "Archive and open the next"
+                    else -> "Archive it"
+                },
+                style = MaterialTheme.typography.labelLarge, color = paper.bg,
+            )
+            next?.let { Text(it.title, style = MaterialTheme.typography.labelSmall, color = paper.bg.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
+        if (from != null) TextButton(onClick = { undone = true; archivedFrom = null; move(from) }) { Text("Undo", color = paper.bg) }
     }
 }

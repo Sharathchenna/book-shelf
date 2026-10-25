@@ -53,6 +53,8 @@ data class ReaderBehaviour(
     val eink: Boolean = false,
     /** Text is highlighted as soon as it's selected (the menu still shows for a single word's lookup). */
     val autoHighlight: Boolean = false,
+    /** Something in the Inbox or Later goes to the Archive by itself when it's read to the end. */
+    val archiveAtEnd: Boolean = true,
 ) {
     /** Page turns animate unless asked not to, or on an e-ink screen. */
     val animated: Boolean get() = animate && !eink
@@ -75,6 +77,7 @@ data class ReaderBehaviour(
                     penStart = p.getString("penStart", "read")!!,
                     eink = p.getBoolean("eink", false),
                     autoHighlight = p.getBoolean("autoHighlight", false),
+                    archiveAtEnd = p.getBoolean("archiveAtEnd", true),
                 )
             }
             return state
@@ -87,6 +90,7 @@ data class ReaderBehaviour(
                 .putFloat("brightness", b.brightness).putBoolean("volumeKeys", b.volumeKeys).putBoolean("tapEdges", b.tapEdges)
                 .putBoolean("animate", b.animate).putString("penStart", b.penStart)
                 .putBoolean("eink", b.eink).putBoolean("autoHighlight", b.autoHighlight)
+                .putBoolean("archiveAtEnd", b.archiveAtEnd)
                 .apply()
         }
     }
@@ -176,6 +180,8 @@ fun BehaviourControls(b: ReaderBehaviour, onChange: (ReaderBehaviour) -> Unit) {
         if (!b.eink) Toggle("Animate page turns", null, b.animate) { onChange(b.copy(animate = it)) }
         Text("HIGHLIGHTING", style = Eyebrow, color = muted)
         Toggle("Highlight as soon as text is selected", "Selecting a passage highlights it, without the menu. Holding a single word still looks it up.", b.autoHighlight) { onChange(b.copy(autoHighlight = it)) }
+        Text("AT THE END", style = Eyebrow, color = muted)
+        Toggle("Archive what's read to the end", "Something in the Inbox or Later goes to the Archive when you reach its end, with Undo.", b.archiveAtEnd) { onChange(b.copy(archiveAtEnd = it)) }
         Text("THE PEN'S TOOL ON OPENING", style = Eyebrow, color = muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("read" to "Read (it scrolls)", "mark" to "Highlight").forEach { (k, label) ->
