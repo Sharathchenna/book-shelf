@@ -55,12 +55,15 @@ export async function replaceShelf(books: StoredBook[], updatedAt: string) {
 
 // ---- clippings ---------------------------------------------------------------------------------
 
-/** Newest first, or only one kind. */
-export async function getClippings(kind?: ClipKind): Promise<ClippingsData> {
+/** Leaves out what the owner has put in the Trash (lib/triage.ts). */
+const NOT_TRASHED = "id NOT IN (SELECT id FROM triage WHERE trashed_at IS NOT NULL)";
+
+/** Newest first, or only one kind; what's in the Trash only when asked for. */
+export async function getClippings(kind?: ClipKind, { trashed = false } = {}): Promise<ClippingsData> {
   const database = await db();
-  const query = kind
-    ? database.prepare("SELECT data FROM clippings WHERE kind = ?1 ORDER BY saved DESC, added_at DESC").bind(kind)
-    : database.prepare("SELECT data FROM clippings ORDER BY saved DESC, added_at DESC");
+  const where = [kind ? "kind = ?1" : "", trashed ? "" : NOT_TRASHED].filter(Boolean).join(" AND ");
+  const sql = `SELECT data FROM clippings ${where ? `WHERE ${where}` : ""} ORDER BY saved DESC, added_at DESC`;
+  const query = kind ? database.prepare(sql).bind(kind) : database.prepare(sql);
   return { items: records<Clip>((await query.all<{ data: string }>()).results) };
 }
 
@@ -68,15 +71,15 @@ export async function getClippings(kind?: ClipKind): Promise<ClippingsData> {
 export async function getClippingsPage(kind: ClipKind, limit: number): Promise<ClippingsData & { total: number }> {
   const database = await db();
   const [rows, count] = await database.batch([
-    database.prepare("SELECT data FROM clippings WHERE kind = ?1 ORDER BY saved DESC, added_at DESC LIMIT ?2").bind(kind, limit),
-    database.prepare("SELECT COUNT(*) AS total FROM clippings WHERE kind = ?1").bind(kind),
+    database.prepare(`SELECT data FROM clippings WHERE kind = ?1 AND ${NOT_TRASHED} ORDER BY saved DESC, added_at DESC LIMIT ?2`).bind(kind, limit),
+    database.prepare(`SELECT COUNT(*) AS total FROM clippings WHERE kind = ?1 AND ${NOT_TRASHED}`).bind(kind),
   ]);
   return { items: records<Clip>(rows.results as { data: string }[]), total: Number((count.results[0] as { total: number }).total) };
 }
 
 /** The kinds that have at least one clipping, which decides which sections exist. */
 export async function getClipKinds(): Promise<ClipKind[]> {
-  const { results } = await (await db()).prepare("SELECT DISTINCT kind FROM clippings").all<{ kind: ClipKind }>();
+  const { results } = await (await db()).prepare(`SELECT DISTINCT kind FROM clippings WHERE ${NOT_TRASHED}`).all<{ kind: ClipKind }>();
   return results.map((row) => row.kind);
 }
 

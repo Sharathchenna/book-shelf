@@ -125,6 +125,23 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
         if (!part.renameTo(into)) throw ApiException(0, "Couldn't save the file.")
     }
 
+    // ---- sorting: inbox, later, archive, trash ---------------------------------------------
+
+    /** Moves things, marks them seen or unseen, or puts them in or out of the Trash (/api/triage). */
+    suspend fun triage(change: TriageChange) {
+        check(http.post("/api/triage") { auth(); contentType(ContentType.Application.Json); setBody(change) })
+    }
+
+    @Serializable
+    private data class Ids(val ids: List<String>)
+
+    @Serializable
+    private data class Deleted(val deleted: List<String> = emptyList())
+
+    /** Deletes things in the Trash for good; answers with those deleted. */
+    suspend fun purge(ids: List<String>): List<String> =
+        check(http.delete("/api/triage") { auth(); contentType(ContentType.Application.Json); setBody(Ids(ids)) }).body<Deleted>().deleted
+
     // ---- adding a file ---------------------------------------------------------------------
 
     @Serializable

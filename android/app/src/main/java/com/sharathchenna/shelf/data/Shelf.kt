@@ -21,6 +21,7 @@ import java.time.Instant
  */
 class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenStore, private val db: LocalDb) {
     private val libraryFile = File(context.filesDir, "library.json")
+    private val pendingTriageFile = File(context.filesDir, "triage-pending.json")
     private val _library = MutableStateFlow<Library?>(null)
 
     /** The library as last fetched (kept on the device), or null before the first fetch. */
@@ -49,6 +50,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         tokens.clear()
         db.clearAllTables()
         libraryFile.delete()
+        pendingTriageFile.delete()
         File(context.filesDir, "books").deleteRecursively()
         _library.value = null
     }
@@ -58,7 +60,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
     /** Loads the copy on the device, so the shelf shows at once. */
     suspend fun loadCached() = withContext(Dispatchers.IO) {
         if (_library.value == null && libraryFile.exists()) {
-            _library.value = runCatching { ShelfJson.decodeFromString<Library>(libraryFile.readText()).tidied() }.getOrNull()
+            _library.value = runCatching { ShelfJson.decodeFromString<Library>(libraryFile.readText()).tidied().withChanges(pendingTriage()) }.getOrNull()
         }
     }
 
@@ -68,7 +70,7 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         val etag = if (_library.value != null) tokens.libraryEtag() else null
         val fresh = api.library(etag) ?: return@withContext
         val (json, tag) = fresh
-        _library.value = ShelfJson.decodeFromString<Library>(json).tidied()
+        _library.value = ShelfJson.decodeFromString<Library>(json).tidied().withChanges(pendingTriage())
         libraryFile.writeText(json)
         tokens.setLibraryEtag(tag)
     }
@@ -77,6 +79,44 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
     fun file(id: String): LibraryFile? = _library.value?.files?.find { it.id == id }
     fun item(id: String): Item? = _library.value?.items?.find { it.id == id }
     fun clip(id: String): Clip? = _library.value?.clips?.find { it.id == id }
+
+    // ---- sorting: inbox, later, archive, trash ---------------------------------------------
+
+    /**
+     * Moves things, marks them seen or unseen, or puts them in or out of the Trash: here at once,
+     * and on the site now or, offline, on the next sync. A change the site turns down is undone.
+     */
+    suspend fun triage(change: TriageChange) {
+        _library.value = _library.value?.withChanges(listOf(change))
+        try {
+            api.triage(change)
+        } catch (error: ApiException) {
+            if (error.status in 400..499 && error.status != 401) {
+                runCatching { refreshLibrary() }
+                throw error
+            }
+            queueTriage(change)
+        } catch (_: Exception) {
+            queueTriage(change)
+        }
+    }
+
+    /** Deletes things in the Trash for good, with their files on the device. */
+    suspend fun purge(ids: List<String>) {
+        val books = ids.mapNotNull { book(it) }
+        api.purge(ids)
+        books.mapNotNull { it.fileId }.forEach { removeDownload(it) }
+        _library.value = _library.value?.let { lib -> lib.copy(books = lib.books.filterNot { it.id in ids }) }
+        runCatching { refreshLibrary() }
+    }
+
+    private fun pendingTriage(): List<TriageChange> =
+        runCatching { ShelfJson.decodeFromString<List<TriageChange>>(pendingTriageFile.readText()) }.getOrDefault(emptyList())
+
+    private suspend fun queueTriage(change: TriageChange) = withContext(Dispatchers.IO) {
+        pendingTriageFile.writeText(ShelfJson.encodeToString(pendingTriage() + change))
+        Sync.soon(context)
+    }
 
     // ---- opening a book --------------------------------------------------------------------
 
@@ -189,6 +229,11 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
     suspend fun sync() = syncing.withLock {
         if (tokens.token() == null) return@withLock
         withContext(Dispatchers.IO) {
+            val queued = pendingTriage()
+            queued.forEachIndexed { i, change ->
+                rejectable { api.triage(change) }
+                pendingTriageFile.writeText(ShelfJson.encodeToString(queued.drop(i + 1)))
+            }
             for (share in db.shares().all()) {
                 runCatching { api.capture(share.text) }.onSuccess { db.shares().remove(share.at) }.onFailure { if (it is ApiException && it.status in 400..499) db.shares().remove(share.at) }
             }
@@ -206,6 +251,24 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
             com.sharathchenna.shelf.widget.ReadingWidget.refresh(context)
         }
     }
+}
+
+/** The library with changes to where things stand laid over it (made here, not yet on the site). */
+private fun Library.withChanges(changes: List<TriageChange>): Library {
+    if (changes.isEmpty()) return this
+    var shown = books
+    for (change in changes) {
+        val ids = change.ids.toSet()
+        shown = shown.map { b ->
+            if (b.id !in ids) b
+            else b.copy(
+                place = change.place ?: b.place,
+                seen = change.seen ?: b.seen,
+                trashed = when (change.trashed) { true -> b.trashed ?: Instant.now().toString(); false -> null; null -> b.trashed },
+            )
+        }
+    }
+    return copy(books = shown)
 }
 
 /**

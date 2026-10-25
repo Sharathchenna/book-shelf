@@ -50,6 +50,12 @@ data class ShelfBook(
     val fileId: String? = null,
     val readable: Boolean = false,
     val look: Look,
+    /** Where it stands in the owner's reading: inbox, later or archive (lib/triage.ts). */
+    val place: String = "inbox",
+    /** Opened at least once; an unseen thing wears a dot. */
+    val seen: Boolean = true,
+    /** When it was put in the Trash; null when it isn't there. */
+    val trashed: String? = null,
 )
 
 /** A spine: its cloth, the colour of its lettering, its style and its size in px. */
@@ -281,3 +287,7 @@ data class Brief(val gist: String, val claims: List<BriefPoint> = emptyList(), v
 
 @Serializable
 data class StoredBrief(val version: Int = 1, val at: String = "", val brief: Brief)
+
+/** A change to where things stand (/api/triage): only what's set is changed. */
+@Serializable
+data class TriageChange(val ids: List<String>, val place: String? = null, val seen: Boolean? = null, val trashed: Boolean? = null)

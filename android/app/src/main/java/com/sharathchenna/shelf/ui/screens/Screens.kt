@@ -132,54 +132,6 @@ internal fun Heading(title: String, count: Int? = null, subtitle: String? = null
     }
 }
 
-// ---- clippings -------------------------------------------------------------------------------
-
-/** The site's clipping sections, in its order and words (lib/clippings.ts, app/components/clip-page.tsx). */
-internal val SECTIONS = listOf(
-    Triple("article", "Articles", "Essays and long reads from around the web, with notes in the margins."),
-    Triple("paper", "Papers", "Research worth the close read: abstracts, authors and where each one appeared."),
-    Triple("newsletter", "Newsletters", "Issues worth keeping from the newsletters in the inbox."),
-    Triple("tweet", "Tweets", "Posts that stuck, kept here in case they disappear."),
-)
-
-private val monthYear = DateTimeFormatter.ofPattern("MMM yyyy", Locale.UK)
-internal fun dateOf(iso: String?): String? = runCatching { LocalDate.parse(iso!!.take(10)).format(monthYear) }.getOrNull()
-
-/** A clipping as the site's cards show it: its picture, where it's from and how long it takes, its title and summary, who and when. */
-@Composable
-internal fun ClipCard(book: ShelfBook, clip: Clip?, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
-    val paper = LocalPaper.current
-    val shape = RoundedCornerShape(20.dp)
-    Column(Modifier.clip(shape).background(paper.raised).border(1.dp, paper.rule, shape).combinedClickable(onLongClick = onLongClick, onClick = onClick)) {
-        val tweet = clip?.tweet
-        if (tweet == null) book.image?.let { AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1.9f)) }
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val source = tweet?.let { "${it.name}  @${it.handle}" } ?: clip?.source?.takeIf { it.isNotBlank() } ?: hostOf(book.url) ?: book.author
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (tweet?.avatar != null) {
-                    AsyncImage(tweet.avatar, null, Modifier.size(20.dp).clip(CircleShape))
-                } else {
-                    Box(Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)).background(hex(book.look.color)), contentAlignment = Alignment.Center) {
-                        Text(source.trim().take(1).uppercase(), fontFamily = Serif, fontSize = 11.sp, color = hex(book.look.fg))
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(source, fontFamily = Sans, fontWeight = FontWeight(500), fontSize = 13.sp, color = paper.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (tweet == null) Text("  ·  ${fmtMinutes(book.minutes)} read", fontFamily = Sans, fontSize = 13.sp, color = paper.muted, maxLines = 1)
-            }
-            if (tweet != null) {
-                Text(tweet.text, style = MaterialTheme.typography.bodyLarge, maxLines = 12, overflow = TextOverflow.Ellipsis)
-                tweet.media.firstOrNull()?.let { AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1.6f).clip(RoundedCornerShape(12.dp))) }
-            } else {
-                Text(book.title, fontFamily = Serif, fontWeight = FontWeight(450), fontSize = 21.sp, lineHeight = 27.sp, color = paper.fg)
-                book.dek?.let { Text(it, fontFamily = Sans, fontSize = 14.sp, lineHeight = 20.sp, color = paper.muted, maxLines = 4, overflow = TextOverflow.Ellipsis) }
-            }
-            val by = listOfNotNull(clip?.author?.takeIf { tweet == null && it != source }, dateOf(clip?.published) ?: dateOf(clip?.saved)).joinToString("  ·  ")
-            if (by.isNotEmpty()) Text(by, fontFamily = Sans, fontSize = 12.5.sp, color = paper.faint)
-        }
-    }
-}
-
 // ---- search ----------------------------------------------------------------------------------
 
 /** The site's examples (app/components/search-palette.tsx). */

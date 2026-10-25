@@ -53,7 +53,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.platform.LocalContext
+import com.sharathchenna.shelf.data.TriageChange
+import com.sharathchenna.shelf.ui.openBook
+import com.sharathchenna.shelf.ui.openExternal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -107,7 +115,7 @@ fun LibraryPane(nav: NavHostController) {
     var open by rememberSaveable { mutableStateOf<String?>(null) }
 
     BookSheetHost(open, nav, onClose = { open = null }) {
-        Bookcase(library, selected = open, onOpen = { open = it })
+        Bookcase(library, selected = open, nav = nav, onOpen = { open = it })
     }
 }
 
@@ -141,10 +149,10 @@ fun BookSheetHost(open: String?, nav: NavHostController, onClose: () -> Unit, co
     }
 }
 
-/** How the library is shown: covers in a grid, a list, the bookcase's shelves, or its topics. */
+/** How the library is shown: a list of rows (one place at a time), covers in a grid, the bookcase's shelves, or its topics. */
 private enum class View(val label: String, val icon: ImageVector) {
-    Covers("Covers", Icons.Outlined.GridView),
     List("List", Icons.AutoMirrored.Outlined.ViewList),
+    Covers("Covers", Icons.Outlined.GridView),
     Shelf("Shelf", Icons.Outlined.ViewWeek),
     Topics("Topics", Icons.Outlined.Category),
 }
@@ -155,21 +163,73 @@ private val STATES = listOf(Tag.Reading, Tag.Finished, Tag.Favourite, Tag.Quick)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Bookcase(library: Library?, selected: String?, onOpen: (String) -> Unit) {
+private fun Bookcase(library: Library?, selected: String?, nav: NavHostController, onOpen: (String) -> Unit) {
     val shelf = LocalShelf.current
     val scope = rememberCoroutineScope()
     val paper = LocalPaper.current
     var refreshing by remember { mutableStateOf(false) }
-    var view by rememberSaveable { mutableStateOf(View.Covers) }
+    var view by rememberSaveable { mutableStateOf(View.List) }
+    var place by rememberSaveable { mutableStateOf(Place.Inbox) }
+    var selection by remember { mutableStateOf(emptySet<String>()) }
+    var selecting by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<List<String>?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     var sort by rememberSaveable { mutableStateOf(Sort.Recent) }
     var kind by rememberSaveable { mutableStateOf<Tag?>(null) }
     var state by rememberSaveable { mutableStateOf<Tag?>(null) }
     var only by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
 
-    val books = library?.books.orEmpty()
+    val everything = library?.books.orEmpty()
+    val kept = remember(everything) { everything.filter { it.trashed == null } }
+    val placeCounts = remember(everything) { Place.entries.associateWith { p -> everything.count { p.holds(it) } } }
+    // The shelves and the topics show the whole library; the rows, one place at a time.
+    val books = remember(everything, place, view) { if (view == View.List) everything.filter { place.holds(it) } else kept }
     val topics = library?.topics.orEmpty()
     val topicByKey = remember(topics) { topics.associateBy { it.key } }
+    val formatOf = remember(library) { library?.files.orEmpty().associate { it.id to it.format } }
+    BackHandler(enabled = selecting) { selecting = false; selection = emptySet() }
+
+    fun move(ids: List<String>, to: Place) {
+        val before = ids.mapNotNull { shelf.book(it) }
+        selecting = false; selection = emptySet()
+        scope.launch {
+            val change = if (to == Place.Trash) TriageChange(ids, trashed = true)
+            else TriageChange(ids, place = to.key, trashed = if (before.any { it.trashed != null }) false else null)
+            runCatching { shelf.triage(change) }
+                .onFailure { snackbar.showSnackbar(it.message ?: "Couldn't move that.") }
+                .onSuccess {
+                    val what = if (ids.size == 1) "" else " ${ids.size}"
+                    val said = when {
+                        to == Place.Trash -> "Moved$what to the Trash"
+                        before.any { it.trashed != null } -> "Restored$what"
+                        else -> "Moved$what to ${to.label}"
+                    }
+                    if (snackbar.showSnackbar(said, actionLabel = "Undo", duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed) {
+                        before.groupBy { it.place to (it.trashed != null) }.forEach { (was, them) ->
+                            runCatching { shelf.triage(TriageChange(them.map { it.id }, place = was.first, trashed = was.second)) }
+                        }
+                    }
+                }
+        }
+    }
+    val goodreads = { b: ShelfBook -> b.kind == "book" && b.fileId != b.id }
+    fun actionsFor(b: ShelfBook) = RowActions(
+        onOpen = {
+            if (b.fileId != null || b.readable || (b.kind != "book" && b.url != null)) {
+                if (!b.seen) scope.launch { runCatching { shelf.triage(TriageChange(listOf(b.id), seen = true)) } }
+                openBook(context, nav, b)
+            } else onOpen(b.id)
+        },
+        onDetails = { onOpen(b.id) },
+        onMove = { move(listOf(b.id), it) },
+        onSeen = { seen -> scope.launch { runCatching { shelf.triage(TriageChange(listOf(b.id), seen = seen)) } } },
+        onShare = b.url?.let { url -> { shareLink(context, b.title, url) } },
+        onOriginal = b.url?.takeIf { b.kind != "book" }?.let { url -> { openExternal(context, url) } },
+        onSelect = { selecting = true; selection = if (b.id in selection) selection - b.id else selection + b.id },
+        onDelete = if (goodreads(b)) null else ({ deleting = listOf(b.id) }),
+    )
     val counts = remember(books) { books.groupingBy { it.topic }.eachCount() }
     val present = remember(topics, counts) { topics.filter { (counts[it.key] ?: 0) > 0 } }
     val shown = remember(books, sort, kind, state, only, query, topics) {
@@ -186,13 +246,21 @@ private fun Bookcase(library: Library?, selected: String?, onOpen: (String) -> U
     }
     val header: @Composable () -> Unit = {
         Header(
-            library!!, books, present, view, { view = it; if (it != View.Shelf && sort == Sort.Colour) sort = Sort.Recent }, sort, { sort = it }, query, { query = it },
+            library!!, kept, books, place, placeCounts[place] ?: 0, { place = it }, present, view, { view = it; if (it != View.Shelf && sort == Sort.Colour) sort = Sort.Recent }, sort, { sort = it }, query, { query = it },
             kind, { kind = it }, state, { state = it }, only, { only = it }, counts,
         )
     }
     val none: @Composable () -> Unit = {
         Text(
-            if (query.isNotBlank()) "Nothing in the library matches “$query”." else "Nothing in the library matches these filters.",
+            when {
+                query.isNotBlank() -> "Nothing here matches “$query”."
+                kind != null || state != null || only != null -> "Nothing here matches these filters."
+                view != View.List -> "Nothing in the library yet."
+                place == Place.Inbox -> "Inbox zero. Whatever you save next lands here."
+                place == Place.Later -> "Nothing saved for later. Swipe a row to the right to keep it here."
+                place == Place.Archive -> "Nothing archived yet. Swipe a row to the left when you're done with it."
+                else -> "The Trash is empty. Things stay here for ${30} days before they're deleted."
+            },
             color = paper.muted, fontFamily = Sans, fontSize = 14.sp,
             modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
@@ -233,7 +301,8 @@ private fun Bookcase(library: Library?, selected: String?, onOpen: (String) -> U
                 else -> LazyVerticalGrid(
                     columns = if (view == View.Covers) GridCells.Adaptive(156.dp) else GridCells.Adaptive(500.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = side, end = side, bottom = 48.dp),
+                    // Room under the last row for the places' bar floating over it.
+                    contentPadding = PaddingValues(start = side, end = side, bottom = if (view == View.List) 120.dp else 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (view == View.Covers) 22.dp else 28.dp),
                     verticalArrangement = Arrangement.spacedBy(if (view == View.Covers) 22.dp else 0.dp),
                 ) {
@@ -243,11 +312,39 @@ private fun Bookcase(library: Library?, selected: String?, onOpen: (String) -> U
                         if (group != null) item(key = "g-$i-${group.key}", span = { GridItemSpan(maxLineSpan) }) { GroupHeading(group, run.size, first = i == 0) }
                         items(run, key = { it.id }) { b ->
                             if (view == View.Covers) CoverCell(b, topicByKey[b.topic], b.id == selected) { onOpen(b.id) }
-                            else ListRow(b, topicByKey[b.topic], b.id == selected) { onOpen(b.id) }
+                            else SwipeRow(b, onMove = { move(listOf(b.id), it) }) {
+                                DocRow(b, topicByKey[b.topic], b.fileId?.let { formatOf[it] }, selecting, b.id in selection, actionsFor(b))
+                            }
                         }
                     }
                 }
             }
+        }
+        val foot = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 22.dp)
+        if (library != null && view == View.List) {
+            if (selecting) SelectionBar(
+                selection.size, place,
+                onMove = { move(selection.toList(), it) },
+                onAll = { selection = if (selection.size == shown.size) emptySet() else shown.map { it.id }.toSet() },
+                onDelete = if (place == Place.Trash) ({ deleting = selection.filter { id -> shelf.book(id)?.let { !goodreads(it) } == true } }) else null,
+                onDone = { selecting = false; selection = emptySet() },
+                modifier = foot,
+            ) else PlaceBar(place, placeCounts, onPlace = { place = it }, modifier = foot)
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 96.dp))
+        deleting?.let { ids ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { deleting = null },
+                title = { Text(if (ids.size == 1) "Delete “${shelf.book(ids[0])?.title}” for good?" else "Delete ${ids.size} things for good?") },
+                text = { Text("They go from the library on the site and every device, with their files, highlights, notes and places. This can't be undone.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        deleting = null; selecting = false; selection = emptySet()
+                        scope.launch { runCatching { shelf.purge(ids) }.onFailure { snackbar.showSnackbar(it.message ?: "Couldn't delete that.") } }
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            )
         }
     }
 }
@@ -290,43 +387,20 @@ private fun CoverCell(b: ShelfBook, topic: Topic?, selected: Boolean, onClick: (
     }
 }
 
-/** A book or clipping as a row: a small cover, the title, who and what and how long, and how far through. */
-@Composable
-private fun ListRow(b: ShelfBook, topic: Topic?, selected: Boolean, onClick: () -> Unit) {
-    val paper = LocalPaper.current
-    Column {
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (selected) paper.sunk else Color.Transparent).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Cover(b, topic, Modifier.width(46.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(b.title, fontFamily = Serif, fontWeight = FontWeight(450), fontSize = 18.sp, lineHeight = 22.sp, color = paper.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOfNotNull(b.author.takeIf { it.isNotBlank() } ?: hostOf(b.url), KIND_LABEL[b.kind], fmtMinutes(b.minutes)).joinToString("  ·  "),
-                    fontFamily = Sans, fontSize = 13.sp, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                if (b.pct > 0 && b.pct < 1) com.sharathchenna.shelf.ui.screens.Bar(b.pct.toFloat(), Modifier.padding(top = 4.dp).widthIn(max = 240.dp))
-            }
-            Text(
-                when { b.pct >= 1 -> "Finished"; b.pct > 0 && b.measured -> "${Math.round(b.pct * 100)}%"; else -> "" },
-                fontFamily = Sans, fontSize = 13.sp, color = paper.faint,
-            )
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(paper.rule))
-    }
-}
-
 /**
- * "<owner>'s library", the counts under it, and the tools: search, how it's shown and sorted, its
- * topics; then the filters, by kind and by where you are with a thing.
+ * "<owner>'s library" (or, in rows, the place shown), the counts of the whole library under it,
+ * and the tools: search, how it's shown and sorted, its topics; then the filters, by kind and by
+ * where you are with a thing, counted in what's shown (`pool`).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Header(
     library: Library,
     books: List<ShelfBook>,
+    pool: List<ShelfBook>,
+    place: Place,
+    placeCount: Int,
+    onPlace: (Place) -> Unit,
     topics: List<Topic>,
     view: View,
     onView: (View) -> Unit,
@@ -356,11 +430,17 @@ private fun Header(
             books.count { it.pct >= 1 }.takeIf { it > 0 }?.let { add("$it read") }
         }
     }
+    val rows = view == View.List
     Column(Modifier.statusBarsPadding().padding(top = 36.dp, bottom = 22.dp)) {
-        Text(
-            library.owner?.let { "$it’s library" } ?: "Library",
-            fontFamily = Serif, fontWeight = FontWeight(420), fontSize = if (compact) 42.sp else 54.sp, lineHeight = if (compact) 44.sp else 56.sp, letterSpacing = (-0.03).em, color = paper.fg,
-        )
+        // In rows the library is one place at a time, as Reader's is: the place is the title.
+        if (rows) Text((library.owner?.let { "$it’s library" } ?: "Library").uppercase(), style = com.sharathchenna.shelf.ui.theme.Eyebrow, color = paper.muted, modifier = Modifier.padding(bottom = 6.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                if (rows) place.label else library.owner?.let { "$it’s library" } ?: "Library",
+                fontFamily = Serif, fontWeight = FontWeight(420), fontSize = if (compact) 42.sp else 54.sp, lineHeight = if (compact) 44.sp else 56.sp, letterSpacing = (-0.03).em, color = paper.fg,
+            )
+            if (rows) Text("  $placeCount", fontFamily = Sans, fontSize = 22.sp, color = paper.faint, modifier = Modifier.padding(bottom = 8.dp))
+        }
         FlowRow(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             // Each count is one piece, so a line breaks between counts, never inside one.
             stats.forEachIndexed { i, s ->
@@ -378,6 +458,9 @@ private fun Header(
         FlowRow(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), itemVerticalAlignment = Alignment.CenterVertically) {
             SearchField(query, onQuery)
             Segments(View.entries.map { it to (it.label to it.icon) }, view, onView)
+            if (rows) Pill(if (place == Place.Trash) "Leave the Trash" else "Trash", on = place == Place.Trash, icon = Place.Trash.icon) {
+                onPlace(if (place == Place.Trash) Place.Inbox else Place.Trash)
+            }
             if (view != View.Topics) {
                 // Colour only means something on the shelves.
                 Menu("Sort: ${sort.label}", Sort.entries.filter { it != Sort.Colour || view == View.Shelf }.map { it.label to (it == sort) }) { label ->
@@ -390,14 +473,14 @@ private fun Header(
             }
         }
         if (view != View.Topics) FlowRow(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-            Chip(on = kind == null, onClick = { onKind(null) }) { ChipText("All"); ChipCount(books.size) }
+            Chip(on = kind == null, onClick = { onKind(null) }) { ChipText("All"); ChipCount(pool.size) }
             KINDS.forEach { t ->
-                val n = books.count(t.test)
+                val n = pool.count(t.test)
                 if (n > 0) Chip(on = kind == t, onClick = { onKind(if (kind == t) null else t) }) { ChipText(t.label); ChipCount(n) }
             }
             Box(Modifier.padding(horizontal = 6.dp).size(1.dp, 18.dp).background(paper.rule))
             STATES.forEach { t ->
-                val n = books.count(t.test)
+                val n = pool.count(t.test)
                 if (n > 0) Chip(on = state == t, onClick = { onState(if (state == t) null else t) }) {
                     t.icon?.let { Glyph(it, 18.dp); Spacer(Modifier.width(6.dp)) }
                     ChipText(t.label); ChipCount(n)

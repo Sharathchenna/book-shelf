@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -66,6 +65,7 @@ import com.sharathchenna.shelf.data.LibraryFile
 import com.sharathchenna.shelf.data.Progress
 import com.sharathchenna.shelf.data.ShelfBook
 import com.sharathchenna.shelf.data.Topic
+import com.sharathchenna.shelf.data.TriageChange
 import com.sharathchenna.shelf.ui.Listen
 import com.sharathchenna.shelf.ui.LocalShelf
 import com.sharathchenna.shelf.ui.library.BookSheetHost
@@ -93,7 +93,7 @@ internal fun inProgress(library: Library?): List<InProgress> {
     val byFile = library.books.filter { it.fileId != null }.associateBy { it.fileId }
     return library.files.mapNotNull { f ->
         val p = f.progress?.takeIf { it.fraction > 0.0 && it.fraction < 0.99 } ?: return@mapNotNull null
-        byFile[f.id]?.let { InProgress(it, f, p) }
+        byFile[f.id]?.takeIf { it.trashed == null }?.let { InProgress(it, f, p) }
     }.sortedByDescending { it.progress.updatedAt }
 }
 
@@ -107,8 +107,9 @@ private fun greeting(): String {
 
 /**
  * Home: what you're reading, biggest, with the next two beside it and the day's review when
- * there's one; under them, the articles, papers and posts saved and not yet started. A tap opens
- * a thing; a long press takes it down for its details, Listen and Keep offline.
+ * there's one; under them, rows as Reader's home has them: recently added, quick reads, long
+ * reads, saved for later. A tap opens a thing; a long press takes it down for its details, Listen
+ * and Keep offline.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -119,7 +120,6 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
     val paper = LocalPaper.current
     val scope = rememberCoroutineScope()
     var open by rememberSaveable { mutableStateOf<String?>(null) }
-    var kind by rememberSaveable { mutableStateOf<String?>(null) }
     var due by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { shelf.api.review(todayMs()) }.onSuccess { due = it.deck.size } }
@@ -128,11 +128,12 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
     val topics = library?.topics.orEmpty()
     val reading = remember(library) { inProgress(library) }
     val started = remember(reading) { reading.map { it.book.id }.toSet() }
-    val waiting = remember(books, started) { books.filter { it.kind != "book" && it.id !in started && it.pct < 1 }.sortedByDescending { it.added } }
-    val kinds = remember(waiting) { SECTIONS.filter { (k, _, _) -> waiting.any { it.kind == k } } }
-    val shown = waiting.filter { kind == null || it.kind == kind }
+    val shelves = remember(books, started) { homeShelves(books, started) }
     val details: (ShelfBook) -> Unit = { open = it.id }
-    val read: (ShelfBook) -> Unit = { openBook(context, nav, it) }
+    val read: (ShelfBook) -> Unit = { b ->
+        if (!b.seen) scope.launch { runCatching { shelf.triage(TriageChange(listOf(b.id), seen = true)) } }
+        openBook(context, nav, b)
+    }
 
     BookSheetHost(open, nav, onClose = { open = null }) {
         PullToRefreshBox(
@@ -166,22 +167,17 @@ fun HomeScreen(nav: NavHostController, onAdd: () -> Unit, onNotes: () -> Unit) {
                             else -> Reading(reading, topics, due, onOpen = read, onDetails = details, onReview = onNotes, onListen = { nav.navigate(Listen(it)) })
                         }
                     }
-                    item(key = "saved", span = StaggeredGridItemSpan.FullLine) {
-                        Column(Modifier.padding(top = 22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text("Saved to read", fontFamily = Serif, fontWeight = FontWeight(420), fontSize = 28.sp, color = paper.fg)
-                            if (kinds.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Choice("All", waiting.size, kind == null) { kind = null }
-                                kinds.forEach { (k, label, _) -> Choice(label, waiting.count { it.kind == k }, kind == k) { kind = k } }
-                            }
-                        }
-                    }
-                    if (shown.isEmpty()) item(key = "none", span = StaggeredGridItemSpan.FullLine) {
+                    if (library != null && shelves.isEmpty()) item(key = "none", span = StaggeredGridItemSpan.FullLine) {
                         Text(
                             "Nothing waiting. Share a link to Shelf from any app, or tap Add, and it's saved here.",
-                            fontFamily = Sans, fontSize = 15.sp, color = paper.muted,
+                            fontFamily = Sans, fontSize = 15.sp, color = paper.muted, modifier = Modifier.padding(top = 22.dp),
                         )
                     }
-                    items(shown, key = { it.id }) { b -> ClipCard(b, shelf.clip(b.id), onLongClick = { details(b) }) { read(b) } }
+                    shelves.forEach { row ->
+                        item(key = "shelf-${row.key}", span = StaggeredGridItemSpan.FullLine) {
+                            HomeShelf(row, topics, onOpen = read, onDetails = details)
+                        }
+                    }
                 }
             }
         }
@@ -362,5 +358,63 @@ internal fun Choice(label: String, count: Int?, on: Boolean, onClick: () -> Unit
     ) {
         Text(label, fontFamily = Sans, fontWeight = FontWeight(500), fontSize = 14.sp, color = if (on) paper.bg else paper.fg)
         count?.let { Text("$it", fontFamily = Sans, fontSize = 14.sp, color = if (on) paper.bg.copy(alpha = 0.6f) else paper.faint) }
+    }
+}
+
+/** A row of things on Home, as Reader's home has them: what's new, what's quick, what's long, what's saved for later. */
+internal data class HomeRow(val key: String, val title: String, val icon: String, val books: List<ShelfBook>)
+
+internal fun homeShelves(books: List<ShelfBook>, started: Set<String>): List<HomeRow> {
+    val live = books.filter { it.trashed == null && it.pct < 1 && it.id !in started }
+    val toRead = live.filter { it.place != "archive" && (it.kind != "book" || it.fileId != null) }
+    return listOf(
+        HomeRow("new", "Recently added", "agent", live.filter { it.place == "inbox" }.sortedByDescending { it.added }),
+        HomeRow("quick", "Quick reads", "quick", toRead.filter { it.minutes <= 12 }.sortedByDescending { it.added }),
+        HomeRow("long", "Long reads", "long", toRead.filter { it.minutes in 25..600 }.sortedByDescending { it.added }),
+        HomeRow("later", "Saved for later", "reading", live.filter { it.place == "later" && (it.kind != "book" || it.fileId != null) }.sortedByDescending { it.added }),
+    ).filter { it.books.isNotEmpty() }.map { it.copy(books = it.books.take(20)) }
+}
+
+/** One of Home's rows: its heading, and its things side by side, scrolled sideways. */
+@Composable
+private fun HomeShelf(row: HomeRow, topics: List<Topic>, onOpen: (ShelfBook) -> Unit, onDetails: (ShelfBook) -> Unit) {
+    val paper = LocalPaper.current
+    Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            com.sharathchenna.shelf.ui.library.Glyph(row.icon, 22.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(row.title, fontFamily = Serif, fontWeight = FontWeight(450), fontSize = 24.sp, color = paper.fg)
+            Text("  ${row.books.size}", fontFamily = Sans, fontSize = 14.sp, color = paper.faint)
+        }
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            items(row.books.size, key = { row.books[it].id }) { i ->
+                val b = row.books[i]
+                ShelfCard(b, topics.find { it.key == b.topic }, onClick = { onOpen(b) }, onLongClick = { onDetails(b) })
+            }
+        }
+    }
+}
+
+/** A thing on one of Home's rows: its picture (or cover), its title, and who or where it's from. */
+@Composable
+private fun ShelfCard(b: ShelfBook, topic: Topic?, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val paper = LocalPaper.current
+    Column(
+        Modifier.width(158.dp).clip(RoundedCornerShape(14.dp)).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(Modifier.size(150.dp), contentAlignment = Alignment.Center) {
+            if (b.kind == "book") Cover(b, topic, Modifier.height(150.dp))
+            else Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(hex(b.look.color)), contentAlignment = Alignment.Center) {
+                if (b.image != null) AsyncImage(b.image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Text(b.title.take(1), fontFamily = Serif, fontSize = 44.sp, color = hex(b.look.fg))
+            }
+            if (!b.seen) Box(Modifier.align(Alignment.TopStart).padding(8.dp).size(10.dp).clip(CircleShape).background(paper.accent).border(1.5.dp, paper.bg, CircleShape))
+        }
+        Text(b.title, fontFamily = Serif, fontWeight = FontWeight(500), fontSize = 15.sp, lineHeight = 19.sp, color = paper.fg, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(
+            listOfNotNull((if (b.kind == "book") b.author else hostOf(b.url) ?: b.author).takeIf { it.isNotBlank() }, fmtMinutes(b.minutes)).joinToString(" · "),
+            fontFamily = Sans, fontSize = 12.5.sp, color = paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }

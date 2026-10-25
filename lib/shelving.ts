@@ -9,6 +9,12 @@ import { listFiles, shelfItemFor } from "./library";
 import type { LibraryBook } from "./library-types";
 import type { Clip, Item } from "./types";
 
+/** The books and clippings in the owner's Trash (lib/triage.ts). */
+async function trashedIds(): Promise<Set<string>> {
+  const { results } = await (await db()).prepare("SELECT id FROM triage WHERE trashed_at IS NOT NULL").all<{ id: string }>();
+  return new Set(results.map((r) => r.id));
+}
+
 /**
  * The bookcase on the home page (lib/bookcase.ts, app/components/bookcase/): where each book and
  * clipping is shelved (the `shelving` table), and the shelf as the page draws it.
@@ -127,9 +133,19 @@ function clipAbout(clip: Clip): Shelvable {
 /** Reading pace for minutes from a file's length: about 5 characters a word, 230 words a minute. */
 const CHARS_PER_MINUTE = 1150;
 
-/** Everything on the bookcase, for anyone: no reading progress, which the owner's browser adds (/api/me). */
-export async function shelfBooks(): Promise<{ books: ShelfBook[]; unsorted: number }> {
-  const [{ items }, { items: clips }, placed, files] = await Promise.all([getShelf(), getClippings(), getShelving(), listFiles()]);
+/**
+ * Everything on the bookcase, for anyone: no reading progress, which the owner's browser adds
+ * (/api/me); and nothing the owner has put in the Trash, unless asked for (the app's Trash).
+ */
+export async function shelfBooks({ trashed = false } = {}): Promise<{ books: ShelfBook[]; unsorted: number }> {
+  const [{ items: shelved }, { items: clips }, placed, files, hidden] = await Promise.all([
+    getShelf(),
+    getClippings(undefined, { trashed }),
+    getShelving(),
+    listFiles(),
+    trashed ? Promise.resolve(new Set<string>()) : trashedIds(),
+  ]);
+  const items = shelved.filter((item) => !hidden.has(item.id));
   const fileOf = new Map<string, LibraryBook>();
   for (const file of files) {
     const owner = file.paperId ?? file.clipId ?? shelfItemFor(file, items);

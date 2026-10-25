@@ -220,6 +220,11 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
     var phase by remember(fileId) { mutableStateOf<Phase>(Phase.Loading(null)) }
     // Readium's PDF reader, for a device without the system's PDF engine or a PDF that engine can't open.
     var simplePdf by remember(fileId) { mutableStateOf(false) }
+    // Opened, it's been seen: its dot in the library goes.
+    LaunchedEffect(fileId) {
+        val unseen = shelf.library.value?.books?.filter { (it.fileId == fileId || it.id == fileId) && !it.seen }?.map { it.id }.orEmpty()
+        if (unseen.isNotEmpty()) runCatching { shelf.triage(com.sharathchenna.shelf.data.TriageChange(unseen, seen = true)) }
+    }
     LaunchedEffect(fileId, simplePdf) {
         phase = runCatching {
             val opened = shelf.open(fileId) { phase = Phase.Loading(it) }
