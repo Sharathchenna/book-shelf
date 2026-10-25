@@ -335,3 +335,7 @@ data class FeedAudio(val url: String, val type: String? = null, val seconds: Int
 
 @Serializable
 data class FeedData(val feeds: List<Feed> = emptyList(), val items: List<FeedItem> = emptyList())
+
+/** Something in the library an answer cites (/api/library/ask): its number in the answer, what it is, and how to open it. */
+@Serializable
+data class LibrarySource(val n: Int, val id: String, val kind: String, val title: String, val by: String? = null, val fileId: String? = null, val url: String? = null)

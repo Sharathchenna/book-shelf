@@ -367,6 +367,41 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
         }
     }
 
+    @Serializable
+    data class Turn(val role: String, val content: String)
+
+    @Serializable
+    private data class Ask(val messages: List<Turn>)
+
+    /**
+     * Asks the whole library (/api/library/ask): what it draws on arrives first (`onSources`), then
+     * the answer streams as it's written, each emission the whole answer so far.
+     */
+    fun askLibrary(messages: List<Turn>, onSources: (List<LibrarySource>) -> Unit): Flow<String> = flow {
+        http.preparePost("/api/library/ask") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(Ask(messages))
+        }.execute { res ->
+            check(res)
+            res.headers["x-sources"]?.let { header ->
+                runCatching { ShelfJson.decodeFromString<List<LibrarySource>>(java.net.URLDecoder.decode(header, "UTF-8")) }.onSuccess(onSources)
+            }
+            val channel = res.bodyAsChannel()
+            val text = StringBuilder()
+            val buffer = ByteArray(4096)
+            while (true) {
+                val n = channel.readAvailable(buffer)
+                if (n == -1) break
+                if (n == 0) continue
+                text.append(String(buffer, 0, n, Charsets.UTF_8))
+                val sofar = text.toString()
+                if (sofar.endsWith(AI_ERROR_MARKER.trim())) throw ApiException(0, "The answer didn't come through. Try again.")
+                emit(sofar)
+            }
+        }
+    }
+
     // ---- listening -------------------------------------------------------------------------
 
     suspend fun voices(bookId: String): List<VoiceCount> = check(http.get("/api/books/$bookId/audio") { auth() }).body<Voices>().voices

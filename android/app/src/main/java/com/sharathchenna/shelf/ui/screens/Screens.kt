@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -141,6 +142,12 @@ private val EXAMPLES = listOf("papers about attention in transformers", "a slow-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(nav: NavHostController) {
+    // Search by meaning, or ask the whole library (Ask.kt).
+    var asking by rememberSaveable { mutableStateOf(false) }
+    if (asking) {
+        AskLibrary(nav, onSearch = { asking = false })
+        return
+    }
     val shelf = LocalShelf.current
     val context = LocalContext.current
     val paper = LocalPaper.current
@@ -164,7 +171,10 @@ fun SearchScreen(nav: NavHostController) {
     Page { side ->
         LazyColumn(contentPadding = PaddingValues(start = side, end = side, bottom = 48.dp)) {
             item {
-                Heading("Search", subtitle = "Describe what you're after, in your own words. It searches books, papers, articles, newsletters and tweets by meaning.")
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Box(Modifier.weight(1f)) { Heading("Search", subtitle = "Describe what you're after, in your own words. It searches books, papers, articles, newsletters and tweets by meaning.") }
+                    Box(Modifier.padding(bottom = 30.dp, start = 12.dp)) { Pill("Ask your library", Icons.Outlined.AutoAwesome) { asking = true } }
+                }
                 Row(
                     Modifier.widthIn(max = 760.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(18.dp)).background(paper.raised).border(1.dp, paper.rule, RoundedCornerShape(18.dp)).padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
