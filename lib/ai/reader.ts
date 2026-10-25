@@ -15,6 +15,11 @@ export async function textSoFar(
   /** How far through the current section, 0–1. */
   sectionFraction: number,
   maxChars: number,
+  /**
+   * Characters past the place to take too: a selection's place is where its page or screen
+   * starts, so the passage itself can lie a little beyond it (the app's scrolled articles).
+   */
+  ahead = 0,
 ): Promise<{ book: LibraryBook; text: string; truncated: boolean } | null> {
   const book = await getFile(bookId);
   const sections = await getJson<string[]>(keys.text(bookId));
@@ -23,7 +28,7 @@ export async function textSoFar(
   const index = Math.min(Math.max(0, Math.floor(sectionIndex)), sections.length - 1);
   const parts = sections.slice(0, index).map((text, i) => (text ? `## ${book.sections[i]?.title ?? ""}\n\n${text}` : ""));
   const current = sections[index] ?? "";
-  const cut = Math.round(current.length * Math.min(1, Math.max(0, sectionFraction)));
+  const cut = Math.min(current.length, Math.round(current.length * Math.min(1, Math.max(0, sectionFraction))) + ahead);
   parts.push(`## ${book.sections[index]?.title ?? ""}\n\n${current.slice(0, cut)}`);
 
   const text = parts.filter(Boolean).join("\n\n");
@@ -49,7 +54,7 @@ Explain it briefly (under 150 words) for a smart reader outside the subfield: wh
  * top of the same rules as Explain: brief, plain prose, only the text given, and for books
  * nothing past where the reader is.
  */
-export function actionSystem(action: Exclude<ReaderAction, "explain">, paper: boolean): string {
+export function actionSystem(action: Exclude<ReaderAction, "explain">, paper: boolean, language = "English"): string {
   const what = paper ? "a research paper" : "a book";
   const scope = paper
     ? "Ground what you say in the paper text you are given."
@@ -60,6 +65,7 @@ export function actionSystem(action: Exclude<ReaderAction, "explain">, paper: bo
     check: `Does the passage still hold up? Search the web for what is known now, then say in 3 to 5 sentences (under 130 words) what has held up, what has changed, and how confident you are. This is mostly outside the text, so say so. Name your sources in the sentences that use them. If the passage is opinion, fiction or a definition rather than a factual claim, say that in one line instead of searching.`,
     connect: `Where else in the text you are given does the author take this up: develop it, support it, or complicate it? Give 2 to 4 pointers, one per line, each starting with "- " and naming the chapter or section, then one line on what happens there with a few quoted words. If the text you have never takes it up elsewhere, say so in one line.`,
     counter: `Give the strongest objection or alternative reading a sharp critic would raise against the passage, in 2 or 3 sentences. Then one line on how the author might answer. Under 110 words in all.`,
+    translate: `Translate the word or passage they selected into ${language}, as it's meant here. Give the translation first, on its own; then, for a single word or short phrase, one line on its sense in this context. If it's already in ${language}, say so in a few words and give its plain meaning instead.`,
   };
   return `You help someone reading ${what}. They selected a passage and asked for something about it.
 

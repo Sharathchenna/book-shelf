@@ -19,6 +19,9 @@ const MAX_IMAGE_CHARS = 2_000_000;
  * web, finds where else the text takes it up, or argues against it: `action`), using only what
  * comes before it in a book.
  */
+/** How far past the selection's place the context runs: a screenful of text, about. */
+const AROUND_CHARS = 2500;
+
 export async function POST(request: Request) {
   const denied = await requireOwner();
   if (denied) return denied;
@@ -31,6 +34,7 @@ export async function POST(request: Request) {
     selection?: unknown;
     image?: unknown;
     action?: unknown;
+    language?: unknown;
   };
   if (
     typeof body.bookId !== "string" ||
@@ -43,7 +47,8 @@ export async function POST(request: Request) {
   }
 
   const action: ReaderAction = isReaderAction(body.action) ? body.action : "explain";
-  const first = await textSoFar(body.bookId, body.sectionIndex, body.sectionFraction, action === "connect" ? CONNECT_CHARS : CONTEXT_CHARS);
+  // The text a little past the place too, so the passage (which can start below where its screen does) is in it.
+  const first = await textSoFar(body.bookId, body.sectionIndex, body.sectionFraction, action === "connect" ? CONNECT_CHARS : CONTEXT_CHARS, AROUND_CHARS);
   if (!first) return Response.json({ error: "Unknown book." }, { status: 404 });
   const isPaper = Boolean(first.book.paperId);
   // A paper has no spoilers: Related reads all of it.
@@ -59,7 +64,9 @@ export async function POST(request: Request) {
         { type: "text" as const, text: prompt },
       ]
     : prompt;
-  const system = action === "explain" ? (isPaper ? EXPLAIN_PAPER_SYSTEM : EXPLAIN_SYSTEM) : actionSystem(action, isPaper);
+  // Translate's language, as the reader chose it (English unless asked).
+  const language = typeof body.language === "string" && /^[\p{L} ()-]{2,40}$/u.test(body.language) ? body.language : undefined;
+  const system = action === "explain" ? (isPaper ? EXPLAIN_PAPER_SYSTEM : EXPLAIN_SYSTEM) : actionSystem(action, isPaper, language);
 
   if (action === "check") return aiResponse(request.signal, (write) => factCheck(system, content, write, request.signal));
   return aiResponse(request.signal, (write) =>

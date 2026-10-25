@@ -1,11 +1,11 @@
 /**
  * What can be done with a passage selected in the reader, beyond highlighting it: Claude Haiku
  * explains it, defines it, says it simply, checks it against the web, finds where else the text
- * takes it up, or argues against it. Shared by the selection popover and /api/reader/explain;
+ * takes it up, argues against it, or translates it. Shared by the selection popover and /api/reader/explain;
  * the prompts are in lib/ai/reader.ts. The set comes from Gloss.
  */
 
-export type ReaderAction = "explain" | "define" | "simplify" | "check" | "connect" | "counter";
+export type ReaderAction = "explain" | "define" | "simplify" | "check" | "connect" | "counter" | "translate";
 
 export const READER_ACTIONS: Record<ReaderAction, { label: string; hint: string }> = {
   explain: { label: "Explain", hint: "What it means here, and why it's here" },
@@ -14,6 +14,7 @@ export const READER_ACTIONS: Record<ReaderAction, { label: string; hint: string 
   check: { label: "Fact-check", hint: "Does it still hold up? Searches the web" },
   connect: { label: "Related", hint: "Where else the text takes this up" },
   counter: { label: "Counterpoint", hint: "The strongest objection to it" },
+  translate: { label: "Translate", hint: "In another language (English unless asked)" },
 };
 
 export const isReaderAction = (v: unknown): v is ReaderAction => typeof v === "string" && v in READER_ACTIONS;

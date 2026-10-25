@@ -57,11 +57,8 @@ const val ARTICLE_GUTTER = 28.0
  * held to its measure, with room above for the bar and below for the buttons.
  */
 fun articleCss(look: ReaderSettings): String {
-    val (rubric, muted, rule) = when (look.theme) {
-        "dark" -> Triple("#6fd3a8", "#9aa29c", "rgba(255,255,255,.16)")
-        "sepia" -> Triple("#8a5a1e", "#8a7558", "rgba(74,59,42,.18)")
-        else -> Triple("#1e7a58", "#7a756a", "rgba(34,32,27,.14)")
-    }
+    val theme = themeOf(look.theme)
+    val (rubric, muted, rule) = Triple(theme.rubric, theme.muted, theme.rule)
     val measure = MEASURES[look.lineWidth] ?: 34
     return """
         :root { --rubric: $rubric; --muted: $muted; --rule: $rule; }
@@ -75,8 +72,8 @@ fun articleCss(look: ReaderSettings): String {
         :root[style] .xarticle .byline p.length { font-size: .7em !important; line-height: 1.4 !important; }
         :root[style] .xarticle .byline a.original { font-size: .7em !important; }
         .xarticle figure img, .xarticle .cover img { cursor: zoom-in; }
-        ${if (look.theme == "dark") ".xarticle img { filter: brightness(.86) contrast(1.05); }" else ""}
-        ::selection { background: ${if (look.theme == "dark") "rgba(111,211,168,.35)" else "rgba(30,122,88,.22)"}; }
+        ${if (theme.dark) ".xarticle img { filter: brightness(.86) contrast(1.05); }" else ""}
+        ::selection { background: ${if (theme.dark) "rgba(111,211,168,.35)" else "rgba(30,122,88,.22)"}; }
     """.trimIndent()
 }
 

@@ -49,7 +49,14 @@ data class ReaderBehaviour(
     val animate: Boolean = true,
     /** The pen's mode when a reader opens: read or mark. */
     val penStart: String = "read",
+    /** For an e-ink screen, as Readwise Reader's E-ink mode: nothing animates, and taps move a screenful even in a scroll. */
+    val eink: Boolean = false,
+    /** Text is highlighted as soon as it's selected (the menu still shows for a single word's lookup). */
+    val autoHighlight: Boolean = false,
 ) {
+    /** Page turns animate unless asked not to, or on an e-ink screen. */
+    val animated: Boolean get() = animate && !eink
+
     companion object {
         private val state = MutableStateFlow<ReaderBehaviour?>(null)
         private fun prefs(context: Context) = context.getSharedPreferences("reader-behaviour", Context.MODE_PRIVATE)
@@ -66,6 +73,8 @@ data class ReaderBehaviour(
                     tapEdges = p.getBoolean("tapEdges", true),
                     animate = p.getBoolean("animate", true),
                     penStart = p.getString("penStart", "read")!!,
+                    eink = p.getBoolean("eink", false),
+                    autoHighlight = p.getBoolean("autoHighlight", false),
                 )
             }
             return state
@@ -77,6 +86,7 @@ data class ReaderBehaviour(
                 .putBoolean("keepAwake", b.keepAwake).putBoolean("fullScreen", b.fullScreen).putString("orientation", b.orientation)
                 .putFloat("brightness", b.brightness).putBoolean("volumeKeys", b.volumeKeys).putBoolean("tapEdges", b.tapEdges)
                 .putBoolean("animate", b.animate).putString("penStart", b.penStart)
+                .putBoolean("eink", b.eink).putBoolean("autoHighlight", b.autoHighlight)
                 .apply()
         }
     }
@@ -129,7 +139,7 @@ fun StatusBarFor(theme: String) {
     DisposableEffect(theme) {
         val bars = WindowCompat.getInsetsController(activity.window, view)
         val before = bars.isAppearanceLightStatusBars
-        bars.isAppearanceLightStatusBars = theme != "dark"
+        bars.isAppearanceLightStatusBars = !themeOf(theme).dark
         onDispose { bars.isAppearanceLightStatusBars = before }
     }
 }
@@ -159,10 +169,13 @@ fun BehaviourControls(b: ReaderBehaviour, onChange: (ReaderBehaviour) -> Unit) {
                 FilterChip(selected = b.orientation == k, onClick = { onChange(b.copy(orientation = k)) }, label = { Text(label) })
             }
         }
+        Toggle("E-ink mode", "For an e-ink screen: nothing animates, and a tap near the top or bottom moves a screenful at a time, even in a scroll. Pair it with the Ink theme.", b.eink) { onChange(b.copy(eink = it)) }
         Text("TURNING PAGES", style = Eyebrow, color = muted)
         Toggle("Tap the left and right edges", "A tap in the middle still shows the bars.", b.tapEdges) { onChange(b.copy(tapEdges = it)) }
         Toggle("Volume keys turn pages", "Down for the next page, up for the one before.", b.volumeKeys) { onChange(b.copy(volumeKeys = it)) }
-        Toggle("Animate page turns", null, b.animate) { onChange(b.copy(animate = it)) }
+        if (!b.eink) Toggle("Animate page turns", null, b.animate) { onChange(b.copy(animate = it)) }
+        Text("HIGHLIGHTING", style = Eyebrow, color = muted)
+        Toggle("Highlight as soon as text is selected", "Selecting a passage highlights it, without the menu. Holding a single word still looks it up.", b.autoHighlight) { onChange(b.copy(autoHighlight = it)) }
         Text("THE PEN'S TOOL ON OPENING", style = Eyebrow, color = muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("read" to "Read (it scrolls)", "mark" to "Highlight").forEach { (k, label) ->

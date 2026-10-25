@@ -68,7 +68,12 @@ private fun SignedIn(launchTarget: MutableStateFlow<String?>) {
         composable<Main> { entry -> MainScreen(nav, initialTab = entry.toRoute<Main>().tab) }
         composable<Reader> { entry ->
             val route = entry.toRoute<Reader>()
-            ReaderScreen(route.fileId, at = route.at, onBack = { nav.popBackStack() }, onListen = { section -> nav.navigate(Listen(route.fileId, section)) })
+            val context = androidx.compose.ui.platform.LocalContext.current
+            ReaderScreen(
+                route.fileId, at = route.at, onBack = { nav.popBackStack() }, onListen = { section -> nav.navigate(Listen(route.fileId, section)) },
+                // Archive and next: this one closes, the next opens in its place.
+                onOpenNext = { next -> nav.popBackStack(); openBook(context, nav, next) },
+            )
         }
         composable<Listen> { entry ->
             val route = entry.toRoute<Listen>()

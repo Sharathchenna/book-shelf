@@ -133,7 +133,7 @@ private class Paging {
     var fit = 0f
 }
 
-private enum class PdfPanel { Pages, Notes, Search, Ai, Brief, Pinned }
+private enum class PdfPanel { Pages, Notes, Search, Ai, Brief, Pinned, Info }
 
 /** What the menu (a loop, a bracket, the pen's button, or a finger's selection) is for. */
 private data class Choice(val passage: PdfPassage?, val area: PageRect?, val page: Int, val stroke: InkStroke?, val x: Float, val y: Float)
@@ -451,7 +451,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (settings.textView) {
-                    PdfTextView(d, page, if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black, onPage = { p ->
+                    PdfTextView(d, page, com.sharathchenna.shelf.reader.themeOf(look.theme).ink, onPage = { p ->
                         settings = settings.copy(textView = false)
                         scope.launch { kotlinx.coroutines.delay(300); go(p) }
                     }, modifier = Modifier.fillMaxSize().statusBarsPadding())
@@ -560,11 +560,12 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                         isPdf = true,
                         onBack = onBack,
                         onPanel = { p ->
-                            val want = when (p) { Panel.Contents -> PdfPanel.Pages; Panel.Notes -> PdfPanel.Notes; Panel.Search -> PdfPanel.Search; Panel.Ai -> PdfPanel.Ai; Panel.Brief -> PdfPanel.Brief }
+                            val want = when (p) { Panel.Contents -> PdfPanel.Pages; Panel.Notes -> PdfPanel.Notes; Panel.Search -> PdfPanel.Search; Panel.Ai -> PdfPanel.Ai; Panel.Brief -> PdfPanel.Brief; Panel.Info -> PdfPanel.Info }
                             panel = if (panel == want) null else want
                         },
                         onRecap = { ai = AiTask.Recap(page, 0.5); panel = PdfPanel.Ai },
                         onSettings = { showSettings = true },
+                        onInfo = { panel = if (panel == PdfPanel.Info) null else PdfPanel.Info },
                         onOriginal = (file.paperId ?: file.clipId)?.let { id -> shelf.clip(id)?.url }?.let { url -> { com.sharathchenna.shelf.ui.openExternal(context, url) } },
                         searchable = true,
                         marked = page in marks,
@@ -578,7 +579,7 @@ fun PdfReading(opened: Shelf.Opened, at: String?, onBack: () -> Unit, onListen: 
                 }
 
                 // The foot: the page, or with the bars up, a slider through the pages.
-                val ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black
+                val ink = com.sharathchenna.shelf.reader.themeOf(look.theme).ink
                 if (chrome) {
                     var dragging by remember { mutableStateOf<Float?>(null) }
                     val paper = LocalPaper.current
@@ -749,6 +750,7 @@ private fun PdfPanelContent(
                     PdfPanel.Notes -> "Highlights & notes"
                     PdfPanel.Search -> "Search"
                     PdfPanel.Brief -> "Brief"
+                    PdfPanel.Info -> "Info"
                     PdfPanel.Pinned -> "Page ${(pinned ?: page) + 1}, pinned"
                     PdfPanel.Ai -> when (task) {
                         is AiTask.Explain -> SelectionAction.entries.find { it.action == task.action }?.label ?: "Explain"
@@ -777,6 +779,7 @@ private fun PdfPanelContent(
             PdfPanel.Brief -> BriefPanel(bookId) { section -> onGo(section, null) }
             PdfPanel.Pinned -> PinnedPage(doc, pinned ?: page)
             PdfPanel.Ai -> AiPanel(bookId, task, onAi)
+            PdfPanel.Info -> com.sharathchenna.shelf.reader.InfoPanel(bookId, onSummarize = null)
         }
     }
 }

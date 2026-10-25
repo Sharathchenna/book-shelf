@@ -13,6 +13,8 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import androidx.fragment.app.FragmentFactory
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.sharathchenna.shelf.data.Highlight
 import com.sharathchenna.shelf.ink.inkSvg
 import kotlinx.parcelize.Parcelize
@@ -24,7 +26,6 @@ import org.readium.r2.navigator.VisualNavigator
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
-import org.readium.r2.navigator.epub.css.FontStyle
 import org.readium.r2.navigator.html.HtmlDecorationTemplate
 import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import org.readium.r2.navigator.input.InputListener
@@ -64,6 +65,12 @@ class ReaderController {
     /** Taps at a page's edges turn it, and turns are animated: as the reader's settings say. */
     var tapEdges = true
     var animate = true
+    /**
+     * E-ink mode (ReaderBehaviour): in a scroll, a tap near the top or bottom (or the left or right
+     * edge) moves a screenful at a time, as a page turns, rather than leaving it to be dragged.
+     */
+    var eink = false
+    var scrolled = false
 
     var navigator: VisualNavigator? = null
         internal set(value) {
@@ -95,6 +102,29 @@ class ReaderController {
     fun clearSelection() = (navigator as? SelectableNavigator)?.clearSelection()
 
     fun go(locator: Locator) = navigator?.go(locator, animated = false)
+
+    /** In e-ink mode's scroll: a screenful up or down for a tap in its zone, else false (the tap shows the bars). */
+    internal fun pageScroll(event: TapEvent): Boolean {
+        val view = epub?.view ?: return false
+        val w = view.width.toFloat().takeIf { it > 0 } ?: return false
+        val h = view.height.toFloat().takeIf { it > 0 } ?: return false
+        val (x, y) = event.point.x to event.point.y
+        val step = when {
+            y > h * 0.7f || x > w * 0.82f -> 1
+            y < h * 0.3f || x < w * 0.18f -> -1
+            else -> return false
+        }
+        scrollScreen(step)
+        return true
+    }
+
+    /** A scroll moved a screenful down (1) or up (-1), a line or two kept from the screen before. */
+    fun scrollScreen(step: Int) {
+        val fragment = epub ?: return
+        fragment.viewLifecycleOwner.lifecycleScope.launch {
+            runCatching { fragment.evaluateJavascript("window.scrollBy(0, $step * Math.max(innerHeight - 56, innerHeight * 0.88))") }
+        }
+    }
 }
 
 /** Readium's stylesheet for a drawing: an element at its paragraph's corner, the SVG drawn from there, over the text. */
@@ -130,7 +160,12 @@ fun NavigatorHost(
     onSelection: (SelectionAction) -> Unit,
     /** A tap in the middle of the page, where it fell (in the navigator's pixels). */
     onTap: (android.graphics.PointF) -> Unit,
-    onDecoration: (id: String) -> Unit,
+    /** A highlight or drawing tapped: its id, and where it is on the screen (the navigator's pixels). */
+    onDecoration: (id: String, rect: android.graphics.RectF?) -> Unit,
+    /** Text was just selected, or the selection changed: the menu shows over it. */
+    onSelecting: () -> Unit = {},
+    /** The book jumped to a place (a link, the contents, a note), away from the reading. */
+    onJump: (Locator) -> Unit = {},
     pen: PenListener,
     penHighlight: Boolean,
     penWrite: Boolean,
@@ -155,21 +190,16 @@ fun NavigatorHost(
                     override fun onExternalLinkActivated(url: org.readium.r2.shared.util.AbsoluteUrl) {
                         if (url.scheme.value == "http" || url.scheme.value == "https") com.sharathchenna.shelf.ui.openExternal(activity, url.toString())
                     }
+                    override fun onJumpToLocator(locator: Locator) = onJump(locator)
                 },
                 configuration = EpubNavigatorFragment.Configuration(
                     decorationTemplates = templates(),
-                    selectionActionModeCallback = SelectionMenu(onSelection),
+                    selectionActionModeCallback = SelectionMenu(onSelection, onSelecting),
                 ).apply {
                     gutter?.let { readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(pageGutter = org.readium.r2.navigator.epub.css.Length.Px(it)) }
-                    // The site's own type, offered in the reader's settings (assets/fonts).
+                    // The reading typefaces offered in the reader's settings (assets/fonts, Themes.kt).
                     servedAssets = listOf("fonts/.*")
-                    addFontFamilyDeclaration(FRAUNCES) {
-                        addFontFace { addSource("fonts/Fraunces.ttf"); setFontStyle(FontStyle.NORMAL); setFontWeight(100..900) }
-                        addFontFace { addSource("fonts/Fraunces-Italic.ttf"); setFontStyle(FontStyle.ITALIC); setFontWeight(100..900) }
-                    }
-                    addFontFamilyDeclaration(GEIST) {
-                        addFontFace { addSource("fonts/Geist.ttf"); setFontStyle(FontStyle.NORMAL); setFontWeight(100..900) }
-                    }
+                    declareReaderFonts()
                 },
             )
         }
@@ -214,7 +244,7 @@ private fun attach(
     tag: String,
     controller: ReaderController,
     onTap: (android.graphics.PointF) -> Unit,
-    onDecoration: (String) -> Unit,
+    onDecoration: (String, android.graphics.RectF?) -> Unit,
 ) {
     val fm = activity.supportFragmentManager
     if (fm.findFragmentByTag(tag) != null || activity.isFinishing) return
@@ -227,7 +257,8 @@ private fun attach(
     // a tap in the middle shows or hides the bars.
     navigator.addInputListener(object : InputListener {
         override fun onTap(event: TapEvent): Boolean =
-            controller.tapEdges && DirectionalNavigationAdapter(navigator as org.readium.r2.navigator.OverflowableNavigator, animatedTransition = controller.animate).onTap(event)
+            if (controller.eink && controller.scrolled) controller.pageScroll(event)
+            else controller.tapEdges && DirectionalNavigationAdapter(navigator as org.readium.r2.navigator.OverflowableNavigator, animatedTransition = controller.animate).onTap(event)
     })
     navigator.addInputListener(object : InputListener {
         override fun onTap(event: TapEvent): Boolean {
@@ -238,7 +269,7 @@ private fun attach(
     (navigator as? DecorableNavigator)?.let { decorable ->
         val listener = object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
-                onDecoration(event.decoration.id)
+                onDecoration(event.decoration.id, event.rect)
                 return true
             }
         }
@@ -247,14 +278,22 @@ private fun attach(
     }
 }
 
-/** The menu over selected text: the reader's actions in place of the system's own. */
-private class SelectionMenu(private val onAction: (SelectionAction) -> Unit) : ActionMode.Callback {
+/**
+ * The menu over selected text: the reader's actions in place of the system's own. Its showing
+ * (and its being prepared again as the selection's handles move) tells the reader the selection
+ * changed, for the lookup card over a single word and for highlighting at once.
+ */
+private class SelectionMenu(private val onAction: (SelectionAction) -> Unit, private val onSelecting: () -> Unit) : ActionMode.Callback {
     override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
         SelectionAction.entries.forEachIndexed { i, a -> menu.add(Menu.NONE, i, i, a.label) }
+        onSelecting()
         return true
     }
 
-    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+        onSelecting()
+        return false
+    }
 
     override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
         onAction(SelectionAction.entries[item.itemId])

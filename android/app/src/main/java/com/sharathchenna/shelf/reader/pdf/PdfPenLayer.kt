@@ -138,10 +138,12 @@ class PdfPenLayer(context: Context) : PenRouter(context) {
         scope.cancel()
     }
 
-    /** The page tinted as the reader's theme asks: as it is, sepia, or night (inverted, the ink still dark on light). */
+    /** The page tinted as the reader's theme asks: as it is, sepia, soft grey, or dark (inverted, the ink light on dark). */
     fun tint(theme: String) {
         val matrix = when (theme) {
             "sepia" -> ColorMatrix(floatArrayOf(0.94f, 0f, 0f, 0f, 8f, 0f, 0.9f, 0f, 0f, 4f, 0f, 0f, 0.78f, 0f, -6f, 0f, 0f, 0f, 1f, 0f))
+            "soft" -> ColorMatrix(floatArrayOf(0.9f, 0f, 0f, 0f, 8f, 0f, 0.9f, 0f, 0f, 7f, 0f, 0f, 0.88f, 0f, 4f, 0f, 0f, 0f, 1f, 0f))
+            "slate" -> ColorMatrix(floatArrayOf(-0.7f, 0f, 0f, 0f, 215f, 0f, -0.7f, 0f, 0f, 222f, 0f, 0f, -0.68f, 0f, 230f, 0f, 0f, 0f, 1f, 0f))
             "dark" -> ColorMatrix(floatArrayOf(-0.86f, 0f, 0f, 0f, 232f, 0f, -0.86f, 0f, 0f, 232f, 0f, 0f, -0.86f, 0f, 232f, 0f, 0f, 0f, 1f, 0f))
             else -> null
         }

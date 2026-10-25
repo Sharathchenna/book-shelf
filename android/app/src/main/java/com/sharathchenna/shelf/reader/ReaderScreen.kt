@@ -52,6 +52,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
@@ -89,7 +94,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** The reader's panels: beside the page on a wide screen, a sheet on a narrow one. */
-enum class Panel { Contents, Notes, Ai, Search, Brief }
+enum class Panel { Contents, Notes, Ai, Search, Brief, Info }
 
 /** What the AI panel is doing: explaining a passage, recapping, or chatting. */
 sealed interface AiTask {
@@ -142,12 +147,14 @@ data class ReaderSettings(
     fun booksOwn(): ReaderSettings = copy(font = "original", fontSize = 1.0, lineHeight = null, justify = null, margins = 1.0, paragraphSpacing = null, fontWeight = null)
 
     fun epub(): EpubPreferences = EpubPreferences(
-        theme = when (theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
+        theme = themeOf(theme).readium,
+        backgroundColor = org.readium.r2.navigator.preferences.Color(themeOf(theme).bg.toInt()),
+        textColor = org.readium.r2.navigator.preferences.Color(themeOf(theme).fg.toInt()),
         fontSize = fontSize,
         scroll = scroll,
         // Two pages side by side when the window is wide enough (as on the tablet in landscape).
         columnCount = if (spread) ColumnCount.AUTO else ColumnCount.ONE,
-        fontFamily = when (font) { "fraunces" -> FRAUNCES; "geist" -> GEIST; "serif" -> FontFamily.SERIF; "sans" -> FontFamily.SANS_SERIF; else -> null },
+        fontFamily = READER_FONTS.find { it.key == font }?.family ?: when (font) { "serif" -> FontFamily.SERIF; "sans" -> FontFamily.SANS_SERIF; else -> null },
         publisherStyles = ownStyles,
         lineHeight = lineHeight,
         pageMargins = margins,
@@ -214,7 +221,7 @@ private sealed interface Phase {
 
 /** A book from the library, in Readium: an EPUB laid out as pages or a scroll, or a PDF. */
 @Composable
-fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int) -> Unit) {
+fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int) -> Unit, onOpenNext: (com.sharathchenna.shelf.data.ShelfBook) -> Unit = {}) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
     var phase by remember(fileId) { mutableStateOf<Phase>(Phase.Loading(null)) }
@@ -250,7 +257,7 @@ fun ReaderScreen(fileId: String, at: String?, onBack: () -> Unit, onListen: (Int
             }
         }
         is Phase.Ready -> {
-            Reading(p.opened, p.book, p.initial, p.restore, onBack, onListen)
+            Reading(p.opened, p.book, p.initial, p.restore, onBack, onListen, onOpenNext)
         }
         is Phase.Pdf -> com.sharathchenna.shelf.reader.pdf.PdfReading(p.opened, at, onBack, onListen, onFallback = { simplePdf = true })
     }
@@ -268,7 +275,7 @@ private suspend fun initialLocator(book: OpenedBook, progress: Progress?, highli
 
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
-private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, restore: Double?, onBack: () -> Unit, onListen: (Int) -> Unit) {
+private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, restore: Double?, onBack: () -> Unit, onListen: (Int) -> Unit, onOpenNext: (com.sharathchenna.shelf.data.ShelfBook) -> Unit) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
     val activity = LocalActivity.current as FragmentActivity
@@ -285,7 +292,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
     val look = settings.resolve(androidx.compose.foundation.isSystemInDarkTheme())
     StatusBarFor(look.theme)
     controller.tapEdges = behaviour.tapEdges
-    controller.animate = behaviour.animate
+    controller.animate = behaviour.animated
+    controller.eink = behaviour.eink
+    controller.scrolled = look.scroll
     var chrome by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf<Panel?>(null) }
     var ai by remember { mutableStateOf<AiTask?>(null) }
@@ -302,6 +311,17 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
     var marks by remember { mutableStateOf(Bookmarks.load(context, file.id)) }
     var fresh by remember { mutableStateOf<Highlight?>(null) }
     var picture by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // A word held down, looked up (Lookup.kt); a highlight tapped, its bar beside it (HighlightBar.kt); its tags being edited.
+    var lookup by remember { mutableStateOf<Lookup?>(null) }
+    var tapped by remember { mutableStateOf<Pair<Highlight, android.graphics.RectF?>?>(null) }
+    var tagging by remember { mutableStateOf<Highlight?>(null) }
+    var selectingTick by remember { mutableStateOf(0) }
+    // Where the reading was before a jump (a link, the contents, a note), to go back to, as Reader's "Return to 39%".
+    var returnTo by remember { mutableStateOf<ReturnPoint?>(null) }
+    var returning by remember { mutableStateOf(false) }
+    // Readium's own moves while the book opens (to where it was left, and a scrolled article's settling) aren't the reader's jumps.
+    var jumpsFrom by remember { mutableStateOf(Long.MAX_VALUE) }
+    LaunchedEffect(ready) { if (ready) { kotlinx.coroutines.delay(if (restore != null) 6000 else 2500); jumpsFrom = System.currentTimeMillis() } }
     val positions = rememberPositions(book)
     val density = androidx.compose.ui.platform.LocalDensity.current.density
 
@@ -379,11 +399,14 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
         val before = lastSeen
         lastSeen = now
         if (panel != null) return@LaunchedEffect
-        chrome = settings.scroll && now != null && before != null && now < before - 0.002
+        // Not in e-ink mode, where a screenful back is a page turned, not a reach for the bars.
+        chrome = settings.scroll && !behaviour.eink && now != null && before != null && now < before - 0.002
     }
 
-    BackHandler(enabled = panel != null || drawing || editing != null) {
+    BackHandler(enabled = panel != null || drawing || editing != null || tapped != null || lookup != null) {
         when {
+            tapped != null -> tapped = null
+            lookup != null -> { lookup = null; controller.clearSelection() }
             drawing -> { drawing = false; written = null }
             editing != null -> editing = null
             else -> panel = null
@@ -401,6 +424,9 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
         Unit
     }
 
+    // The text just highlighted and when, so a selection highlighted at once (and by the pen) isn't highlighted twice.
+    var lastHighlighted by remember { mutableStateOf<Pair<String, Long>?>(null) }
+
     /** What the selection menu asked for, applied to the text selected now. */
     val onSelection: (SelectionAction) -> Unit = { action ->
         scope.launch {
@@ -410,8 +436,12 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
             val section = book.sectionOf(selected)
             val fraction = selected.locations.progression ?: 0.0
             controller.clearSelection()
+            lookup = null
             when (action) {
                 SelectionAction.Highlight, SelectionAction.Note -> {
+                    val recent = lastHighlighted
+                    if (action == SelectionAction.Highlight && recent != null && recent.first == text && System.currentTimeMillis() - recent.second < 4000) return@launch
+                    lastHighlighted = text to System.currentTimeMillis()
                     val now = Instant.now().toString()
                     val note = Highlight(
                         id = UUID.randomUUID().toString().replace("-", "").take(16),
@@ -435,6 +465,28 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     panel = Panel.Ai
                 }
             }
+        }
+    }
+
+    // As text is selected: a single word is looked up (Reader's card); a passage, with Highlight at
+    // once on, is highlighted without the menu. Watched until the selection goes.
+    LaunchedEffect(selectingTick) {
+        if (selectingTick == 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(220)
+        while (true) {
+            val current = (controller.navigator as? org.readium.r2.navigator.SelectableNavigator)?.currentSelection()
+            val selected = current?.locator
+            val text = selected?.text?.highlight?.trim().orEmpty()
+            if (selected == null || text.isEmpty()) { lookup = null; break }
+            if (isSingleWord(text)) {
+                val height = controller.epub?.view?.height ?: 0
+                val low = current.rect?.let { it.centerY() > height * 0.5f } ?: true
+                if (lookup?.word != text) lookup = Lookup(text, book.sectionOf(selected), selected.locations.progression ?: 0.0, low)
+            } else {
+                lookup = null
+                if (behaviour.autoHighlight) { onSelection(SelectionAction.Highlight); break }
+            }
+            kotlinx.coroutines.delay(450)
         }
     }
 
@@ -462,7 +514,10 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                 drawing = true
             }
             override fun onNearTop() { if (!chrome) chrome = true }
-            override fun onButton() { (controller.navigator as? org.readium.r2.navigator.OverflowableNavigator)?.goForward(animated = true) }
+            override fun onButton() {
+                if (controller.eink && controller.scrolled) controller.scrollScreen(1)
+                else (controller.navigator as? org.readium.r2.navigator.OverflowableNavigator)?.goForward(animated = controller.animate)
+            }
         }
     }
 
@@ -474,7 +529,18 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
         val volume = behaviour.volumeKeys && (event.key == Key.VolumeDown || event.key == Key.VolumeUp)
         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent volume
         val nav = controller.navigator as? org.readium.r2.navigator.OverflowableNavigator ?: return@onPreviewKeyEvent false
-        val animated = behaviour.animate
+        val animated = behaviour.animated
+        // In e-ink mode a scroll moves a screenful at a time for the keys too.
+        if (controller.eink && look.scroll) {
+            val step = when {
+                event.key == Key.DirectionRight || event.key == Key.DirectionDown || event.key == Key.PageDown || (volume && event.key == Key.VolumeDown) -> 1
+                event.key == Key.DirectionLeft || event.key == Key.DirectionUp || event.key == Key.PageUp || (volume && event.key == Key.VolumeUp) -> -1
+                event.key == Key.Spacebar -> if (event.isShiftPressed) -1 else 1
+                else -> return@onPreviewKeyEvent false
+            }
+            controller.scrollScreen(step)
+            return@onPreviewKeyEvent true
+        }
         when {
             event.key == Key.DirectionRight || event.key == Key.PageDown || (volume && event.key == Key.VolumeDown) -> nav.goForward(animated = animated)
             event.key == Key.DirectionLeft || event.key == Key.PageUp || (volume && event.key == Key.VolumeUp) -> nav.goBackward(animated = animated)
@@ -525,8 +591,20 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     controller = controller,
                     onSelection = onSelection,
                     // A tap on a picture shows it on its own; anywhere else, the bars.
-                    onTap = { point -> scope.launch { picture = controller.pictureAt(point, density) ?: run { chrome = !chrome; null } } },
-                    onDecoration = { id -> notes.find { it.id == id }?.let { editing = NoteEdit(it) } },
+                    onTap = { point ->
+                        // A tap away from a highlight's bar or the lookup card puts it away, and does nothing else.
+                        if (tapped != null || lookup != null) { tapped = null; if (lookup != null) { lookup = null; controller.clearSelection() } }
+                        else scope.launch { picture = controller.pictureAt(point, density) ?: run { chrome = !chrome; null } }
+                    },
+                    onDecoration = { id, rect ->
+                        notes.find { it.id == id }?.let { n -> if (n.ink != null) editing = NoteEdit(n) else tapped = n to rect }
+                    },
+                    onSelecting = { selectingTick++ },
+                    onJump = { _ ->
+                        val from = locator
+                        if (returning) returning = false
+                        else if (from != null && System.currentTimeMillis() >= jumpsFrom) returnTo = ReturnPoint(from, scrolled, ((scrolled ?: from.locations.totalProgression ?: 0.0) * 100).toInt())
+                    },
                     pen = pen,
                     penHighlight = (nib == Nib.Highlight || nib == Nib.Erase) && !drawing,
                     penWrite = nib == Nib.Write && !drawing,
@@ -570,6 +648,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                             if (book.isPdf) sketching = locator?.let(book::sectionOf) ?: 0 else drawing = true
                         },
                         onSettings = { showSettings = true },
+                        onInfo = { panel = if (panel == Panel.Info) null else Panel.Info },
                         noun = if (article) "article" else "book",
                         onOriginal = (file.clipId ?: file.paperId)?.let { id -> shelf.clip(id)?.url }?.let { url -> { com.sharathchenna.shelf.ui.openExternal(context, url) } },
                         isPdf = book.isPdf,
@@ -580,7 +659,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     )
                 }
                 val progress = (scrolled ?: locator?.locations?.totalProgression ?: 0.0).toFloat()
-                val ink = if (look.theme == "dark") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black
+                val ink = themeOf(look.theme).ink
                 if (article && !drawing && !chrome) ArticleProgress(progress, ink, Modifier.align(Alignment.TopCenter))
                 if (chrome && !drawing) {
                     Scrubber(book, positions, progress, onGo = { controller.go(it) }, modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 720.dp).fillMaxWidth())
@@ -593,7 +672,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                     )
                     ReadingFooter(
                         // An article's title is the page's own masthead; the foot keeps to what's left.
-                        chapter = if (article) "" else locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
+                        chapter = if (article) file.title else locator?.title ?: book.linkFor(section)?.title ?: file.sections.getOrNull(section)?.title.orEmpty(),
                         where = if (article) listOf(minutesLeft(positions, progress), "${Math.round(progress * 100)}%").filter { it.isNotEmpty() }.joinToString("  ·  ") else whereLabel(book, positions, locator),
                         // An article's progress is the line along the top.
                         progress = if (article) 0f else progress,
@@ -609,6 +688,68 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                         onColor = { c -> scope.launch { shelf.saveNote(file.id, note.copy(color = c)) }; fresh = null },
                         onNote = { editing = NoteEdit(note, focusNote = true); fresh = null },
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 56.dp),
+                    )
+                }
+                // A highlight tapped: its bar in the margin beside it.
+                tapped?.let { (note, rect) ->
+                    val current = notes.find { it.id == note.id } ?: note
+                    val insets = androidx.compose.foundation.layout.WindowInsets.statusBars
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val width = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width
+                    val top = with(density) { insets.getTop(this) + 8.dp.roundToPx() + (rect?.top?.toInt() ?: 200) }
+                    // Just past the text's right edge, as Reader sets it, kept on the screen.
+                    val left = with(density) { ((rect?.right?.toInt() ?: width) + 28.dp.roundToPx()).coerceAtMost(width - (if (panel != null && wide) 470 else 70).dp.roundToPx()) }
+                    HighlightBar(
+                        current,
+                        onNote = { editing = NoteEdit(current, focusNote = true); tapped = null },
+                        onTags = { tagging = current; tapped = null },
+                        onAsk = { ai = AiTask.Chat(current.text); panel = Panel.Ai; tapped = null },
+                        onColor = { c -> scope.launch { shelf.saveNote(file.id, current.copy(color = c)) } },
+                        onRemove = { scope.launch { shelf.removeNote(file.id, current) }; tapped = null; message = "Highlight removed" },
+                        modifier = Modifier.align(Alignment.TopStart).offset { androidx.compose.ui.unit.IntOffset(left, (top - 20).coerceAtLeast(0)) },
+                    )
+                }
+                // A word held down, looked up.
+                lookup?.let { l ->
+                    LookupCard(
+                        l, file.id,
+                        onHighlight = { onSelection(SelectionAction.Highlight) },
+                        onClose = { lookup = null; controller.clearSelection() },
+                        // Clear of the word: above it when it's low on the screen, below it when it's high.
+                        modifier = if (l.low) Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(start = 24.dp, end = 24.dp, top = 16.dp)
+                        else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 40.dp),
+                    )
+                }
+                // Back to where the reading was before a jump.
+                val progressNow = scrolled ?: locator?.locations?.totalProgression ?: 0.0
+                returnTo?.takeIf { lookup == null && Math.abs(it.percent - progressNow * 100) >= 1.0 }?.let { point ->
+                    ReturnPill(
+                        point.percent,
+                        onReturn = {
+                            returning = true
+                            returnTo = null
+                            controller.go(point.locator)
+                            if (article && look.scroll && point.scrolled != null) scope.launch { controller.settle(point.scrolled) }
+                        },
+                        onDismiss = { returnTo = null },
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
+                    )
+                }
+                // At the end: Archive and open the next thing, as Reader offers.
+                val here = remember(shelf.library.collectAsState().value, file.id) { shelf.library.value?.books?.find { it.fileId == file.id || it.id == file.id } }
+                if (here != null && here.trashed == null && here.place != "archive" && progressNow >= 0.985 && lookup == null && returnTo == null && !drawing) {
+                    val next = remember(here.id) {
+                        shelf.library.value?.books.orEmpty()
+                            .filter { it.id != here.id && it.trashed == null && it.place == here.place && it.pct < 1 && (it.fileId != null || it.readable) }
+                            .sortedByDescending { it.added }.firstOrNull()
+                    }
+                    ArchiveAndNext(
+                        next?.title,
+                        onArchive = {
+                            scope.launch { runCatching { shelf.triage(com.sharathchenna.shelf.data.TriageChange(listOf(here.id), place = "archive")) } }
+                            if (next != null) onOpenNext(next) else onBack()
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (chrome) 130.dp else 64.dp),
                     )
                 }
                 // The pen's tools, Ask and Listen, down the page's left side.
@@ -634,14 +775,14 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
                 Box(Modifier.width(400.dp).fillMaxHeight().background(LocalPaper.current.raised).statusBarsPadding().navigationBarsPadding()) {
                     val edit = editing
                     if (edit != null) NoteEditor(edit, onSave = saveEdit, onRemove = removeEdit, onExplain = explainEdit, onClose = { saveEdit(it) })
-                    else PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+                    else PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it }, onPanel = { panel = it })
                 }
             }
         }
         if (!wide && panel != null) {
             ModalBottomSheet(onDismissRequest = { panel = null }) {
                 Box(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
-                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it })
+                    PanelContent(panel!!, book, file.id, file.paperId != null, notes, ai, here, controller, marks, onRemoveMark = { m -> marks = marks - m; Bookmarks.save(context, file.id, marks) }, onSendNotes = sendNotes, onClose = { panel = null }, onEdit = { editing = NoteEdit(it) }, onAi = { ai = it }, onPanel = { panel = it })
                 }
             }
         }
@@ -655,6 +796,13 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
         SettingsSheet(settings, isPdf = book.isPdf, article = article, onChange = { settings = it; it.save(context, article) }, onDismiss = { showSettings = false })
     }
     picture?.let { PictureViewer(it, onDismiss = { picture = null }) }
+    tagging?.let { note ->
+        TagEditor(
+            note, others = notes.flatMap { it.tags }.distinct().sorted(),
+            onSave = { tags -> scope.launch { shelf.saveNote(file.id, note.copy(tags = tags)) }; tagging = null },
+            onDismiss = { tagging = null },
+        )
+    }
     sketching?.let { page ->
         PageSketch(
             pdf = opened.path,
@@ -673,11 +821,7 @@ private fun Reading(opened: Shelf.Opened, book: OpenedBook, initial: Locator?, r
     }
 }
 
-fun readerBackground(theme: String) = when (theme) {
-    "dark" -> androidx.compose.ui.graphics.Color(0xFF000000)
-    "sepia" -> androidx.compose.ui.graphics.Color(0xFFFAF4E8)
-    else -> androidx.compose.ui.graphics.Color(0xFFFFFFFF)
-}
+fun readerBackground(theme: String) = themeOf(theme).background
 
 /**
  * The reader's bar: back, where you are, and the three things reached for most (the contents,
@@ -703,6 +847,8 @@ internal fun TopBar(
     /** Drawing with a finger, for a book's margin (the pen draws with Write). */
     onDraw: (() -> Unit)? = null,
     onOriginal: (() -> Unit)? = null,
+    /** What it is, where it's from, your note on it (InfoPanel.kt). */
+    onInfo: (() -> Unit)? = null,
 ) {
     val paper = LocalPaper.current
     var more by remember { mutableStateOf(false) }
@@ -719,6 +865,7 @@ internal fun TopBar(
         IconButton(onClick = { onPanel(Panel.Contents) }) { Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentsLabel) }
         IconButton(onClick = { onPanel(Panel.Notes) }) { Icon(Icons.Outlined.EditNote, "Highlights and notes") }
         IconButton(onClick = onSettings) { Icon(Icons.Outlined.FormatSize, if (isPdf) "Page and layout" else "Text and layout") }
+        onInfo?.let { IconButton(onClick = it) { Icon(Icons.Outlined.Info, "Info") } }
         Box {
             IconButton(onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, "More") }
             androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
@@ -780,5 +927,41 @@ internal fun FreshHighlight(note: Highlight, onColor: (String) -> Unit, onNote: 
             )
         }
         TextButton(onClick = onNote) { Text("Add a note") }
+    }
+}
+
+/** Where the reading was before a jump: its place, a scrolled article's own measure of it, and how far through. */
+data class ReturnPoint(val locator: Locator, val scrolled: Double?, val percent: Int)
+
+/** "Return to 39%", with a cross to stay where the jump went. */
+@Composable
+internal fun ReturnPill(percent: Int, onReturn: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val paper = LocalPaper.current
+    Row(
+        modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.raised, RoundedCornerShape(50)).padding(start = 6.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onReturn).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.History, null, Modifier.size(18.dp), tint = paper.fg)
+            Text("  Return to $percent%", style = MaterialTheme.typography.labelLarge, color = paper.fg)
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Close, "Stay here", Modifier.size(18.dp), tint = paper.muted) }
+    }
+}
+
+/** At the end of something in the Inbox or Later: archive it, and open the next thing there. */
+@Composable
+internal fun ArchiveAndNext(next: String?, onArchive: () -> Unit, modifier: Modifier = Modifier) {
+    val paper = LocalPaper.current
+    Row(
+        modifier.shadow(8.dp, RoundedCornerShape(50)).background(paper.fg, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).clickable(onClick = onArchive)
+            .padding(horizontal = 20.dp, vertical = 12.dp).widthIn(max = 520.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Archive, null, Modifier.size(18.dp), tint = paper.bg)
+        Column(Modifier.padding(start = 10.dp)) {
+            Text(if (next != null) "Archive and open the next" else "Archive it", style = MaterialTheme.typography.labelLarge, color = paper.bg)
+            next?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = paper.bg.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
     }
 }

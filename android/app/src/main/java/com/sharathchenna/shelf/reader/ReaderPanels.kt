@@ -129,6 +129,7 @@ fun PanelContent(
     onClose: () -> Unit,
     onEdit: (Highlight) -> Unit,
     onAi: (AiTask) -> Unit,
+    onPanel: (Panel) -> Unit = {},
 ) {
     val task = ai ?: AiTask.Chat(null)
     if (panel == Panel.Ai && task is AiTask.Chat) {
@@ -142,6 +143,7 @@ fun PanelContent(
                     Panel.Contents -> "Contents"
                     Panel.Search -> "Search"
                     Panel.Brief -> "Brief"
+                    Panel.Info -> "Info"
                     Panel.Notes -> "Highlights & notes"
                     Panel.Ai -> when (task) {
                         is AiTask.Explain -> SelectionAction.entries.find { it.action == task.action }?.label ?: "Explain"
@@ -178,6 +180,8 @@ fun PanelContent(
                 NotesList(book, notes, onGo = { n -> book.locatorOf(n)?.let(controller::go); onClose() }, onEdit = onEdit)
             }
             Panel.Ai -> AiPanel(bookId, task, onAi)
+            // A clipping's ebook (an article or paper) has a brief to write; a book doesn't.
+            Panel.Info -> InfoPanel(bookId, onSummarize = if (LocalShelf.current.file(bookId)?.let { it.clipId != null || it.paperId != null } == true) ({ onPanel(Panel.Brief) }) else null)
         }
     }
 }
@@ -244,6 +248,7 @@ private fun NotesList(book: OpenedBook, notes: List<Highlight>, onGo: (Highlight
                 n.ink?.let { ink -> InkThumbnail(ink) }
                 n.ink?.recognized?.let { Text(it, style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic), color = paper.muted) }
                 n.note?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = paper.muted) }
+                if (n.tags.isNotEmpty()) Text(n.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodySmall, color = paper.accent)
                 TextButton(onClick = { onEdit(n) }, contentPadding = PaddingValues(0.dp)) { Text("Edit") }
             }
         }
@@ -370,6 +375,7 @@ fun NoteEditor(edit: NoteEdit, onSave: (Highlight) -> Unit, onRemove: (Highlight
             }
         }
         OutlinedTextField(note, { note = it }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth().focusRequester(focus), minLines = if (onClose != null) 5 else 2)
+        if (edit.note.tags.isNotEmpty()) Text(edit.note.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodyMedium, color = paper.accent)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onSave(current) }) { Text("Save") }
             if (edit.note.text.isNotBlank()) OutlinedButton(onClick = { onExplain(edit.note) }) { Text("Explain") }
@@ -398,13 +404,34 @@ fun SettingsSheet(settings: ReaderSettings, isPdf: Boolean, article: Boolean = f
             when (tab) {
                 0 -> {
                     Text("THEME", style = Eyebrow, color = muted)
-                    Choices(listOf("auto" to "Auto", "light" to "Paper", "sepia" to "Sepia", "dark" to "Night"), settings.theme) { onChange(settings.copy(theme = it)) }
+                    ThemeSwatches(settings.theme) { onChange(settings.copy(theme = it)) }
                     if (isPdf) PdfLook(settings, onChange) else BookLook(settings, article, onChange)
                 }
                 1 -> BehaviourControls(behaviour) { ReaderBehaviour.update(context, it) }
                 else -> PenSettings(settings, isPdf, onChange)
             }
         }
+    }
+}
+
+/** The page's colours, each a swatch of itself with its name; Auto follows the system's light or dark. */
+@Composable
+private fun ThemeSwatches(chosen: String, onChoose: (String) -> Unit) {
+    val paper = LocalPaper.current
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        READER_THEMES.forEach { t ->
+            Column(
+                Modifier.size(78.dp, 70.dp).clip(RoundedCornerShape(14.dp)).background(t.background)
+                    .border(if (t.key == chosen) 2.5.dp else 1.dp, if (t.key == chosen) paper.accent else paper.rule, RoundedCornerShape(14.dp))
+                    .clickable { onChoose(t.key) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text("Aa", fontFamily = Serif, fontSize = 22.sp, color = t.ink)
+                Text(t.label, fontSize = 11.sp, color = t.ink.copy(alpha = 0.8f))
+            }
+        }
+        FilterChip(selected = chosen == "auto", onClick = { onChoose("auto") }, label = { Text("Auto") }, modifier = Modifier.padding(top = 18.dp))
     }
 }
 
@@ -427,12 +454,11 @@ private fun BookLook(settings: ReaderSettings, article: Boolean, onChange: (Read
     }
     if (layout == "two") Text("Two pages show side by side when the screen is wide enough, as on the tablet in landscape.", style = MaterialTheme.typography.bodySmall, color = muted)
     Text("TYPE", style = Eyebrow, color = muted)
+    val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("original" to own, "fraunces" to "Fraunces", "geist" to "Geist", "serif" to "Serif", "sans" to "Sans").forEach { (k, label) ->
-            FilterChip(
-                selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) },
-                label = { Text(label, fontFamily = when (k) { "fraunces" -> Serif; "geist" -> com.sharathchenna.shelf.ui.theme.Sans; "serif" -> androidx.compose.ui.text.font.FontFamily.Serif; "sans" -> androidx.compose.ui.text.font.FontFamily.SansSerif; else -> null }) },
-            )
+        (listOf("original" to own) + READER_FONTS.map { it.key to it.label }).forEach { (k, label) ->
+            val family = remember(k) { composeFamily(context, k) }
+            FilterChip(selected = settings.font == k, onClick = { onChange(settings.copy(font = k)) }, label = { Text(label, fontFamily = family) })
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {

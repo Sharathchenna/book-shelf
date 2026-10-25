@@ -12,6 +12,7 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.preparePost
@@ -141,6 +142,14 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
     /** Deletes things in the Trash for good; answers with those deleted. */
     suspend fun purge(ids: List<String>): List<String> =
         check(http.delete("/api/triage") { auth(); contentType(ContentType.Application.Json); setBody(Ids(ids)) }).body<Deleted>().deleted
+
+    @Serializable
+    data class DocEdit(val title: String? = null, val author: String? = null, val note: String? = null)
+
+    /** Corrects a clipping's or file's title and author, or writes its note (/api/docs/[id]). */
+    suspend fun editDoc(id: String, edit: DocEdit) {
+        check(http.patch("/api/docs/$id") { auth(); contentType(ContentType.Application.Json); setBody(edit) })
+    }
 
     // ---- adding a file ---------------------------------------------------------------------
 

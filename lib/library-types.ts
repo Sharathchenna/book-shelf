@@ -32,6 +32,8 @@ export type LibraryBook = {
   shelfItemId?: string;
   /** Storage key of the extracted cover image. */
   coverKey?: string;
+  /** The owner's note on the whole book (a clipping's is the clipping's own `note`). */
+  note?: string;
   /** EPUB spine sections, or PDF pages, in reading order (same indices as the reader's sections). */
   sections: LibrarySection[];
   totalChars: number;
@@ -68,6 +70,8 @@ export type Highlight = {
   progression?: number;
   color: HighlightColor;
   note?: string;
+  /** The owner's own tags on it, as Readwise Reader has them. */
+  tags?: string[];
   /** A drawing made with a stylus in the Android app, beside `text` (or on the PDF page). */
   ink?: Ink;
   sectionIndex: number;

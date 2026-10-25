@@ -146,6 +146,8 @@ data class LibraryFile(
     val bytes: Long = 0,
     val addedAt: String = "",
     val progress: Progress? = null,
+    /** The owner's note on the whole book. */
+    val note: String? = null,
 ) {
     val isPdf: Boolean get() = format == "pdf"
 }
@@ -180,6 +182,8 @@ data class Highlight(
     val progression: Double? = null,
     val color: String = "yellow",
     val note: String? = null,
+    /** The owner's own tags on it. */
+    val tags: List<String> = emptyList(),
     val ink: Ink? = null,
     val sectionIndex: Int = 0,
     val createdAt: String,

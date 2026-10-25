@@ -69,6 +69,8 @@ fun notesMarkdown(meta: NotesMeta, highlights: List<Highlight>): String {
             ink.recognized?.trim()?.takeIf { it.isNotEmpty() }?.let { out += "*Ink:* ${it.replace(Regex("\\s+"), " ")}"; out += "" }
         }
         h.note?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it; out += "" }
+        // Tags as Obsidian's own, so the vault finds them: #word, spaces made hyphens.
+        if (h.tags.isNotEmpty()) { out += h.tags.joinToString(" ") { "#" + it.trim().replace(Regex("\\s+"), "-") }; out += "" }
         out += "<small>${h.color} · ${day(h.createdAt)}</small>"
         out += ""
     }

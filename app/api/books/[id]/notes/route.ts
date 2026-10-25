@@ -51,6 +51,9 @@ const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, ma
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const iso = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? v : undefined);
 
+/** Up to 12 tags, each a word or two, without repeats. */
+const tagsOf = (list: unknown[]) => [...new Set(list.filter((t): t is string => typeof t === "string").map((t) => t.trim().slice(0, 40)).filter(Boolean))].slice(0, 12);
+
 /** The highlights in a request, cleaned, or null when any is malformed. */
 function parse(list: unknown): Highlight[] | null {
   if (!Array.isArray(list) || list.length > 5000) return null;
@@ -76,6 +79,7 @@ function parse(list: unknown): Highlight[] | null {
       ...(finite(n.progression) ? { progression: Math.min(1, Math.max(0, n.progression)) } : {}),
       color: n.color!,
       note: text(n.note, 4000),
+      ...(Array.isArray(n.tags) ? { tags: tagsOf(n.tags) } : {}),
       ...(ink ? { ink } : {}),
       sectionIndex: finite(n.sectionIndex) ? Math.max(0, Math.floor(n.sectionIndex)) : 0,
       createdAt,

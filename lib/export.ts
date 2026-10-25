@@ -66,6 +66,8 @@ export function notesMarkdown(
       if (h.ink.recognized?.trim()) out.push(`*Ink:* ${h.ink.recognized.trim().replace(/\s+/g, " ")}`, "");
     }
     if (h.note?.trim()) out.push(h.note.trim(), "");
+    // Tags as Obsidian's own, so the vault finds them: #word, spaces made hyphens.
+    if (h.tags?.length) out.push(h.tags.map((t) => `#${t.trim().replace(/\s+/g, "-")}`).join(" "), "");
     out.push(`<small>${h.color} · ${day(h.createdAt)}</small>`, "");
   }
   if (!sorted.length) out.push("No highlights yet.", "");

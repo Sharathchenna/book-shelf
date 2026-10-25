@@ -110,6 +110,12 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         runCatching { refreshLibrary() }
     }
 
+    /** Corrects what a thing is called or who it's by, or writes its note; the library is fetched again after. */
+    suspend fun editDoc(id: String, edit: ShelfApi.DocEdit) {
+        api.editDoc(id, edit)
+        runCatching { refreshLibrary() }
+    }
+
     private fun pendingTriage(): List<TriageChange> =
         runCatching { ShelfJson.decodeFromString<List<TriageChange>>(pendingTriageFile.readText()) }.getOrDefault(emptyList())
 
