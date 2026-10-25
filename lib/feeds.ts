@@ -62,6 +62,8 @@ const MAX_CONTENT = 120_000;
 export const feedContentKey = (clipId: string) => `feed/${clipId}.html`;
 /** Items read from a feed at a time, the newest. */
 const MAX_ITEMS = 60;
+/** The most of a feed read at once, from its start: about half a megabyte parses well within a Worker's time. */
+const MAX_XML_CHARS = 500_000;
 /** Feeds checked per run, the longest unchecked first; the hourly runs take turns through the rest. */
 const FEEDS_PER_RUN = 10;
 
@@ -98,17 +100,21 @@ export async function discover(input: string): Promise<{ url: string; xml: strin
 }
 
 /**
- * A feed cut to its first `n` items (feeds list the newest first), closed again: a podcast's can
- * hold thousands of episodes, too many to read through on every check.
+ * A feed cut to its first `n` items (feeds list the newest first), or as many as fit in
+ * MAX_XML_CHARS (at least one), closed again: a podcast's can hold thousands of episodes, and a
+ * blog's every post in full (Dan Luu's is 6.6 MB), too much to read through within a Worker's time.
  */
 function trim(xml: string, n: number): string {
   const close = /<\/(item|entry)>/gi;
   let match: RegExpExecArray | null = null;
-  for (let i = 0; i < n; i++) {
-    match = close.exec(xml);
-    if (!match) return xml;
+  // The items kept: up to n, while they end within the budget (the first whatever its length).
+  for (let i = 0; i <= n; i++) {
+    const next = close.exec(xml);
+    // No more after the last kept: the feed as it is.
+    if (!next) return xml;
+    if (i === n || (match && next.index > MAX_XML_CHARS)) break;
+    match = next;
   }
-  if (!close.exec(xml)) return xml;
   const end = match!.index + match![0].length;
   const tail = /<rss\b/i.test(xml) ? "</channel></rss>" : /<rdf:RDF\b/i.test(xml) ? "</rdf:RDF>" : "</feed>";
   return xml.slice(0, end) + tail;
