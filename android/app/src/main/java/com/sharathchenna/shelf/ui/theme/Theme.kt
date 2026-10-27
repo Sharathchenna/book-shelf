@@ -105,7 +105,10 @@ fun ShelfTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () ->
         )
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalPaper provides paper) {
-        MaterialTheme(colorScheme = colors, typography = ShelfType, content = content)
+        MaterialTheme(colorScheme = colors, typography = ShelfType) {
+            // Type and icons given no colour take the paper's ink: with no Surface above them, they'd be black, in the dark too.
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides paper.fg, content = content)
+        }
     }
 }
 
