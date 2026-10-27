@@ -1,7 +1,7 @@
 import { requireOwner } from "@/lib/auth/session";
 import { CLIP_KINDS } from "@/lib/clippings";
 import { deleteClipping } from "@/lib/data";
-import { saveLink } from "@/lib/save";
+import { backToInbox, saveLink } from "@/lib/save";
 import { removeDocs } from "@/lib/search/vectors";
 import { removeShelving } from "@/lib/shelving";
 import type { ClipKind } from "@/lib/types";
@@ -25,7 +25,9 @@ export async function POST(request: Request) {
     : undefined;
 
   try {
-    return Response.json(await saveLink(body.url, { kind, note, tags }));
+    const saved = await saveLink(body.url, { kind, note, tags });
+    if (saved.refreshed) await backToInbox(saved.clip.id);
+    return Response.json(saved);
   } catch (error) {
     return Response.json({ error: `Couldn't clip that: ${(error as Error).message}` }, { status: 422 });
   }

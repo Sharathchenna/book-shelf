@@ -1,6 +1,6 @@
 import { fromCaptureToken, isOwner, requestDevice } from "@/lib/auth/session";
 import { MAX_PAGE_CHARS, Refused, type SentPage } from "@/lib/clip";
-import { saveLink } from "@/lib/save";
+import { backToInbox, saveLink } from "@/lib/save";
 
 /**
  * Saving a link from elsewhere: the iOS share-sheet shortcut (with the capture token), the Android
@@ -28,8 +28,9 @@ export async function POST(request: Request) {
     // From a phone (the shortcut, or the app's share sheet), so the library can show where it came from.
     const fromPhone = token || (await requestDevice()) !== null;
     const { clip, refreshed } = await saveLink(url, { note, page, ...(fromPhone ? { via: "phone" as const } : {}) });
+    const back = refreshed && (await backToInbox(clip.id));
     const what = clip.tweet ? `@${clip.tweet.handle}: ${clip.tweet.text}` : (clip.title ?? clip.url);
-    return reply(`${refreshed ? "Already saved, refreshed" : "Saved"}. ${what.replace(/\s+/g, " ").slice(0, 120)}`);
+    return reply(`${back ? "Already saved, back in the Inbox" : refreshed ? "Already saved, refreshed" : "Saved"}. ${what.replace(/\s+/g, " ").slice(0, 120)}`);
   } catch (error) {
     const wanted = error instanceof Refused && !page && URL.canParse(url) ? { "x-shelf-wants-page": new URL(url).href } : undefined;
     return reply(`Not saved: ${(error as Error).message}.`, 422, wanted);

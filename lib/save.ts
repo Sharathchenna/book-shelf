@@ -3,6 +3,7 @@ import { clipId, clipLink, expand, paperCode, type ClipOptions } from "./clip";
 import { getClipping, getClippings, getShelf, saveClipping } from "./data";
 import { enrich } from "./enrich";
 import { shelveMissing } from "./shelving";
+import { getTriage, setTriage } from "./triage";
 import { bookDoc, clipDoc } from "./search/site";
 import { indexDocs } from "./search/vectors";
 import type { Clip } from "./types";
@@ -30,6 +31,17 @@ export async function saveLink(input: string, options: ClipOptions): Promise<{ c
   // Onto the bookcase's topics; a failure leaves it in Unsorted until the next sync.
   if (!existing) await shelveMissing().catch((error) => console.error("Shelving failed", clip.id, error));
   return { clip, refreshed: Boolean(existing) };
+}
+
+/**
+ * A link saved again by hand (Add, the share sheet) from the Trash, the Archive or the Feed comes
+ * back to the Inbox, unseen: whoever saves it again wants it in front of them. True if it moved.
+ */
+export async function backToInbox(id: string): Promise<boolean> {
+  const current = (await getTriage()).get(id);
+  if (!current || (!current.trashed && (current.place === "inbox" || current.place === "later"))) return false;
+  await setTriage([{ id, current }], { place: "inbox", seen: false, trashed: false });
+  return true;
 }
 
 /** arXiv papers whose code and stars are looked up again per run, and how often each is. */
