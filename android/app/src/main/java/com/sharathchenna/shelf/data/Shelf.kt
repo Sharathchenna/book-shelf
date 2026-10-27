@@ -143,6 +143,15 @@ class Shelf(private val context: Context, val api: ShelfApi, val tokens: TokenSt
         runCatching { api.sendCaptions(clipId, text) }.onSuccess { runCatching { refreshLibrary() } }
     }
 
+    /**
+     * An article's page fetched here and sent, for a site that turns the site's server away
+     * (the opener asks, WebScreen.kt). True once the site has it.
+     */
+    suspend fun sendPage(clipId: String, url: String): Boolean = withContext(Dispatchers.IO) {
+        val page = runCatching { devicePage(api.http, url) }.getOrNull() ?: return@withContext false
+        runCatching { api.sendPage(clipId, page) }.isSuccess
+    }
+
     // ---- the Feed --------------------------------------------------------------------------
 
     /** The Feed: the copy on the device at once, then the site's; with `check`, the feeds are checked for new items first. */

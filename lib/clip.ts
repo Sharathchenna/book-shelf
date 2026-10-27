@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { appleEpisodeId, audioEpisode, fetchAppleEpisode, fetchYouTube, isAudioFile, putMediaText, youtubeId } from "./media";
 import { pwcByArxiv } from "./pwc";
+import { getStorage } from "./storage";
 import type { Clip, ClipKind, PaperCode, QuotedPost } from "./types";
 import { fetchXArticle } from "./x-article";
 import { articleMinutes } from "./x-article-types";
@@ -36,8 +37,29 @@ const NEWSLETTER_HOSTS = [
 /** Substack and beehiiv on custom domains still load their own assets. (Not signup forms: blogs embed those too.) */
 const NEWSLETTER_MARKERS = /substackcdn\.com|media\.beehiiv\.com/;
 
+/**
+ * A page a site turned the server away from: Google's sites (and others behind bot checks) refuse
+ * Cloudflare's addresses but not the owner's own connection, so the app fetches it and sends it
+ * (/api/capture's `page`, /api/books/clips/source's POST).
+ */
+export class Refused extends Error {}
+
+/** A page as the owner's device fetched it, and where it ended up. */
+export type SentPage = { html: string; url?: string };
+
+/** Where a clipping keeps the page its device sent, read when the server can't fetch it (/api/books/clips/source). */
+export const pageCopyKey = (clipId: string) => `page/${clipId}.html`;
+
+/** The most of a sent page kept. */
+export const MAX_PAGE_CHARS = 6_000_000;
+
+/** Statuses that turn the server away rather than say the page isn't there (Google's "unusual traffic" page is a 429). */
+export const refusedBy = (status: number) => [401, 403, 429, 503].includes(status);
+
 export type ClipOptions = {
   kind?: ClipKind;
+  /** The page as the owner's device fetched it, for a site that turns the server away. */
+  page?: SentPage;
   note?: string;
   tags?: string[];
   via?: Clip["via"];
@@ -79,7 +101,7 @@ export async function clipLink(input: string, options: ClipOptions, existing?: C
       ? await fetchArxiv(arxivId(url)!)
       : doiOf(url)
         ? await fetchCrossref(doiOf(url)!)
-        : await fetchPage(url, options.kind).catch((error: Error) => {
+        : await fetchPage(url, options.kind, options.page).catch((error: Error) => {
             // A feed's item whose page turns the clipper away is kept as its feed described it.
             if (!fed?.title) throw error;
             const kept: Fetched = { kind: "article", url, title: fed.title, source: new URL(url).host.replace(/^www\./, "") };
@@ -106,6 +128,7 @@ export async function clipLink(input: string, options: ClipOptions, existing?: C
   if (!clip.note) delete clip.note;
   if (!clip.via) delete clip.via;
   if (media) await putMediaText(clip.id, media.text);
+  if (options.page) await getStorage().put(pageCopyKey(clip.id), options.page.html.slice(0, MAX_PAGE_CHARS), "text/html; charset=utf-8");
   return clip;
 }
 
@@ -492,20 +515,26 @@ async function fetchTweetOembed(url: string): Promise<Fetched> {
 
 // ---- articles and newsletters --------------------------------------------------------------------
 
-async function fetchPage(url: string, kind?: ClipKind): Promise<Fetched> {
+async function fetchPage(url: string, kind?: ClipKind, sent?: SentPage): Promise<Fetched> {
   if (/^https?:\/\/(www\.)?openreview\.net\//.test(url)) {
     throw new Error("OpenReview shows scripts a browser check instead of the paper; clip its arXiv link instead");
   }
-  const res = await fetch(url, { headers: HEADERS, redirect: "follow" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const html = await res.text();
+  let html = sent?.html;
+  let at = sent?.url || url;
+  if (html === undefined) {
+    const res = await fetch(url, { headers: HEADERS, redirect: "follow" });
+    if (refusedBy(res.status)) throw new Refused(`the site answered ${res.status}, turning Shelf's server away; save it from the Shelf app, which fetches it itself`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    html = await res.text();
+    at = res.url || url;
+  }
   if (!kind || kind === "paper") {
-    const paper = citationPaper(html, res.url || url);
+    const paper = citationPaper(html, at);
     if (paper) return paper;
   }
   const meta = readMeta(html);
   const ld = readJsonLd(html);
-  const finalUrl = new URL(meta["og:url"] || canonical(html) || res.url || url, res.url || url).toString();
+  const finalUrl = new URL(meta["og:url"] || canonical(html) || at, at).toString();
   const host = new URL(finalUrl).host.replace(/^www\./, "");
 
   const newsletter =

@@ -327,16 +327,36 @@ class ShelfApi(val siteUrl: String, private val token: suspend () -> String?, pr
         })
     }
 
-    /** Saves a link as a clipping (/api/capture), answering in a sentence fit for a notification. */
+    @Serializable
+    private data class Shared(val text: String, val page: SentPage? = null)
+
+    /**
+     * Saves a link as a clipping (/api/capture), answering in a sentence fit for a notification.
+     * A site that turned the server away is fetched here and sent with it (Pages.kt).
+     */
     suspend fun capture(text: String): String {
-        val res = http.post("/api/capture") {
-            auth()
-            contentType(ContentType.Application.Json)
-            setBody(mapOf("text" to text))
+        val send = suspend { page: SentPage? ->
+            http.post("/api/capture") {
+                auth()
+                contentType(ContentType.Application.Json)
+                setBody(Shared(text, page))
+            }
+        }
+        var res = send(null)
+        res.headers["X-Shelf-Wants-Page"]?.let { url ->
+            runCatching { devicePage(http, url) }.getOrNull()?.let { res = send(it) }
         }
         val reply = res.bodyAsText()
         if (!res.status.isSuccess()) throw ApiException(res.status.value, reply)
         return reply
+    }
+
+    @Serializable
+    private data class PageOf(val clipId: String, val html: String, val url: String)
+
+    /** Sends an article's page, fetched here, for the site to make its ebook from (/api/books/clips/source). */
+    suspend fun sendPage(clipId: String, page: SentPage) {
+        check(http.post("/api/books/clips/source") { auth(); contentType(ContentType.Application.Json); setBody(PageOf(clipId, page.html, page.url)) })
     }
 
     // ---- the reader's AI -------------------------------------------------------------------

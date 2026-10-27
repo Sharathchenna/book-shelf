@@ -61,11 +61,51 @@ const TRANSCRIPT_SCRIPT = `<script type="text/javascript">//<![CDATA[
 })();
 //]]></script>`;
 
+/**
+ * The Shelf app, when the opener runs in it (android …/ui/WebScreen.kt): it fetches a page on the
+ * tablet's own connection and sends it to the site, then dispatches "shelf-page" with { clipId, ok }.
+ */
+type ShelfApp = { sendPage(clipId: string, url: string): void };
+
+/** How long the app is given to fetch and send a page. */
+const APP_PAGE_TIMEOUT = 60_000;
+
+type Source = (XArticle | WebPage) & { error?: string; refused?: boolean; url?: string };
+
+async function fetchSource(clipId: string): Promise<{ ok: boolean; source: Source }> {
+  const res = await fetch(`/api/books/clips/source?clipId=${encodeURIComponent(clipId)}`);
+  return { ok: res.ok, source: (await res.json().catch(() => ({}))) as Source };
+}
+
+/** Asks the app to fetch the page and send it; true once the site has it. */
+function sentByApp(app: ShelfApp, clipId: string, url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const finish = (ok: boolean) => {
+      window.removeEventListener("shelf-page", heard);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const heard = (e: Event) => {
+      const detail = (e as CustomEvent<{ clipId?: string; ok?: boolean }>).detail;
+      if (detail?.clipId === clipId) finish(Boolean(detail.ok));
+    };
+    const timer = setTimeout(() => finish(false), APP_PAGE_TIMEOUT);
+    window.addEventListener("shelf-page", heard);
+    app.sendPage(clipId, url);
+  });
+}
+
 export async function buildArticleEpub(clipId: string, onProgress: (label: string) => void): Promise<Blob> {
   onProgress("Fetching the article…");
-  const res = await fetch(`/api/books/clips/source?clipId=${encodeURIComponent(clipId)}`);
-  const source = (await res.json().catch(() => ({}))) as (XArticle | WebPage) & { error?: string };
-  if (!res.ok) throw new Error(source.error ?? "Couldn't fetch the article.");
+  let { ok, source } = await fetchSource(clipId);
+  // A site that turns the server away (Google's): in the app, the tablet fetches it instead.
+  const app = (window as { ShelfApp?: ShelfApp }).ShelfApp;
+  if (!ok && source.refused && source.url && app) {
+    onProgress("Fetching the article on this device…");
+    if (await sentByApp(app, clipId, source.url)) ({ ok, source } = await fetchSource(clipId));
+    else throw new Error("The site turned away both Shelf's server and this device.");
+  }
+  if (!ok) throw new Error(source.error ?? "Couldn't fetch the article.");
   // A web page is read here; an X Article arrives as blocks.
   if ("html" in source) onProgress("Reading the page…");
   const article = "html" in source ? webArticle(source) : source;

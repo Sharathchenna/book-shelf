@@ -2,9 +2,11 @@ package com.sharathchenna.shelf.ui
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -29,12 +31,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sharathchenna.shelf.BuildConfig
+import com.sharathchenna.shelf.data.devicePicture
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A clipping's id in its opener's address, /reader/clip/<id>. */
 private val CLIP_PATH = Regex("^/reader/clip/([\\w.:-]+)$")
@@ -54,6 +61,7 @@ private val BOOK_PATH = Regex("^/reader/([a-z0-9]{8,32})$")
 fun WebScreen(path: String, title: String, onBack: () -> Unit, onBook: ((String) -> Unit)?) {
     val shelf = LocalShelf.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var web by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableStateOf(0f) }
     var pageTitle by remember { mutableStateOf(title) }
@@ -100,6 +108,15 @@ fun WebScreen(path: String, title: String, onBack: () -> Unit, onBook: ((String)
                             return true
                         }
 
+                        // An opener's pictures are fetched here, on the tablet's own connection, as some sites turn the
+                        // site's server away (Google's); one that fails here is still asked of the site (/api/books/clips/asset).
+                        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                            val url = request.url
+                            if (onBook == null || request.method != "GET" || url.host != site.host || url.path != "/api/books/clips/asset") return null
+                            val picture = url.getQueryParameter("url")?.let { runBlocking { runCatching { devicePicture(shelf.api.http, it) }.getOrNull() } } ?: return null
+                            return WebResourceResponse(picture.first, null, picture.second.inputStream())
+                        }
+
                         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                             val uri = Uri.parse(url)
                             val book = BOOK_PATH.find(uri.path ?: "")?.groupValues?.get(1)
@@ -125,6 +142,17 @@ fun WebScreen(path: String, title: String, onBack: () -> Unit, onBook: ((String)
                             return true
                         }
                     }
+                    // An opener's page from a site that turns the server away, fetched here (x-article-epub.ts's ShelfApp).
+                    if (onBook != null) addJavascriptInterface(object {
+                        @JavascriptInterface
+                        fun sendPage(clipId: String, url: String) {
+                            scope.launch {
+                                val ours = Uri.parse(this@apply.url ?: "").host == site.host
+                                val ok = ours && shelf.sendPage(clipId, url)
+                                this@apply.evaluateJavascript("window.dispatchEvent(new CustomEvent('shelf-page', { detail: { clipId: ${JsonPrimitive(clipId)}, ok: $ok } }))", null)
+                            }
+                        }
+                    }, "ShelfApp")
                     val start = "${BuildConfig.SITE_URL}/api/auth/session?next=${Uri.encode(path)}"
                     loadUrl(start, mapOf("Authorization" to "Bearer $t"))
                     web = this

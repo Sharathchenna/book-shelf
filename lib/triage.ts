@@ -71,8 +71,8 @@ export async function purge(ids: string[]): Promise<string[]> {
     for (const file of own) await removeBook(file.id);
     if (clip) {
       await deleteClipping(id);
-      // What's kept beside it: a video's or episode's transcript, a feed item's post (lib/media.ts, lib/feeds.ts).
-      await Promise.all([`media/${id}.json`, `feed/${id}.html`].map((key) => getStorage().delete(key).catch(() => {})));
+      // What's kept beside it: a video's or episode's transcript, a feed item's post, a page the app sent (lib/media.ts, lib/feeds.ts, lib/clip.ts).
+      await Promise.all([`media/${id}.json`, `feed/${id}.html`, `page/${id}.html`].map((key) => getStorage().delete(key).catch(() => {})));
       await removeShelving(id).catch(() => {});
       await removeDocs([`clip:${id}`]).catch((error) => console.error("Removing from the search index failed", id, error));
     }
